@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -5,10 +6,59 @@ import path from "node:path";
 const label = "com.jobtracker.local.jobs";
 const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
 const projectRoot = process.cwd();
-const nodePath = process.execPath;
-const scriptPath = path.join(projectRoot, "scripts", "run-jobs.ts");
-const tsxPath = path.join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
-const logPath = path.join(projectRoot, "data", "jobs-worker.log");
+
+/**
+ * Prefer the packaged Tauri binary with `--run-jobs`. Fall back to the debug
+ * cargo target, then the legacy Node/tsx worker.
+ */
+function resolveRunner(): {
+  programArguments: string[];
+  workingDirectory: string;
+  logPath: string;
+  dataDir: string;
+} {
+  const dataDir = process.env.JOB_TRACKER_DATA_DIR
+    ? path.resolve(process.env.JOB_TRACKER_DATA_DIR)
+    : path.join(projectRoot, "data");
+  const logPath = path.join(dataDir, "jobs-worker.log");
+
+  const releaseApp = path.join(
+    projectRoot,
+    "src-tauri/target/release/bundle/macos/Job Tracker.app/Contents/MacOS/job-tracker",
+  );
+  const releaseBin = path.join(projectRoot, "src-tauri/target/release/job-tracker");
+  const debugBin = path.join(projectRoot, "src-tauri/target/debug/job-tracker");
+
+  for (const binary of [releaseApp, releaseBin, debugBin]) {
+    if (fs.existsSync(binary)) {
+      return {
+        programArguments: [binary, "--run-jobs", "--data-dir", dataDir],
+        workingDirectory: projectRoot,
+        logPath,
+        dataDir,
+      };
+    }
+  }
+
+  const nodePath = process.execPath;
+  const scriptPath = path.join(projectRoot, "scripts", "run-jobs.ts");
+  const tsxPath = path.join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
+  console.warn(
+    "Tauri binary not found; installing legacy Node/tsx LaunchAgent. Run `npm run tauri:build` then re-run jobs:install.",
+  );
+  return {
+    programArguments: [nodePath, tsxPath, scriptPath],
+    workingDirectory: projectRoot,
+    logPath,
+    dataDir,
+  };
+}
+
+const { programArguments, workingDirectory, logPath, dataDir } = resolveRunner();
+
+const programArgsXml = programArguments
+  .map((arg) => `      <string>${arg}</string>`)
+  .join("\n");
 
 const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -18,12 +68,15 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
     <string>${label}</string>
     <key>ProgramArguments</key>
     <array>
-      <string>${nodePath}</string>
-      <string>${tsxPath}</string>
-      <string>${scriptPath}</string>
+${programArgsXml}
     </array>
     <key>WorkingDirectory</key>
-    <string>${projectRoot}</string>
+    <string>${workingDirectory}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>JOB_TRACKER_DATA_DIR</key>
+      <string>${dataDir}</string>
+    </dict>
     <key>StartInterval</key>
     <integer>3600</integer>
     <key>RunAtLoad</key>
@@ -38,9 +91,18 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
 
 fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 fs.mkdirSync(path.dirname(logPath), { recursive: true });
+
+// Unload any previous agent before rewriting so it cannot keep writing an old tree.
+try {
+  execSync(`launchctl unload "${plistPath}"`, { stdio: "ignore" });
+} catch {
+  // not loaded
+}
+
 fs.writeFileSync(plistPath, plist);
 
 console.log(`Wrote ${plistPath}`);
+console.log(`Program: ${programArguments.join(" ")}`);
 console.log("Load it with:");
 console.log(`  launchctl unload ${plistPath} 2>/dev/null; launchctl load ${plistPath}`);
-console.log("The worker runs once per hour and logs to data/jobs-worker.log");
+console.log(`The worker runs once per hour and logs to ${logPath}`);

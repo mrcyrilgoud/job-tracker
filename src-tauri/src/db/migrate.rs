@@ -1,40 +1,11 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import fs from "node:fs";
-import path from "node:path";
+use anyhow::Result;
+use rusqlite::Connection;
 
-import * as schema from "./schema";
-
-/**
- * Shared-path mode during Tauri migration: honor JOB_TRACKER_DATA_DIR so Next
- * and the desktop app read/write the same SQLite tree (default: repo `data/`).
- */
-function resolveDataDir() {
-  const fromEnv = process.env.JOB_TRACKER_DATA_DIR?.trim();
-  if (fromEnv) {
-    return path.resolve(fromEnv);
-  }
-  return path.join(process.cwd(), "data");
-}
-
-let DATA_DIR = resolveDataDir();
-let DB_PATH = path.join(DATA_DIR, "job-tracker.db");
-let DOCUMENTS_DIR = path.join(DATA_DIR, "documents");
-
-function refreshPaths() {
-  DATA_DIR = resolveDataDir();
-  DB_PATH = path.join(DATA_DIR, "job-tracker.db");
-  DOCUMENTS_DIR = path.join(DATA_DIR, "documents");
-}
-
-function ensureDataDirs() {
-  refreshPaths();
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
-}
-
-function migrate(sqlite: Database.Database) {
-  sqlite.exec(`
+/// Exact schema from Next.js `src/lib/db/index.ts` migrate(), including the
+/// partial unique index on `(source, source_external_id)`.
+pub fn migrate(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
     CREATE TABLE IF NOT EXISTS companies (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
@@ -147,47 +118,7 @@ function migrate(sqlite: Database.Database) {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-  `);
-}
-
-let dbInstance: ReturnType<typeof drizzle<typeof schema>> | null = null;
-let sqliteInstance: Database.Database | null = null;
-
-export function getSqlite() {
-  if (sqliteInstance) {
-    return sqliteInstance;
-  }
-
-  ensureDataDirs();
-  const sqlite = new Database(DB_PATH);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("busy_timeout = 5000");
-  sqlite.pragma("foreign_keys = ON");
-  migrate(sqlite);
-  sqliteInstance = sqlite;
-  return sqlite;
-}
-
-export function getDb() {
-  if (dbInstance) {
-    return dbInstance;
-  }
-
-  dbInstance = drizzle(getSqlite(), { schema });
-  return dbInstance;
-}
-
-export function getDocumentsDir() {
-  ensureDataDirs();
-  return DOCUMENTS_DIR;
-}
-
-export function getDataDir() {
-  ensureDataDirs();
-  return DATA_DIR;
-}
-
-export function getDbPath() {
-  ensureDataDirs();
-  return DB_PATH;
+    "#,
+    )?;
+    Ok(())
 }

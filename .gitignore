@@ -44,3 +44,8 @@ next-env.d.ts
 /data/
 *.db
 *.db-*
+
+# Tauri / Rust
+/src-tauri/target/
+/desktop/dist/
+/desktop/node_modules/

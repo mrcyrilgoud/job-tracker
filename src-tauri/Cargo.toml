@@ -1,0 +1,46 @@
+[package]
+name = "job-tracker"
+version = "0.1.0"
+description = "Personal local Job Tracker Mac app"
+authors = ["Job Tracker"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "job_tracker_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+url = "2"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+keyring = { version = "3", features = ["apple-native"] }
+thiserror = "2"
+anyhow = "1"
+parking_lot = "0.12"
+regex = "1"
+urlencoding = "2"
+fs2 = "0.4"
+dns-lookup = "2"
+ipnet = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

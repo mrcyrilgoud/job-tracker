@@ -3,15 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "npm run tauri:dev",
+    "tauri:dev": "cargo tauri dev --config src-tauri/tauri.conf.json",
+    "tauri:build": "cargo tauri build --config src-tauri/tauri.conf.json",
+    "jobs": "cargo run --manifest-path src-tauri/Cargo.toml -- --run-jobs",
+    "desktop:dev": "npm --prefix desktop run dev",
+    "desktop:build": "npm --prefix desktop run build",
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "test:vitest": "vitest run",
+    "jobs:install": "tsx scripts/install-launchd.ts",
+    "next:dev": "next dev",
+    "next:build": "next build",
     "lint": "eslint",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "db:studio": "drizzle-kit studio",
-    "jobs": "tsx scripts/run-jobs.ts",
-    "jobs:install": "tsx scripts/install-launchd.ts"
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.1",
