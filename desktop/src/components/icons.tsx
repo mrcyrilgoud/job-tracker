@@ -108,6 +108,31 @@ export function BellIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function CheckIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+export function AlertIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v6M12 16.5v.5" />
+    </svg>
+  );
+}
+
+export function ArrowUpRightIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M7 17 17 7M9 7h8v8" />
+    </svg>
+  );
+}
+
 type IconComponent = (props: IconProps) => React.JSX.Element;
 
 export const statusIcons: Record<JobStatus, IconComponent> = {

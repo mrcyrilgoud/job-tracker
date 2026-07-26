@@ -59,6 +59,25 @@ export function postingStatePresentation(state: PostingState): Presentation {
   }
 }
 
+/**
+ * The stored check result is plumbing ("active: HTTP 200"). Return a sentence
+ * worth reading, or null when the status pill already says everything.
+ */
+export function checkResultNote(result: string | null): string | null {
+  if (!result) return null;
+  const trimmed = result.trim();
+
+  const failed = /^error:\s*(.+)$/i.exec(trimmed);
+  if (failed) return `Couldn't reach the posting — ${failed[1]}`;
+
+  const inconclusive = /^unknown:\s*HTTP\s*(\d{3})$/i.exec(trimmed);
+  if (inconclusive) {
+    return `The site replied ${inconclusive[1]}, so we couldn't tell either way.`;
+  }
+
+  return null;
+}
+
 /** A friendly sentence for where a job came from, or null for manually added jobs. */
 export function jobSourceLabel(source: JobSource): string | null {
   switch (source) {
