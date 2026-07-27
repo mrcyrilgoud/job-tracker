@@ -338,5 +338,3 @@ export function listPendingEmailMatches() {
     .where(eq(emailMatches.triageStatus, "pending"))
     .all();
 }
-
-export { classifyEmail };

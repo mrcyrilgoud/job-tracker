@@ -14,8 +14,7 @@
     "jobs:install": "tsx scripts/install-launchd.ts",
     "next:dev": "next dev",
     "next:build": "next build",
-    "lint": "eslint",
-    "db:studio": "drizzle-kit studio"
+    "lint": "eslint"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.1",

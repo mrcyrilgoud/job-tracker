@@ -17,8 +17,7 @@ import {
 } from "@/lib/jobs/service";
 import { normalizeCanonicalUrl, nowIso } from "@/lib/utils";
 
-export const JOBS_CSV_FILENAME = "jobs.csv";
-export const JOBS_CSV_SYNC_FILENAME = "jobs.csv.sync.json";
+const JOBS_CSV_FILENAME = "jobs.csv";
 
 export const CSV_HEADERS = [
   "id",
@@ -133,7 +132,7 @@ export function getDefaultJobsCsvPath() {
   return path.join(getDataDir(), JOBS_CSV_FILENAME);
 }
 
-export function getDefaultJobsCsvSyncPath(csvPath = getDefaultJobsCsvPath()) {
+function getDefaultJobsCsvSyncPath(csvPath = getDefaultJobsCsvPath()) {
   return `${csvPath}.sync.json`;
 }
 

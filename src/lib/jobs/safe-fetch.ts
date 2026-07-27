@@ -6,7 +6,7 @@ const MAX_BYTES = 1_500_000;
 const TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 5;
 
-export type SafeFetchResult = {
+type SafeFetchResult = {
   ok: boolean;
   status: number;
   finalUrl: string;

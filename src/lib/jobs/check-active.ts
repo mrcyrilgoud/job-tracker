@@ -6,7 +6,7 @@ import { createId, nowIso } from "@/lib/utils";
 import { looksLikeClosedPosting, safeFetch } from "@/lib/jobs/safe-fetch";
 import { jobEvents } from "@/lib/db/schema";
 
-export type CheckPostingResult = {
+type CheckPostingResult = {
   postingState: PostingState;
   lastCheckResult: string;
   lastCheckedAt: string;

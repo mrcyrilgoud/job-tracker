@@ -12,19 +12,14 @@ export const jobStatuses = [
 
 export type JobStatus = (typeof jobStatuses)[number];
 
-export const jobSources = [
-  "manual",
-  "greenhouse",
-  "lever",
-  "ashby",
-  "careers_page",
-] as const;
+export type JobSource =
+  | "manual"
+  | "greenhouse"
+  | "lever"
+  | "ashby"
+  | "careers_page";
 
-export type JobSource = (typeof jobSources)[number];
-
-export const postingStates = ["active", "inactive", "unknown"] as const;
-
-export type PostingState = (typeof postingStates)[number];
+export type PostingState = "active" | "inactive" | "unknown";
 
 export const documentKinds = [
   "resume",
@@ -178,11 +173,3 @@ export const appSettings = sqliteTable("app_settings", {
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
-
-export type Company = typeof companies.$inferSelect;
-export type Job = typeof jobs.$inferSelect;
-export type CompanyWatch = typeof companyWatches.$inferSelect;
-export type JobEvent = typeof jobEvents.$inferSelect;
-export type Document = typeof documents.$inferSelect;
-export type JobDocument = typeof jobDocuments.$inferSelect;
-export type EmailMatch = typeof emailMatches.$inferSelect;

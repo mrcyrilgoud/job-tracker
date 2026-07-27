@@ -126,16 +126,7 @@ export const api = {
   attachDocument: (jobId: string, documentId: string, kind: DocumentKind) =>
     call<{ attachment: unknown }>("attach_document", { jobId, documentId, kind }),
 
-  detachDocument: (attachmentId: string) =>
-    call<{ ok: boolean }>("detach_document", { attachmentId }),
-
   openDocument: (documentId: string) => call<{ ok: boolean }>("open_document", { documentId }),
-
-  csvStatus: () => call<{ path: string | null; lastSyncedAt: string | null }>("csv_status"),
-
-  csvExport: () => call<{ path: string }>("csv_export"),
-
-  csvImport: () => call<{ imported: number; updated: number }>("csv_import"),
 
   gmailStatus: () => call<GmailStatus>("gmail_status"),
 
@@ -152,6 +143,4 @@ export const api = {
     call<{ ok: boolean }>("gmail_triage", { matchId, jobId }),
 
   runJobsCycle: () => call<Record<string, unknown>>("run_jobs_cycle_cmd"),
-
-  getDataDir: () => call<{ dataDir: string }>("get_data_dir"),
 };

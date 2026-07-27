@@ -10,19 +10,14 @@ export const jobStatuses = [
 
 export type JobStatus = (typeof jobStatuses)[number];
 
-export const jobSources = [
-  "manual",
-  "greenhouse",
-  "lever",
-  "ashby",
-  "careers_page",
-] as const;
+export type JobSource =
+  | "manual"
+  | "greenhouse"
+  | "lever"
+  | "ashby"
+  | "careers_page";
 
-export type JobSource = (typeof jobSources)[number];
-
-export const postingStates = ["active", "inactive", "unknown"] as const;
-
-export type PostingState = (typeof postingStates)[number];
+export type PostingState = "active" | "inactive" | "unknown";
 
 export const documentKinds = [
   "resume",

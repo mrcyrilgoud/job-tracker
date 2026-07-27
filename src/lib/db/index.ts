@@ -153,7 +153,7 @@ function migrate(sqlite: Database.Database) {
 let dbInstance: ReturnType<typeof drizzle<typeof schema>> | null = null;
 let sqliteInstance: Database.Database | null = null;
 
-export function getSqlite() {
+function getSqlite() {
   if (sqliteInstance) {
     return sqliteInstance;
   }
@@ -185,9 +185,4 @@ export function getDocumentsDir() {
 export function getDataDir() {
   ensureDataDirs();
   return DATA_DIR;
-}
-
-export function getDbPath() {
-  ensureDataDirs();
-  return DB_PATH;
 }
