@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::Duration;
 
 use dns_lookup::lookup_host;
@@ -248,17 +248,6 @@ pub async fn safe_fetch(
     }
 }
 
-pub fn extract_html_title(html: &str) -> Option<String> {
-    let re = regex::Regex::new(r"(?is)<title[^>]*>([^<]*)</title>").ok()?;
-    let caps = re.captures(html)?;
-    let title = caps.get(1)?.as_str().split_whitespace().collect::<Vec<_>>().join(" ");
-    if title.is_empty() {
-        None
-    } else {
-        Some(title)
-    }
-}
-
 pub fn looks_like_closed_posting(html: &str, status: u16) -> bool {
     if status == 404 || status == 410 {
         return true;
@@ -301,18 +290,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blocks_local_hostname() {
+        let result = safe_fetch("https://localhost/job", Some("GET"), None).await;
+        assert!(!result.ok);
+        assert!(result.error.as_deref().unwrap_or("").contains("local"));
+    }
+
+    #[tokio::test]
     async fn blocks_file_scheme() {
         let result = safe_fetch("file:///etc/passwd", Some("GET"), None).await;
         assert!(!result.ok);
-        assert!(result
-            .error
-            .as_deref()
-            .unwrap_or("")
-            .contains("Only HTTP"));
+        assert!(result.error.as_deref().unwrap_or("").contains("Only HTTP"));
     }
 
-    #[allow(dead_code)]
-    fn _unused_ipv4() -> Ipv4Addr {
-        Ipv4Addr::LOCALHOST
+    #[tokio::test]
+    async fn blocks_other_non_http_schemes() {
+        let result = safe_fetch("ftp://example.com/job", Some("GET"), None).await;
+        assert!(!result.ok);
+        assert!(result.error.as_deref().unwrap_or("").contains("Only HTTP"));
     }
 }

@@ -16,9 +16,10 @@ use crate::jobs::check_active::{apply_posting_check, fetch_posting_state, load_j
 use crate::jobs::csv::{
     export_jobs_csv, get_jobs_csv_status, import_jobs_csv, schedule_export_jobs_csv, ImportMode,
 };
+use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::service::{
-    get_job_detail, get_pipeline_counts, get_weekly_activity, list_jobs, resolve_title_from_url,
-    update_job, create_job_from_url, JobFilters, UpdateJobInput,
+    create_job_from_url, get_job_detail, get_pipeline_counts, get_weekly_activity, list_jobs,
+    resolve_title_from_url, update_job, JobFilters, UpdateJobInput,
 };
 use crate::runner::run_jobs_cycle;
 
@@ -76,6 +77,11 @@ pub struct CreateJobArgs {
     pub applied_at: Option<String>,
     pub notes: Option<String>,
     pub location: Option<String>,
+}
+
+#[tauri::command]
+pub async fn preview_job_url(url: String) -> AppResult<JobMetadata> {
+    resolve_job_metadata(&url).await
 }
 
 #[tauri::command]

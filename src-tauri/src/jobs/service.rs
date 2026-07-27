@@ -4,7 +4,7 @@ use chrono::{Datelike, Local, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{map_sqlite, AppError, AppResult};
-use crate::jobs::safe_fetch::{extract_html_title, safe_fetch};
+use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
     AttachedDocument, Company, Document, Job, JobDetail, JobDocument, JobEvent, JobListItem,
     WeeklyActivity, WeeklyDay,
@@ -48,21 +48,18 @@ const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_extern
 
 /// Resolve a page title via network. Callers must not hold a DB mutex across this.
 pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
-    let mut resolved_title = title
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(|t| t.to_string())
-        .unwrap_or_else(|| guess_title_from_url(url));
-
-    if title.map(str::trim).filter(|t| !t.is_empty()).is_none() {
-        let fetched = safe_fetch(url, Some("GET"), None).await;
-        if fetched.ok {
-            if let Some(t) = extract_html_title(&fetched.body_text) {
-                resolved_title = t;
-            }
-        }
+    if let Some(manual_title) = title.map(str::trim).filter(|t| !t.is_empty()) {
+        return manual_title.to_string();
     }
-    resolved_title
+
+    let metadata = resolve_job_metadata(url).await.ok();
+    title_from_metadata(url, metadata.as_ref())
+}
+
+fn title_from_metadata(url: &str, metadata: Option<&JobMetadata>) -> String {
+    metadata
+        .and_then(|metadata| metadata.title.clone())
+        .unwrap_or_else(|| guess_title_from_url(url))
 }
 
 pub fn create_job_from_url(
@@ -575,4 +572,32 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
     }
 
     Ok(WeeklyActivity { total, days })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::jobs::metadata::extract_job_metadata;
+
+    #[test]
+    fn title_fallback_consumes_shared_metadata() {
+        let metadata =
+            extract_job_metadata(r#"<meta property="og:title" content="Shared Resolver Title">"#);
+
+        assert_eq!(
+            title_from_metadata("https://example.com/jobs/123", Some(&metadata)),
+            "Shared Resolver Title"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_title_is_preserved() {
+        let title = resolve_title_from_url(
+            "file:///this-would-fail-if-fetched",
+            Some("  Manually Entered Title  "),
+        )
+        .await;
+
+        assert_eq!(title, "Manually Entered Title");
+    }
 }

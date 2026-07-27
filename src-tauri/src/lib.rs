@@ -55,6 +55,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_jobs_cmd,
+            commands::preview_job_url,
             commands::create_job,
             commands::get_job,
             commands::update_job_cmd,

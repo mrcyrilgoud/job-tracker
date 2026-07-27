@@ -32,6 +32,11 @@ export type CreateJobInput = {
   location?: string | null;
 };
 
+export type JobUrlPreview = {
+  title: string | null;
+  companyName: string | null;
+};
+
 export type UpdateJobInput = {
   title?: string;
   companyName?: string;
@@ -87,6 +92,8 @@ export const api = {
 
   createJob: (input: CreateJobInput) =>
     call<{ job: Job; company: Company }>("create_job", { input }),
+
+  previewJobUrl: (url: string) => call<JobUrlPreview>("preview_job_url", { url }),
 
   getJob: (id: string) => call<{ detail: JobDetail }>("get_job", { id }),
 

@@ -1,9 +1,19 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "@/lib/api";
+import { applyJobUrlPreview } from "@/lib/job-url-preview";
 import { jobStatuses, type JobStatus } from "@/lib/schema";
 import { jobStatusPresentation } from "@/lib/ui";
+
+function isValidPostingUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 export function NewJobPage() {
   const navigate = useNavigate();
@@ -13,13 +23,57 @@ export function NewJobPage() {
   const [status, setStatus] = useState<JobStatus>("wishlist");
   const [appliedAt, setAppliedAt] = useState("");
   const [notes, setNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [autofillError, setAutofillError] = useState<string | null>(null);
+  const [autofillStatus, setAutofillStatus] = useState<string | null>(null);
+  const [isAutofilling, setIsAutofilling] = useState(false);
+  const autofillInFlight = useRef(false);
+
+  async function onAutofill() {
+    if (autofillInFlight.current) return;
+
+    const postingUrl = url.trim();
+    setAutofillError(null);
+    setAutofillStatus(null);
+
+    if (!isValidPostingUrl(postingUrl)) {
+      setAutofillError("Enter a valid http or https posting link.");
+      return;
+    }
+
+    autofillInFlight.current = true;
+    setIsAutofilling(true);
+    try {
+      const preview = await api.previewJobUrl(postingUrl);
+      setTitle((current) =>
+        applyJobUrlPreview({ title: current, companyName }, preview).title,
+      );
+      setCompanyName((current) =>
+        applyJobUrlPreview({ title, companyName: current }, preview).companyName,
+      );
+
+      if (preview.title && preview.companyName) {
+        setAutofillStatus("Found the role title and company.");
+      } else if (preview.title) {
+        setAutofillStatus("Found the role title. Company could not be found.");
+      } else if (preview.companyName) {
+        setAutofillStatus("Found the company. Role title could not be found.");
+      } else {
+        setAutofillStatus("No title or company was found. Enter the details manually.");
+      }
+    } catch {
+      setAutofillError("Could not autofill details. Check the link and try again.");
+    } finally {
+      autofillInFlight.current = false;
+      setIsAutofilling(false);
+    }
+  }
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true);
-    setError(null);
+    setIsSaving(true);
+    setSubmitError(null);
     try {
       const result = await api.createJob({
         url,
@@ -31,9 +85,9 @@ export function NewJobPage() {
       });
       navigate(`/jobs/${result.job.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create job");
+      setSubmitError(err instanceof Error ? err.message : "Could not create job");
     } finally {
-      setBusy(false);
+      setIsSaving(false);
     }
   }
 
@@ -55,17 +109,44 @@ export function NewJobPage() {
       </div>
 
       <form onSubmit={(e) => void onSubmit(e)} className="card space-y-5 p-6">
-        <label className="block space-y-1.5 text-sm">
-          <span className="font-medium">Posting link</span>
-          <input
-            required
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://…"
-            className="field"
-          />
-        </label>
+        <div className="space-y-1.5 text-sm">
+          <label htmlFor="posting-url" className="block font-medium">
+            Posting link
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              id="posting-url"
+              required
+              type="url"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setAutofillError(null);
+                setAutofillStatus(null);
+              }}
+              placeholder="https://…"
+              className="field"
+            />
+            <button
+              type="button"
+              disabled={isAutofilling}
+              onClick={() => void onAutofill()}
+              className="btn btn-secondary shrink-0"
+            >
+              {isAutofilling ? "Finding details…" : "Autofill"}
+            </button>
+          </div>
+          {autofillError ? (
+            <p className="text-sm text-[var(--danger)]" role="alert">
+              {autofillError}
+            </p>
+          ) : null}
+          {autofillStatus ? (
+            <p className="text-sm text-[var(--muted)]" aria-live="polite">
+              {autofillStatus}
+            </p>
+          ) : null}
+        </div>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block space-y-1.5 text-sm">
             <span className="font-medium">
@@ -121,13 +202,13 @@ export function NewJobPage() {
             className="field"
           />
         </label>
-        {error ? (
+        {submitError ? (
           <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
-            {error}
+            {submitError}
           </p>
         ) : null}
-        <button type="submit" disabled={busy} className="btn btn-primary">
-          {busy ? "Saving…" : "Track this job"}
+        <button type="submit" disabled={isSaving} className="btn btn-primary">
+          {isSaving ? "Saving…" : "Track this job"}
         </button>
       </form>
     </div>
