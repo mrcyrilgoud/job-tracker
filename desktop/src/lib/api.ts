@@ -13,6 +13,7 @@ import type {
   WeeklyActivity,
   WatchProvider,
 } from "@/lib/schema";
+import { DESKTOP_SHELL_REQUIRED, isDesktopShell } from "@/lib/tauri";
 
 export type JobFilters = {
   status?: string;
@@ -78,6 +79,9 @@ export type JobsRunnerProgress = {
 };
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isDesktopShell()) {
+    throw new Error(DESKTOP_SHELL_REQUIRED);
+  }
   return invoke<T>(command, args);
 }
 

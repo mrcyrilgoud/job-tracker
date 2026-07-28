@@ -1,5 +1,9 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Agent notes
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+This is a **Tauri 2** desktop app:
+
+- `desktop/` — Vite + React UI
+- `src-tauri/` — Rust backend (SQLite, Keychain, jobs runner, ATS, Gmail)
+- `scripts/install-launchd.ts` — macOS LaunchAgent installer for the hourly jobs runner
+
+Do not reintroduce a Next.js or Node server stack. Prefer Rust for backend logic and the desktop Vite app for UI.

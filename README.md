@@ -2,7 +2,7 @@
 
 Personal local Mac app for tracking job applications, resumes/cover letters, company ATS watches, and Gmail updates.
 
-The primary app is a **Tauri 2** desktop shell (`desktop/` UI + `src-tauri/` Rust backend). A legacy Next.js app remains under `src/` for shared-path migration only (`npm run next:dev`).
+The app is a **Tauri 2** desktop shell (`desktop/` UI + `src-tauri/` Rust backend).
 
 ## Requirements
 
@@ -35,10 +35,10 @@ npm run tauri:build
 
 | Mode | Path |
 | --- | --- |
-| Dev / shared with Next | repo `data/` (or `JOB_TRACKER_DATA_DIR`) |
+| Dev | repo `data/` (or `JOB_TRACKER_DATA_DIR`) |
 | Release (no env override) | `~/Library/Application Support/com.jobtracker.local/` |
 
-Set a shared directory explicitly (recommended while Next is still used):
+Override explicitly:
 
 ```bash
 export JOB_TRACKER_DATA_DIR="/absolute/path/to/job-tracker/data"
@@ -50,8 +50,6 @@ Contents:
 - `documents/`
 - `jobs.csv` + `jobs.csv.sync.json`
 - `jobs-worker.log`, `jobs-runner.lock`
-
-**Do not** copy the DB into a second directory while Next is still writing — that forks your data. Prefer shared-path mode until Next is retired.
 
 Release builds may one-time migrate from a legacy repo `data/` tree into Application Support using a WAL checkpoint + copy of `db`/`-wal`/`-shm`, `documents/`, and CSV files (only when the destination DB is missing).
 
@@ -104,8 +102,8 @@ Default OAuth is **loopback**, not a custom URL scheme:
    The app binds an ephemeral port and shows the exact redirect URI after you click Connect — add that URI (or a small port range) in Google Cloud.
 3. In the app’s **Gmail** screen, paste client ID/secret, then Connect (opens the system browser)
 
-Keychain service/account (unchanged from the Node app): `job-tracker-local` / `gmail-refresh-token`.  
-If a notarized/sandboxed build cannot see the old Keychain item, reconnect Gmail once.
+Keychain service/account: `job-tracker-local` / `gmail-refresh-token`.  
+If a notarized/sandboxed build cannot see an older Keychain item, reconnect Gmail once.
 
 Optional env vars:
 
@@ -120,7 +118,7 @@ JOB_TRACKER_DATA_DIR=/absolute/path/to/data
 
 ```bash
 npm test                 # Rust unit tests (CSV, classify, safe_fetch, ATS parsers, …)
-npm run test:vitest      # legacy TypeScript Vitest suite (Next lib)
+npm run test:desktop     # Desktop Vitest suite
 npm run desktop:build    # Vite UI typecheck + build
 ```
 
@@ -133,13 +131,13 @@ npm run desktop:build    # Vite UI typecheck + build
 | `npm run jobs` | One-shot posting / ATS / careers / Gmail / CSV cycle |
 | `npm run jobs:install` | Write/retarget the LaunchAgent plist |
 | `npm test` | Rust unit tests |
-| `npm run next:dev` | Legacy Next.js UI (shared `data/` via `JOB_TRACKER_DATA_DIR`) |
+| `npm run test:desktop` | Desktop UI unit tests |
 
 ## Repo layout
 
 ```text
 desktop/          Vite + React + Tailwind SPA
 src-tauri/        Rust/Tauri backend (rusqlite, keyring, reqwest)
-src/              Legacy Next.js app (migration only)
+scripts/          LaunchAgent installer
 data/             Local SQLite + documents + CSV (gitignored)
 ```

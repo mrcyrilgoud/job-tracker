@@ -35,7 +35,7 @@ The previous UI felt austere and technical:
 ## Color
 
 Warm neutrals + a single clay-coral accent + a soft, friendly semantic palette for status.
-All tokens live in `src/app/globals.css` as CSS custom properties.
+All tokens live in `desktop/src/index.css` as CSS custom properties.
 
 ### Neutrals & accent
 
@@ -67,11 +67,11 @@ Each state is a soft tinted fill + a saturated ink. Used for pipeline status and
 | Error | `--danger-soft #fbe9e6` | `--danger #b0432f` |
 
 Rule: never show a raw enum value to the user. Map it to a human label + a tone (see
-`src/lib/ui.ts`).
+`desktop/src/lib/ui.ts`).
 
 ## Typography
 
-Two variable fonts loaded via `next/font/google`, exposed as CSS variables.
+Two variable fonts loaded from Google Fonts in `desktop/index.html`, exposed as CSS variables.
 
 - **Display / headings — Fraunces.** A soft modern old-style serif. Warm, editorial,
   characterful. Used for page titles, the wordmark, and large numbers. Weights 400–600.

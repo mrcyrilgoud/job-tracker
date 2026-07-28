@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 
 import { api, type JobsRunnerProgress } from "@/lib/api";
+import { isDesktopShell } from "@/lib/tauri";
 
 export function RunJobsButton() {
   const [busy, setBusy] = useState(false);
@@ -9,6 +10,10 @@ export function RunJobsButton() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isDesktopShell()) {
+      return;
+    }
+
     let unlisten: (() => void) | undefined;
 
     void listen<JobsRunnerProgress>("jobs-runner-progress", (event) => {

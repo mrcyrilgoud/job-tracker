@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 
-/// Exact schema from Next.js `src/lib/db/index.ts` migrate(), including the
+/// Canonical SQLite schema for Job Tracker, including the
 /// partial unique index on `(source, source_external_id)`.
 pub fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(

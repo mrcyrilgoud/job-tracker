@@ -9,7 +9,7 @@ const projectRoot = process.cwd();
 
 /**
  * Prefer the packaged Tauri binary with `--run-jobs`. Fall back to the debug
- * cargo target, then the legacy Node/tsx worker.
+ * cargo target.
  */
 function resolveRunner(): {
   programArguments: string[];
@@ -40,18 +40,9 @@ function resolveRunner(): {
     }
   }
 
-  const nodePath = process.execPath;
-  const scriptPath = path.join(projectRoot, "scripts", "run-jobs.ts");
-  const tsxPath = path.join(projectRoot, "node_modules", "tsx", "dist", "cli.mjs");
-  console.warn(
-    "Tauri binary not found; installing legacy Node/tsx LaunchAgent. Run `npm run tauri:build` then re-run jobs:install.",
+  throw new Error(
+    "Tauri binary not found. Run `npm run tauri:build` (or `npm run tauri:dev` once) then re-run jobs:install.",
   );
-  return {
-    programArguments: [nodePath, tsxPath, scriptPath],
-    workingDirectory: projectRoot,
-    logPath,
-    dataDir,
-  };
 }
 
 const { programArguments, workingDirectory, logPath, dataDir } = resolveRunner();
