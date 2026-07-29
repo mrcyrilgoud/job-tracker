@@ -48,15 +48,24 @@ Contents:
 
 - `job-tracker.db` (+ WAL/SHM)
 - `documents/`
-- `jobs.csv` + `jobs.csv.sync.json`
+- `jobs.csv` + `jobs.csv.sync.json` (default location; see custom CSV below)
 - `jobs-worker.log`, `jobs-runner.lock`
 
 Release builds may one-time migrate from a legacy repo `data/` tree into Application Support using a WAL checkpoint + copy of `db`/`-wal`/`-shm`, `documents/`, and CSV files (only when the destination DB is missing).
 
+### Custom jobs.csv path (Tauri-first)
+
+The SQLite database and documents stay under the fixed data directory. You can point `jobs.csv` (and its `{csv}.sync.json` sidecar) elsewhere from the desktop app Jobs footer — for example a Dropbox folder.
+
+- Preference is stored in `app_settings.jobs_csv_path` (absolute path only).
+- The LaunchAgent / `--run-jobs` CLI opens the same DB and resolves the CSV the same way (env → setting → default).
+- `JOB_TRACKER_JOBS_CSV` overrides the saved setting for tests/dev only; do not rely on it for the packaged app + LaunchAgent pair.
+- Custom CSV is Tauri-only until any remaining Next.js path is retired; Next still uses `{dataDir}/jobs.csv` if you run it.
+
 ## Features
 
 1. **Jobs** — paste a posting URL, set status/applied date/notes, check whether the posting is still active
-2. **Jobs CSV** — `jobs.csv` mirrors editable fields; rewritten after changes and by the jobs runner
+2. **Jobs CSV** — mirrors editable fields; rewritten after changes and by the jobs runner. Default is `{dataDir}/jobs.csv`; optional custom absolute path via the desktop app (sidecar always `{csv}.sync.json`).
 3. **Documents** — import PDF/DOCX/TXT; open with the system viewer (`shell.open`), not raw web paths
 4. **Companies / watches** — Greenhouse, Lever, Ashby board sync; careers pages produce review items
 5. **Gmail** — readonly OAuth with PKCE; refresh token in macOS Keychain (`job-tracker-local` / `gmail-refresh-token`)

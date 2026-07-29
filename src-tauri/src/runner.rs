@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::ats::careers::{apply_careers_check, fetch_careers_hash};
 use crate::ats::sync::{apply_watch_sync, fetch_remote_jobs};
+use crate::db::jobs_csv_path::resolve_jobs_csv_path;
 use crate::db::migrate;
 use crate::db::paths::DataPaths;
 use crate::error::{AppError, AppResult};
@@ -199,7 +200,8 @@ pub async fn run_jobs_cycle(
         serde_json::json!({ "skipped": true })
     };
 
-    // 5) CSV sync
+    // 5) CSV sync — re-resolve after DB open so LaunchAgent/CLI honor app_settings
+    // (and never silently fall back to default on I/O failure).
     emit_progress(
         app.as_ref(),
         RunnerProgress {
@@ -209,7 +211,8 @@ pub async fn run_jobs_cycle(
             total: 1,
         },
     );
-    let csv = sync_jobs_csv_with_disk(&paths.db_path, &paths.jobs_csv_path)?;
+    let csv_path = resolve_jobs_csv_path(&paths.data_dir, &conn)?;
+    let csv = sync_jobs_csv_with_disk(&paths.db_path, &csv_path)?;
 
     let summary = serde_json::json!({
         "postings": posting_results.len(),

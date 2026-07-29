@@ -226,12 +226,13 @@ fn empty_sync_state(csv_path: &Path) -> SyncState {
     }
 }
 
-fn sync_path_for(csv_path: &Path) -> PathBuf {
+/// Sidecar always lives beside the CSV as `{csv}.sync.json`.
+pub fn jobs_csv_sync_path(csv_path: &Path) -> PathBuf {
     PathBuf::from(format!("{}.sync.json", csv_path.display()))
 }
 
 fn read_sync_state(csv_path: &Path) -> SyncState {
-    let sync_path = sync_path_for(csv_path);
+    let sync_path = jobs_csv_sync_path(csv_path);
     if !sync_path.exists() {
         return empty_sync_state(csv_path);
     }
@@ -242,7 +243,7 @@ fn read_sync_state(csv_path: &Path) -> SyncState {
 }
 
 fn write_sync_state(state: &SyncState) -> AppResult<()> {
-    let sync_path = sync_path_for(Path::new(&state.path));
+    let sync_path = jobs_csv_sync_path(Path::new(&state.path));
     let temp_path = format!("{}.{}.tmp", sync_path.display(), std::process::id());
     let json = serde_json::to_string_pretty(state).map_err(|e| AppError::from(e.to_string()))?;
     {

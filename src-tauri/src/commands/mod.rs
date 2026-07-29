@@ -1,13 +1,20 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::Command;
 
 use serde::Deserialize;
 use tauri::{AppHandle, State};
+use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_shell::ShellExt;
 
 use crate::ats;
 use crate::ats::careers::{apply_careers_check, company_careers_url, fetch_careers_hash};
 use crate::ats::sync::{apply_watch_sync, fetch_remote_jobs};
 use crate::companies;
+use crate::db::jobs_csv_path::{
+    jobs_csv_path_info, reset_jobs_csv_path as reset_jobs_csv_path_impl, set_jobs_csv_path,
+    SetJobsCsvMode, WithoutSidecarAction,
+};
 use crate::db::AppState;
 use crate::documents;
 use crate::error::AppResult;
@@ -101,7 +108,7 @@ pub async fn create_job(
             input.notes.as_deref(),
             input.location.as_deref(),
         )?;
-        schedule_export_jobs_csv(conn, &state.paths.jobs_csv_path);
+        schedule_export_jobs_csv(conn, &state.current_jobs_csv_path());
         Ok(serde_json::json!({ "job": job, "company": company }))
     })?;
     Ok(result)
@@ -123,7 +130,7 @@ pub async fn update_job_cmd(
 ) -> AppResult<serde_json::Value> {
     state.with_db(|conn| {
         let detail = update_job(conn, &id, updates)?;
-        schedule_export_jobs_csv(conn, &state.paths.jobs_csv_path);
+        schedule_export_jobs_csv(conn, &state.current_jobs_csv_path());
         Ok(serde_json::json!({ "detail": detail }))
     })
 }
@@ -348,16 +355,18 @@ pub async fn open_document(
 
 #[tauri::command]
 pub async fn csv_status(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    let csv_path = state.current_jobs_csv_path();
     state.with_db(|conn| {
-        let status = get_jobs_csv_status(conn, &state.paths.jobs_csv_path)?;
+        let status = get_jobs_csv_status(conn, &csv_path)?;
         Ok(serde_json::json!(status))
     })
 }
 
 #[tauri::command]
 pub async fn csv_export(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    let csv_path = state.current_jobs_csv_path();
     state.with_db(|conn| {
-        let result = export_jobs_csv(conn, &state.paths.jobs_csv_path, None)?;
+        let result = export_jobs_csv(conn, &csv_path, None)?;
         Ok(serde_json::json!(result))
     })
 }
@@ -380,15 +389,128 @@ pub async fn csv_import(
         _ => ImportMode::Merge,
     };
     // Open a dedicated connection so async import does not hold the UI mutex across awaits.
-    let paths = state.paths.clone();
+    let db_path = state.paths.db_path.clone();
+    let csv_path = state.current_jobs_csv_path();
     let result = import_jobs_csv(
-        &paths.db_path,
-        &paths.jobs_csv_path,
+        &db_path,
+        &csv_path,
         input.content.as_deref(),
         input.dry_run.unwrap_or(false),
         mode,
     )?;
     Ok(serde_json::json!(result))
+}
+
+#[tauri::command]
+pub async fn get_jobs_csv_path(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    state.with_db(|conn| {
+        let info = jobs_csv_path_info(&state.paths.data_dir, conn)?;
+        Ok(serde_json::json!(info))
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetJobsCsvPathArgs {
+    pub path: String,
+    pub mode: String,
+    pub dry_run: Option<bool>,
+    pub confirm: Option<bool>,
+    pub without_sidecar_action: Option<String>,
+}
+
+#[tauri::command]
+pub async fn set_jobs_csv_path_cmd(
+    state: State<'_, AppState>,
+    input: SetJobsCsvPathArgs,
+) -> AppResult<serde_json::Value> {
+    if state.runner_is_active() {
+        return Err(crate::error::AppError::from(
+            "Cannot change CSV path while the jobs runner is in progress",
+        ));
+    }
+    let _guard = state.runner_lock.try_lock().ok_or_else(|| {
+        crate::error::AppError::from("Cannot change CSV path while another path update is in progress")
+    })?;
+
+    let mode = SetJobsCsvMode::parse(&input.mode)?;
+    let without = input
+        .without_sidecar_action
+        .as_deref()
+        .map(WithoutSidecarAction::parse)
+        .transpose()?;
+
+    let data_dir = state.paths.data_dir.clone();
+    let db_path = state.paths.db_path.clone();
+    let result = state.with_db(|conn| {
+        set_jobs_csv_path(
+            &data_dir,
+            &db_path,
+            conn,
+            &input.path,
+            mode,
+            input.dry_run.unwrap_or(false),
+            input.confirm.unwrap_or(false),
+            without,
+        )
+    })?;
+
+    // Dry-run preview must not mutate in-memory path / setting (setting already untouched).
+    if result.action != "dry_run" {
+        let resolved = PathBuf::from(&result.path);
+        state.set_current_jobs_csv_path(resolved);
+    }
+
+    Ok(serde_json::json!(result))
+}
+
+#[tauri::command]
+pub async fn reset_jobs_csv_path_cmd(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    if state.runner_is_active() {
+        return Err(crate::error::AppError::from(
+            "Cannot reset CSV path while the jobs runner is in progress",
+        ));
+    }
+    let _guard = state.runner_lock.try_lock().ok_or_else(|| {
+        crate::error::AppError::from("Cannot reset CSV path while another path update is in progress")
+    })?;
+
+    let data_dir = state.paths.data_dir.clone();
+    let result = state.with_db(|conn| reset_jobs_csv_path_impl(&data_dir, conn))?;
+    state.set_current_jobs_csv_path(PathBuf::from(&result.path));
+    Ok(serde_json::json!(result))
+}
+
+#[tauri::command]
+pub async fn pick_jobs_csv_path(app: AppHandle) -> AppResult<Option<String>> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Jobs CSV location")
+        .add_filter("CSV", &["csv"])
+        .set_file_name("jobs.csv")
+        .blocking_save_file();
+    Ok(picked.and_then(|p: FilePath| {
+        p.into_path()
+            .ok()
+            .map(|path| path.display().to_string())
+    }))
+}
+
+#[tauri::command]
+pub async fn reveal_jobs_csv_path(state: State<'_, AppState>) -> AppResult<()> {
+    let path = state.current_jobs_csv_path();
+    let status = Command::new("open")
+        .arg("-R")
+        .arg(&path)
+        .status()
+        .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+    if !status.success() {
+        return Err(crate::error::AppError::from(
+            "Failed to reveal CSV path in Finder",
+        ));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -477,8 +599,13 @@ pub async fn run_jobs_cycle_cmd(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<serde_json::Value> {
-    // In-memory single-flight check; drop guard before await (MutexGuard is !Send).
-    // File flock inside run_jobs_cycle covers cross-process exclusivity.
+    // In-memory single-flight (Send-safe AtomicBool). File flock inside run_jobs_cycle
+    // covers cross-process exclusivity. set-path rejects while runner_active.
+    if state.runner_is_active() {
+        return Err(crate::error::AppError::from(
+            "Jobs runner is already in progress",
+        ));
+    }
     {
         let guard = state.runner_lock.try_lock();
         if guard.is_none() {
@@ -487,8 +614,13 @@ pub async fn run_jobs_cycle_cmd(
             ));
         }
     }
+    state.set_runner_active(true);
     let paths = state.paths.clone();
-    run_jobs_cycle(&paths, Some(app)).await
+    let result = run_jobs_cycle(&paths, Some(app)).await;
+    state.set_runner_active(false);
+    // Refresh live CSV path in case settings changed externally (unlikely mid-run).
+    let _ = state.refresh_jobs_csv_path_from_db();
+    result
 }
 
 #[tauri::command]

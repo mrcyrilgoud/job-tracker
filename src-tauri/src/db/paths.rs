@@ -9,8 +9,6 @@ pub struct DataPaths {
     pub data_dir: PathBuf,
     pub db_path: PathBuf,
     pub documents_dir: PathBuf,
-    pub jobs_csv_path: PathBuf,
-    pub jobs_csv_sync_path: PathBuf,
     pub worker_log_path: PathBuf,
     pub runner_lock_path: PathBuf,
 }
@@ -19,16 +17,12 @@ impl DataPaths {
     pub fn from_data_dir(data_dir: PathBuf) -> Self {
         let db_path = data_dir.join("job-tracker.db");
         let documents_dir = data_dir.join("documents");
-        let jobs_csv_path = data_dir.join("jobs.csv");
-        let jobs_csv_sync_path = data_dir.join("jobs.csv.sync.json");
         let worker_log_path = data_dir.join("jobs-worker.log");
         let runner_lock_path = data_dir.join("jobs-runner.lock");
         Self {
             data_dir,
             db_path,
             documents_dir,
-            jobs_csv_path,
-            jobs_csv_sync_path,
             worker_log_path,
             runner_lock_path,
         }
