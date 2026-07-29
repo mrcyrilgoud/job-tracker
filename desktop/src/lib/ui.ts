@@ -38,6 +38,28 @@ export function jobStatusPresentation(status: JobStatus): Presentation {
   }
 }
 
+/**
+ * Whether the posting is still live only matters while you could still apply.
+ * Once an application is in, the listing closing says nothing about the job.
+ */
+export function postingStateMatters(status: JobStatus): boolean {
+  switch (status) {
+    case "wishlist":
+      return true;
+    case "applied":
+    case "interviewing":
+    case "offer":
+    case "rejected":
+    case "withdrawn":
+    case "closed":
+      return false;
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
+  }
+}
+
 export function postingStatePresentation(state: PostingState): Presentation {
   switch (state) {
     case "active":

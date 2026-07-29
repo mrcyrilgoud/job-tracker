@@ -7,6 +7,7 @@ import { jobStatuses, type JobStatus, type PostingState } from "@/lib/schema";
 import {
   checkResultNote,
   jobStatusPresentation,
+  postingStateMatters,
   postingStatePresentation,
   toneClasses,
 } from "@/lib/ui";
@@ -97,7 +98,9 @@ export function JobDetailClient({
   const [error, setError] = useState<string | null>(null);
 
   const isDirty = !draftsMatch(draft, saved);
-  const postingInfo = postingStatePresentation(posting.state);
+  const postingInfo = postingStateMatters(draft.status)
+    ? postingStatePresentation(posting.state)
+    : null;
   const checkNote = checkResultNote(posting.lastCheckResult);
 
   const saveState: SaveState = saving
@@ -223,10 +226,12 @@ export function JobDetailClient({
         </div>
 
         <div className="flex shrink-0 flex-row items-center gap-2 sm:flex-col sm:items-end sm:gap-1.5 sm:text-right">
-          <span className={`pill ${toneClasses[postingInfo.tone]}`}>
-            <span className="pill-dot" />
-            {postingInfo.label}
-          </span>
+          {postingInfo ? (
+            <span className={`pill ${toneClasses[postingInfo.tone]}`}>
+              <span className="pill-dot" />
+              {postingInfo.label}
+            </span>
+          ) : null}
           {posting.lastCheckedAt ? (
             <span className="text-xs text-[var(--faint)]">
               Checked{" "}

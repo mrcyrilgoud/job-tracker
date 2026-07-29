@@ -14,6 +14,7 @@ import { jobStatuses, type JobListItem, type WeeklyActivity } from "@/lib/schema
 import {
   jobSourceLabel,
   jobStatusPresentation,
+  postingStateMatters,
   postingStatePresentation,
   toneClasses,
 } from "@/lib/ui";
@@ -241,7 +242,9 @@ export function JobsPage() {
           <ul className="space-y-3">
             {jobs.map(({ job, companyName }) => {
               const statusInfo = jobStatusPresentation(job.status);
-              const postingInfo = postingStatePresentation(job.postingState);
+              const postingInfo = postingStateMatters(job.status)
+                ? postingStatePresentation(job.postingState)
+                : null;
               const source = jobSourceLabel(job.source);
               const StageIcon = statusIcons[job.status];
               return (
@@ -257,10 +260,12 @@ export function JobsPage() {
                             <StageIcon size={12} />
                             {statusInfo.label}
                           </span>
-                          <span className={`pill ${toneClasses[postingInfo.tone]}`}>
-                            <span className="pill-dot" />
-                            {postingInfo.label}
-                          </span>
+                          {postingInfo ? (
+                            <span className={`pill ${toneClasses[postingInfo.tone]}`}>
+                              <span className="pill-dot" />
+                              {postingInfo.label}
+                            </span>
+                          ) : null}
                           {job.isNewFromWatch ? (
                             <span className="pill bg-[var(--accent-soft)] text-[var(--accent-ink)]">
                               New
