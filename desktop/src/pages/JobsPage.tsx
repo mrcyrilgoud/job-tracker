@@ -1,5 +1,6 @@
+import { listen } from "@tauri-apps/api/event";
 import { formatDistanceToNow } from "date-fns";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import {
@@ -9,8 +10,9 @@ import {
   statusIcons,
   TrophyIcon,
 } from "@/components/icons";
-import { api } from "@/lib/api";
+import { api, type JobsRunnerProgress } from "@/lib/api";
 import { jobStatuses, type JobListItem, type WeeklyActivity } from "@/lib/schema";
+import { isDesktopShell } from "@/lib/tauri";
 import {
   jobSourceLabel,
   jobStatusPresentation,
@@ -33,9 +35,15 @@ export function JobsPage() {
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checkingPostings, setCheckingPostings] = useState(false);
+  const [checkProgress, setCheckProgress] = useState<JobsRunnerProgress | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const checkingPostingsRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [listResult, companiesResult, watchResult] = await Promise.all([
@@ -51,13 +59,61 @@ export function JobsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load jobs");
     } finally {
-      setLoading(false);
+      if (!opts?.quiet) {
+        setLoading(false);
+      }
     }
   }, [status, companyId, postingState, search]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isDesktopShell()) {
+      return;
+    }
+
+    let unlisten: (() => void) | undefined;
+
+    void listen<JobsRunnerProgress>("jobs-runner-progress", (event) => {
+      if (checkingPostingsRef.current) {
+        setCheckProgress(event.payload);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!checkProgress || checkProgress.phase !== "done" || checkingPostings) {
+      return;
+    }
+    const timer = window.setTimeout(() => setCheckProgress(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [checkProgress, checkingPostings]);
+
+  async function checkAllPostings() {
+    checkingPostingsRef.current = true;
+    setCheckingPostings(true);
+    setCheckError(null);
+    setCheckProgress({ phase: "starting", message: "Checking job postings…" });
+    try {
+      await api.checkAllPostings();
+      setCheckProgress({ phase: "done", message: "Posting check complete" });
+      await load({ quiet: true });
+    } catch (err) {
+      setCheckError(err instanceof Error ? err.message : "Posting check failed");
+      setCheckProgress(null);
+    } finally {
+      checkingPostingsRef.current = false;
+      setCheckingPostings(false);
+    }
+  }
 
   const activeStatus = jobStatuses.find((value) => value === status);
   const heading = activeStatus ? jobStatusPresentation(activeStatus).label : "All jobs";
@@ -140,9 +196,41 @@ export function JobsPage() {
                 : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`}
             </p>
           </div>
-          <Link to="/jobs/new" className="btn btn-primary self-start md:self-auto">
-            Add a job
-          </Link>
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => void checkAllPostings()}
+                disabled={checkingPostings}
+                aria-busy={checkingPostings}
+                className="btn btn-secondary"
+                title="Check whether each job posting is still open"
+              >
+                {checkingPostings ? <span className="spinner" aria-hidden="true" /> : null}
+                {checkingPostings ? "Checking…" : "Check all postings"}
+              </button>
+              {checkProgress && !checkError ? (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className="absolute right-0 top-full z-10 mt-1 w-56 rounded-lg bg-[var(--surface)] px-2 py-1 text-xs text-[var(--muted)] shadow-[var(--shadow-md)]"
+                >
+                  {checkProgress.message}
+                </p>
+              ) : null}
+              {checkError ? (
+                <p
+                  role="alert"
+                  className="absolute right-0 top-full z-10 mt-1 w-56 rounded-lg bg-[var(--danger-soft)] px-2 py-1 text-xs text-[var(--danger)]"
+                >
+                  {checkError}
+                </p>
+              ) : null}
+            </div>
+            <Link to="/jobs/new" className="btn btn-primary">
+              Add a job
+            </Link>
+          </div>
         </div>
 
         {!isFiltered ? (

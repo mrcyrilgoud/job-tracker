@@ -21,7 +21,7 @@ use crate::jobs::service::{
     create_job_from_url, get_job_detail, get_pipeline_counts, get_weekly_activity, list_jobs,
     resolve_title_from_url, update_job, JobFilters, UpdateJobInput,
 };
-use crate::runner::run_jobs_cycle;
+use crate::runner::{check_all_postings, run_jobs_cycle};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -489,6 +489,25 @@ pub async fn run_jobs_cycle_cmd(
     }
     let paths = state.paths.clone();
     run_jobs_cycle(&paths, Some(app)).await
+}
+
+#[tauri::command]
+pub async fn check_all_postings_cmd(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<serde_json::Value> {
+    // In-memory single-flight check; drop guard before await (MutexGuard is !Send).
+    // File flock inside check_all_postings covers cross-process exclusivity.
+    {
+        let guard = state.runner_lock.try_lock();
+        if guard.is_none() {
+            return Err(crate::error::AppError::from(
+                "Jobs runner is already in progress",
+            ));
+        }
+    }
+    let paths = state.paths.clone();
+    check_all_postings(&paths, Some(app)).await
 }
 
 #[tauri::command]

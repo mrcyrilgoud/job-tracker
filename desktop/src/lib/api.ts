@@ -154,4 +154,6 @@ export const api = {
     call<{ ok: boolean }>("gmail_triage", { matchId, jobId }),
 
   runJobsCycle: () => call<Record<string, unknown>>("run_jobs_cycle_cmd"),
+
+  checkAllPostings: () => call<Record<string, unknown>>("check_all_postings_cmd"),
 };

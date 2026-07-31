@@ -82,6 +82,7 @@ pub fn run() {
             commands::gmail_poll,
             commands::gmail_triage,
             commands::run_jobs_cycle_cmd,
+            commands::check_all_postings_cmd,
             commands::get_data_dir,
         ])
         .run(tauri::generate_context!())

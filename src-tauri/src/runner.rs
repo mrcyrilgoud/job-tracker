@@ -47,11 +47,7 @@ fn open_runner_conn(paths: &DataPaths) -> AppResult<Connection> {
     Ok(conn)
 }
 
-/// Single-instance flock around the full jobs cycle.
-pub async fn run_jobs_cycle(
-    paths: &DataPaths,
-    app: Option<AppHandle>,
-) -> AppResult<serde_json::Value> {
+fn try_lock_runner(paths: &DataPaths) -> AppResult<std::fs::File> {
     let lock_file = OpenOptions::new()
         .create(true)
         .read(true)
@@ -62,23 +58,25 @@ pub async fn run_jobs_cycle(
             "Another jobs runner is already active (lock held)",
         ));
     }
+    Ok(lock_file)
+}
 
-    let mut log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&paths.worker_log_path)?;
-    writeln!(log, "--- jobs cycle start {} ---", crate::util::now_iso())?;
-
-    let conn = open_runner_conn(paths)?;
-
-    // 1) Check postings
+/// Shared posting-check loop (no flock). Callers that already hold the runner
+/// lock use this; `check_all_postings` acquires the lock then delegates here.
+///
+/// Takes `&mut Connection` (Send) rather than `&Connection` (!Send) so the
+/// future stays Send across HTTP awaits.
+pub async fn check_all_postings_with_conn(
+    conn: &mut Connection,
+    app: Option<&AppHandle>,
+) -> AppResult<Vec<serde_json::Value>> {
     let job_ids: Vec<String> = {
         let mut stmt = conn.prepare("SELECT id FROM jobs")?;
         let rows = stmt.query_map([], |r| r.get(0))?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
     emit_progress(
-        app.as_ref(),
+        app,
         RunnerProgress {
             stage: "postings".into(),
             message: "Checking job postings".into(),
@@ -88,12 +86,12 @@ pub async fn run_jobs_cycle(
     );
     let mut posting_results = Vec::new();
     for (i, job_id) in job_ids.iter().enumerate() {
-        let (url, previous) = load_job_check_context(&conn, job_id)?;
+        let (url, previous) = load_job_check_context(conn, job_id)?;
         let (state, result) = fetch_posting_state(&url).await;
-        let applied = apply_posting_check(&conn, job_id, &previous, &state, &result)?;
+        let applied = apply_posting_check(conn, job_id, &previous, &state, &result)?;
         posting_results.push(serde_json::json!({ "jobId": job_id, "result": applied }));
         emit_progress(
-            app.as_ref(),
+            app,
             RunnerProgress {
                 stage: "postings".into(),
                 message: format!("Checked {job_id}"),
@@ -102,6 +100,40 @@ pub async fn run_jobs_cycle(
             },
         );
     }
+    Ok(posting_results)
+}
+
+/// Batch HTTP posting checks for every job, with exclusive runner flock.
+pub async fn check_all_postings(
+    paths: &DataPaths,
+    app: Option<AppHandle>,
+) -> AppResult<serde_json::Value> {
+    let lock_file = try_lock_runner(paths)?;
+    let mut conn = open_runner_conn(paths)?;
+    let posting_results = check_all_postings_with_conn(&mut conn, app.as_ref()).await?;
+    let _ = lock_file.unlock();
+    Ok(serde_json::json!({
+        "postings": posting_results.len(),
+    }))
+}
+
+/// Single-instance flock around the full jobs cycle.
+pub async fn run_jobs_cycle(
+    paths: &DataPaths,
+    app: Option<AppHandle>,
+) -> AppResult<serde_json::Value> {
+    let lock_file = try_lock_runner(paths)?;
+
+    let mut log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&paths.worker_log_path)?;
+    writeln!(log, "--- jobs cycle start {} ---", crate::util::now_iso())?;
+
+    let mut conn = open_runner_conn(paths)?;
+
+    // 1) Check postings (shared helper; cycle already holds the flock)
+    let posting_results = check_all_postings_with_conn(&mut conn, app.as_ref()).await?;
 
     // 2) Sync watches
     let watch_ids: Vec<(String, String, String)> = {
