@@ -11,7 +11,9 @@
     "desktop:build": "npm --prefix desktop run build",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:desktop": "npm --prefix desktop run test",
-    "jobs:install": "tsx scripts/install-launchd.ts"
+    "jobs:install": "tsx scripts/install-launchd.ts",
+    "app:rebuild": "tsx scripts/rebuild-app.ts",
+    "hooks:install": "tsx scripts/install-git-hooks.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

@@ -24,12 +24,26 @@ npm run tauri:dev
 # alias: npm run dev
 ```
 
-Packaged `.app`:
+Packaged `.app` (build only):
 
 ```bash
 npm run tauri:build
 # → src-tauri/target/release/bundle/macos/Job Tracker.app
 ```
+
+Refresh the packaged app **and** retarget the jobs LaunchAgent:
+
+```bash
+npm run app:rebuild
+```
+
+Optional one-time setup so a successful `git push` of app code starts a background rebuild:
+
+```bash
+npm run hooks:install
+```
+
+Day-to-day UI/Rust iteration still uses `npm run tauri:dev`; `app:rebuild` is for keeping the packaged `.app` (and LaunchAgent) current.
 
 ## Data directory
 
@@ -72,8 +86,8 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 Hourly work must run even when the UI is closed. Prefer a LaunchAgent that invokes the **packaged binary**:
 
 ```bash
-npm run tauri:build
-npm run jobs:install
+npm run app:rebuild
+# or: npm run tauri:build && npm run jobs:install
 launchctl unload ~/Library/LaunchAgents/com.jobtracker.local.jobs.plist 2>/dev/null
 launchctl load ~/Library/LaunchAgents/com.jobtracker.local.jobs.plist
 ```
@@ -128,16 +142,20 @@ npm run desktop:build    # Vite UI typecheck + build
 | --- | --- |
 | `npm run tauri:dev` | Run the Mac app (Vite + Rust) |
 | `npm run tauri:build` | Produce `Job Tracker.app` |
+| `npm run app:rebuild` | Build packaged app, retarget LaunchAgent, notify; quit/relaunch if running |
+| `npm run hooks:install` | Install local post-push hook (background rebuild on app-code pushes) |
 | `npm run jobs` | One-shot posting / ATS / careers / Gmail / CSV cycle |
 | `npm run jobs:install` | Write/retarget the LaunchAgent plist |
 | `npm test` | Rust unit tests |
 | `npm run test:desktop` | Desktop UI unit tests |
+
+`app:rebuild` flags: `--skip-jobs` (build only), `--background` (used by the post-push hook). Concurrent rebuilds use `data/rebuild.lock` and fail clearly if one is already running. Log: `data/rebuild.log`.
 
 ## Repo layout
 
 ```text
 desktop/          Vite + React + Tailwind SPA
 src-tauri/        Rust/Tauri backend (rusqlite, keyring, reqwest)
-scripts/          LaunchAgent installer
+scripts/          LaunchAgent + rebuild + git hook installers
 data/             Local SQLite + documents + CSV (gitignored)
 ```
