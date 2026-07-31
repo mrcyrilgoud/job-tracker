@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -8,17 +9,26 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 
+pub mod jobs_csv_path;
 pub mod migrate;
 pub mod paths;
+pub mod settings;
 
+pub use jobs_csv_path::resolve_jobs_csv_path;
 pub use paths::{resolve_data_dir, DataPaths};
 
-/// Shared app state. Never hold the mutex across `.await`.
+/// Shared app state. Never hold the db mutex across `.await`.
 #[derive(Clone)]
 pub struct AppState {
     pub paths: DataPaths,
+    /// Live jobs.csv path (env / settings / default). Interior-mutable so set-path
+    /// updates take effect without restart; re-read under lock at use sites.
+    pub jobs_csv_path: Arc<Mutex<PathBuf>>,
     pub db: Arc<Mutex<Connection>>,
+    /// Serializes set-path with itself; also used as a brief single-flight gate.
     pub runner_lock: Arc<Mutex<()>>,
+    /// True while the in-app jobs runner cycle is in progress (Send-safe).
+    pub runner_active: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -31,16 +41,41 @@ impl AppState {
         conn.pragma_update(None, "busy_timeout", 5000i32)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         migrate::migrate(&conn)?;
+        let jobs_csv_path = resolve_jobs_csv_path(&paths.data_dir, &conn)?;
         Ok(Self {
             paths,
+            jobs_csv_path: Arc::new(Mutex::new(jobs_csv_path)),
             db: Arc::new(Mutex::new(conn)),
             runner_lock: Arc::new(Mutex::new(())),
+            runner_active: Arc::new(AtomicBool::new(false)),
         })
     }
 
     pub fn with_db<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
         let guard = self.db.lock();
         f(&guard)
+    }
+
+    pub fn current_jobs_csv_path(&self) -> PathBuf {
+        self.jobs_csv_path.lock().clone()
+    }
+
+    pub fn set_current_jobs_csv_path(&self, path: PathBuf) {
+        *self.jobs_csv_path.lock() = path;
+    }
+
+    pub fn refresh_jobs_csv_path_from_db(&self) -> AppResult<PathBuf> {
+        let path = self.with_db(|conn| resolve_jobs_csv_path(&self.paths.data_dir, conn))?;
+        self.set_current_jobs_csv_path(path.clone());
+        Ok(path)
+    }
+
+    pub fn runner_is_active(&self) -> bool {
+        self.runner_active.load(Ordering::SeqCst)
+    }
+
+    pub fn set_runner_active(&self, active: bool) {
+        self.runner_active.store(active, Ordering::SeqCst);
     }
 }
 

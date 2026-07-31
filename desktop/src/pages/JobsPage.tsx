@@ -9,6 +9,7 @@ import {
   statusIcons,
   TrophyIcon,
 } from "@/components/icons";
+import { JobsCsvPathSettings } from "@/components/JobsCsvPathSettings";
 import { api } from "@/lib/api";
 import { jobStatuses, type JobListItem, type WeeklyActivity } from "@/lib/schema";
 import {
@@ -294,6 +295,8 @@ export function JobsPage() {
             })}
           </ul>
         )}
+
+        <JobsCsvPathSettings />
       </section>
     </div>
   );

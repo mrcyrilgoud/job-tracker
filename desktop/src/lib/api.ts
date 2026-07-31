@@ -154,4 +154,51 @@ export const api = {
     call<{ ok: boolean }>("gmail_triage", { matchId, jobId }),
 
   runJobsCycle: () => call<Record<string, unknown>>("run_jobs_cycle_cmd"),
+
+  getJobsCsvPath: () => call<JobsCsvPathInfo>("get_jobs_csv_path"),
+
+  setJobsCsvPath: (input: SetJobsCsvPathInput) =>
+    call<SetJobsCsvPathResult>("set_jobs_csv_path_cmd", { input }),
+
+  resetJobsCsvPath: () => call<SetJobsCsvPathResult>("reset_jobs_csv_path_cmd"),
+
+  pickJobsCsvPath: () => call<string | null>("pick_jobs_csv_path"),
+
+  revealJobsCsvPath: () => call<void>("reveal_jobs_csv_path"),
+};
+
+export type JobsCsvPathInfo = {
+  path: string;
+  isDefault: boolean;
+  envOverride: boolean;
+  defaultPath: string;
+  hasSidecar: boolean;
+};
+
+export type SetJobsCsvPathInput = {
+  path: string;
+  mode: "relocate_export" | "link_with_sidecar" | "link_without_sidecar";
+  dryRun?: boolean;
+  confirm?: boolean;
+  withoutSidecarAction?: "export_overwrite" | "overwrite_editable";
+};
+
+export type SetJobsCsvPathResult = {
+  path: string;
+  action: string;
+  envOverride: boolean;
+  import?: {
+    dryRun: boolean;
+    mode: string;
+    path: string;
+    summary: {
+      created: number;
+      updated: number;
+      unchanged: number;
+      conflicts: number;
+      skipped: number;
+      notesAdded: number;
+      missingFromCsv: number;
+    };
+  };
 };
