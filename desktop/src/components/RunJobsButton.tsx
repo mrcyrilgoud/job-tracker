@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, type JobsRunnerProgress } from "@/lib/api";
 import { isDesktopShell } from "@/lib/tauri";
@@ -8,6 +8,8 @@ export function RunJobsButton() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<JobsRunnerProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const clearProgressTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!isDesktopShell()) {
@@ -17,17 +19,28 @@ export function RunJobsButton() {
     let unlisten: (() => void) | undefined;
 
     void listen<JobsRunnerProgress>("jobs-runner-progress", (event) => {
-      setProgress(event.payload);
+      // This event is shared with the page-level posting check. Only show
+      // progress here when this button started the jobs cycle.
+      if (busyRef.current) {
+        setProgress(event.payload);
+      }
     }).then((fn) => {
       unlisten = fn;
     });
 
     return () => {
       unlisten?.();
+      if (clearProgressTimer.current !== undefined) {
+        window.clearTimeout(clearProgressTimer.current);
+      }
     };
   }, []);
 
   async function run() {
+    if (clearProgressTimer.current !== undefined) {
+      window.clearTimeout(clearProgressTimer.current);
+    }
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setProgress({ phase: "starting", message: "Starting jobs cycle…" });
@@ -38,7 +51,11 @@ export function RunJobsButton() {
       setError(err instanceof Error ? err.message : "Jobs cycle failed");
       setProgress(null);
     } finally {
+      busyRef.current = false;
       setBusy(false);
+      clearProgressTimer.current = window.setTimeout(() => {
+        setProgress(null);
+      }, 3000);
     }
   }
 
