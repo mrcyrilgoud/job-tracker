@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Company,
   CompanyRow,
+  DetectedBoard,
   Document,
   DocumentKind,
   DocumentListItem,
@@ -31,11 +32,20 @@ export type CreateJobInput = {
   appliedAt?: string | null;
   notes?: string | null;
   location?: string | null;
+  confirmedDiscovery?: ConfirmedJobDiscovery | null;
+};
+
+export type ConfirmedJobDiscovery = {
+  provider?: WatchProvider;
+  boardSlug?: string;
+  careersUrl?: string;
 };
 
 export type JobUrlPreview = {
   title: string | null;
   companyName: string | null;
+  board: DetectedBoard | null;
+  careersUrl: string | null;
 };
 
 export type UpdateJobInput = {
@@ -113,10 +123,14 @@ export const api = {
   listCompanies: () => call<{ companies: CompanyRow[] }>("list_companies"),
 
   createCompany: (name: string, careersUrl?: string | null) =>
-    call<{ company: Company }>("create_company", { name, careersUrl: careersUrl ?? null }),
+    call<{ company: Company }>("create_company", {
+      input: { name, careersUrl: careersUrl ?? null },
+    }),
 
   createWatch: (companyId: string, provider: WatchProvider, boardSlug: string) =>
-    call<{ watch: unknown }>("create_watch", { companyId, provider, boardSlug }),
+    call<{ watch: unknown }>("create_watch", {
+      input: { companyId, provider, boardSlug },
+    }),
 
   deleteWatch: (watchId: string) => call<{ ok: boolean }>("delete_watch", { watchId }),
 
@@ -128,6 +142,12 @@ export const api = {
 
   dismissReview: (reviewId: string) =>
     call<{ ok: boolean }>("dismiss_review", { reviewId }),
+
+  approveWatchJob: (jobId: string) =>
+    call<{ job: Job }>("approve_watch_job_cmd", { jobId }),
+
+  dismissWatchJob: (jobId: string) =>
+    call<{ job: Job }>("dismiss_watch_job_cmd", { jobId }),
 
   listDocuments: () => call<{ documents: DocumentListItem[] }>("list_documents"),
 

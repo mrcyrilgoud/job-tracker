@@ -33,6 +33,13 @@ export const watchProviders = ["greenhouse", "lever", "ashby"] as const;
 
 export type WatchProvider = (typeof watchProviders)[number];
 
+export type DetectedBoard = {
+  provider: WatchProvider;
+  boardSlug: string;
+  boardUrl: string;
+  postingId: string | null;
+};
+
 export type Company = {
   id: string;
   name: string;

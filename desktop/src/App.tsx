@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/Layout";
 import { isDesktopShell } from "@/lib/tauri";
 import { CompaniesPage } from "@/pages/CompaniesPage";
+import { CompanyDetailPage } from "@/pages/CompanyDetailPage";
 import { DocumentsPage } from "@/pages/DocumentsPage";
 import { GmailPage } from "@/pages/GmailPage";
 import { JobDetailPage } from "@/pages/JobDetailPage";
@@ -49,6 +50,7 @@ export function App() {
           <Route path="jobs/:id" element={<JobDetailPage />} />
           <Route path="documents" element={<DocumentsPage />} />
           <Route path="companies" element={<CompaniesPage />} />
+          <Route path="companies/:id" element={<CompanyDetailPage />} />
           <Route path="gmail" element={<GmailPage />} />
         </Route>
       </Routes>

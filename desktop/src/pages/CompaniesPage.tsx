@@ -31,8 +31,9 @@ export function CompaniesPage() {
       <div>
         <h1 className="font-display text-3xl font-semibold tracking-tight">Companies</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Follow a company&apos;s job board and we&apos;ll surface new roles automatically. Careers
-          pages only ping you when something actually changes.
+          Use <span className="font-medium text-[var(--foreground)]">Detect job board</span> below
+          (or open a company) to pick a tracked posting or paste a URL and start watching its ATS
+          board for new roles.
         </p>
       </div>
 

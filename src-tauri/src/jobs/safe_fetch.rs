@@ -164,7 +164,11 @@ pub async fn safe_fetch(
                 | StatusCode::TEMPORARY_REDIRECT
                 | StatusCode::PERMANENT_REDIRECT
         ) {
-            let location = match response.headers().get("location").and_then(|v| v.to_str().ok()) {
+            let location = match response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+            {
                 Some(l) => l.to_string(),
                 None => {
                     return SafeFetchResult {

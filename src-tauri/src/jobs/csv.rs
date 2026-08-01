@@ -236,7 +236,9 @@ fn read_sync_state(csv_path: &Path) -> SyncState {
         return empty_sync_state(csv_path);
     }
     match fs::read_to_string(&sync_path) {
-        Ok(text) => serde_json::from_str::<SyncState>(&text).unwrap_or_else(|_| empty_sync_state(csv_path)),
+        Ok(text) => {
+            serde_json::from_str::<SyncState>(&text).unwrap_or_else(|_| empty_sync_state(csv_path))
+        }
         Err(_) => empty_sync_state(csv_path),
     }
 }
@@ -255,9 +257,16 @@ fn write_sync_state(state: &SyncState) -> AppResult<()> {
 }
 
 fn load_job_rows(conn: &Connection) -> AppResult<Vec<(Job, String)>> {
+    // Pending watch discoveries and dismissed watch roles stay out of jobs.csv —
+    // only pipeline jobs the user is tracking are exported.
     let mut stmt = conn.prepare(
         "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
-         FROM jobs j INNER JOIN companies c ON j.company_id = c.id",
+         FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+         WHERE j.is_new_from_watch = 0
+           AND NOT EXISTS (
+             SELECT 1 FROM job_events e
+             WHERE e.job_id = j.id AND e.type = 'dismissed_from_watch'
+           )",
     )?;
     let rows = stmt
         .query_map([], |row| {
@@ -310,7 +319,10 @@ pub fn export_jobs_csv(
     let sync = read_sync_state(csv_path);
     let rows = load_job_rows(conn)?;
     let mut next_rows = HashMap::new();
-    let mut csv_rows = vec![CSV_HEADERS.iter().map(|s| (*s).to_string()).collect::<Vec<_>>()];
+    let mut csv_rows = vec![CSV_HEADERS
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect::<Vec<_>>()];
 
     for (job, company_name) in &rows {
         let previous = sync.rows.get(&job.id);
@@ -512,8 +524,10 @@ fn field_get<'a>(fields: &'a EditableFields, key: &str) -> Option<&'a str> {
 
 fn open_csv_conn(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(map_sqlite)?;
-    conn.pragma_update(None, "busy_timeout", 5000i32).map_err(map_sqlite)?;
-    conn.pragma_update(None, "foreign_keys", true).map_err(map_sqlite)?;
+    conn.pragma_update(None, "busy_timeout", 5000i32)
+        .map_err(map_sqlite)?;
+    conn.pragma_update(None, "foreign_keys", true)
+        .map_err(map_sqlite)?;
     Ok(conn)
 }
 
@@ -602,15 +616,13 @@ pub fn import_jobs_csv(
             latest_note: normalize_nullable(Some(&get("latest_note"))),
         };
         let id = normalize_nullable(Some(&get("id")));
-        let key = id
-            .clone()
-            .unwrap_or_else(|| {
-                if csv_fields.url.is_empty() {
-                    format!("row-{row_number}")
-                } else {
-                    csv_fields.url.clone()
-                }
-            });
+        let key = id.clone().unwrap_or_else(|| {
+            if csv_fields.url.is_empty() {
+                format!("row-{row_number}")
+            } else {
+                csv_fields.url.clone()
+            }
+        });
 
         match process_row(
             &conn,
@@ -782,20 +794,36 @@ fn process_row(
 
     let note_changed = match mode {
         ImportMode::OverwriteEditable => {
-            !values_equal(csv_fields.latest_note.as_deref(), db_fields.latest_note.as_deref())
-                && csv_fields.latest_note.is_some()
+            !values_equal(
+                csv_fields.latest_note.as_deref(),
+                db_fields.latest_note.as_deref(),
+            ) && csv_fields.latest_note.is_some()
         }
         ImportMode::Merge => {
-            !values_equal(csv_fields.latest_note.as_deref(), baseline.latest_note.as_deref())
-                && csv_fields.latest_note.is_some()
-                && values_equal(db_fields.latest_note.as_deref(), baseline.latest_note.as_deref())
+            !values_equal(
+                csv_fields.latest_note.as_deref(),
+                baseline.latest_note.as_deref(),
+            ) && csv_fields.latest_note.is_some()
+                && values_equal(
+                    db_fields.latest_note.as_deref(),
+                    baseline.latest_note.as_deref(),
+                )
         }
     };
 
     let note_conflict = matches!(mode, ImportMode::Merge)
-        && !values_equal(csv_fields.latest_note.as_deref(), baseline.latest_note.as_deref())
-        && !values_equal(db_fields.latest_note.as_deref(), baseline.latest_note.as_deref())
-        && !values_equal(csv_fields.latest_note.as_deref(), db_fields.latest_note.as_deref());
+        && !values_equal(
+            csv_fields.latest_note.as_deref(),
+            baseline.latest_note.as_deref(),
+        )
+        && !values_equal(
+            db_fields.latest_note.as_deref(),
+            baseline.latest_note.as_deref(),
+        )
+        && !values_equal(
+            csv_fields.latest_note.as_deref(),
+            db_fields.latest_note.as_deref(),
+        );
 
     if note_conflict {
         result.summary.conflicts += 1;

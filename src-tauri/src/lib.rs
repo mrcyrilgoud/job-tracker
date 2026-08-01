@@ -67,6 +67,8 @@ pub fn run() {
             commands::sync_watch,
             commands::check_careers,
             commands::dismiss_review,
+            commands::approve_watch_job_cmd,
+            commands::dismiss_watch_job_cmd,
             commands::list_documents,
             commands::import_document,
             commands::attach_document,

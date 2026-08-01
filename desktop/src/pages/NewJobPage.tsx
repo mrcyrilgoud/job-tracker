@@ -1,8 +1,15 @@
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { api } from "@/lib/api";
-import { applyJobUrlPreview } from "@/lib/job-url-preview";
+import { api, type ConfirmedJobDiscovery, type JobUrlPreview } from "@/lib/api";
+import {
+  applyJobUrlPreview,
+  confirmJobUrlPreview,
+  formatJobSaveError,
+  isConfirmedJobDiscovery,
+  resetJobUrlDiscovery,
+  serializeConfirmedJobDiscovery,
+} from "@/lib/job-url-preview";
 import { jobStatuses, type JobStatus } from "@/lib/schema";
 import { jobStatusPresentation } from "@/lib/ui";
 
@@ -28,6 +35,9 @@ export function NewJobPage() {
   const [autofillError, setAutofillError] = useState<string | null>(null);
   const [autofillStatus, setAutofillStatus] = useState<string | null>(null);
   const [isAutofilling, setIsAutofilling] = useState(false);
+  const [preview, setPreview] = useState<JobUrlPreview | null>(null);
+  const [confirmedDiscovery, setConfirmedDiscovery] =
+    useState<ConfirmedJobDiscovery | null>(null);
   const autofillInFlight = useRef(false);
 
   async function onAutofill() {
@@ -46,6 +56,8 @@ export function NewJobPage() {
     setIsAutofilling(true);
     try {
       const preview = await api.previewJobUrl(postingUrl);
+      setPreview(preview);
+      setConfirmedDiscovery(resetJobUrlDiscovery().confirmedDiscovery);
       setTitle((current) =>
         applyJobUrlPreview({ title: current, companyName }, preview).title,
       );
@@ -82,10 +94,11 @@ export function NewJobPage() {
         status,
         appliedAt: appliedAt ? new Date(appliedAt).toISOString() : null,
         notes: notes || null,
+        confirmedDiscovery: serializeConfirmedJobDiscovery(preview, confirmedDiscovery),
       });
       navigate(`/jobs/${result.job.id}`);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Could not create job");
+      setSubmitError(formatJobSaveError(err));
     } finally {
       setIsSaving(false);
     }
@@ -103,8 +116,8 @@ export function NewJobPage() {
       <div>
         <h1 className="font-display text-3xl font-semibold tracking-tight">Add a job</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Paste the posting link and we&apos;ll fill in what we can. You can fix the title and
-          company afterward.
+          Paste the posting link and hit Autofill — we&apos;ll fill title/company and detect the
+          job board when we can. To watch a company&apos;s board ongoing, use the Companies tab.
         </p>
       </div>
 
@@ -123,6 +136,8 @@ export function NewJobPage() {
                 setUrl(e.target.value);
                 setAutofillError(null);
                 setAutofillStatus(null);
+                setPreview(null);
+                setConfirmedDiscovery(null);
               }}
               placeholder="https://…"
               className="field"
@@ -133,7 +148,7 @@ export function NewJobPage() {
               onClick={() => void onAutofill()}
               className="btn btn-secondary shrink-0"
             >
-              {isAutofilling ? "Finding details…" : "Autofill"}
+              {isAutofilling ? "Finding details…" : "Autofill + detect board"}
             </button>
           </div>
           {autofillError ? (
@@ -147,6 +162,84 @@ export function NewJobPage() {
             </p>
           ) : null}
         </div>
+        {preview?.board ? (
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  {isConfirmedJobDiscovery(preview, confirmedDiscovery)
+                    ? "Watch confirmed"
+                    : "Detected job board"}
+                </p>
+                <p className="text-sm text-[var(--muted)]">
+                  {preview.board.provider} / {preview.board.boardSlug}
+                </p>
+                <a
+                  href={preview.board.boardUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-[var(--accent)] hover:underline"
+                >
+                  {preview.board.boardUrl}
+                </a>
+              </div>
+              {isConfirmedJobDiscovery(preview, confirmedDiscovery) ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmedDiscovery(null)}
+                >
+                  Clear
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmedDiscovery(confirmJobUrlPreview(preview))}
+                >
+                  Use/Watch this board
+                </button>
+              )}
+            </div>
+          </div>
+        ) : preview?.careersUrl ? (
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  {isConfirmedJobDiscovery(preview, confirmedDiscovery)
+                    ? "Careers page confirmed"
+                    : "Detected careers page"}
+                </p>
+                <a
+                  href={preview.careersUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm text-[var(--accent)] hover:underline"
+                >
+                  {preview.careersUrl}
+                </a>
+              </div>
+              {isConfirmedJobDiscovery(preview, confirmedDiscovery) ? (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmedDiscovery(null)}
+                >
+                  Clear
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmedDiscovery(confirmJobUrlPreview(preview))}
+                >
+                  Use this careers page
+                </button>
+              )}
+            </div>
+          </div>
+        ) : null}
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block space-y-1.5 text-sm">
             <span className="font-medium">

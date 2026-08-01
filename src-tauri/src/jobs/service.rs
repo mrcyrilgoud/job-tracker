@@ -72,6 +72,30 @@ pub fn create_job_from_url(
     notes: Option<&str>,
     location: Option<&str>,
 ) -> AppResult<(Job, Company)> {
+    create_job_from_url_with_careers(
+        conn,
+        url,
+        resolved_title,
+        company_name,
+        status,
+        applied_at,
+        notes,
+        location,
+        None,
+    )
+}
+
+pub fn create_job_from_url_with_careers(
+    conn: &Connection,
+    url: &str,
+    resolved_title: &str,
+    company_name: Option<&str>,
+    status: Option<&str>,
+    applied_at: Option<&str>,
+    notes: Option<&str>,
+    location: Option<&str>,
+    careers_url: Option<&str>,
+) -> AppResult<(Job, Company)> {
     let canonical_url = normalize_canonical_url(url).map_err(AppError::from)?;
     let existing: Option<String> = conn
         .query_row(
@@ -91,7 +115,7 @@ pub fn create_job_from_url(
         .unwrap_or("Unknown company");
     let timestamp = now_iso();
 
-    let company = find_or_create_company(conn, company_name, None)?;
+    let company = find_or_create_company(conn, company_name, careers_url)?;
     let status = status.unwrap_or("wishlist");
     let job_id = create_id();
     let applied = if let Some(a) = applied_at {
@@ -226,6 +250,9 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
     if filters.new_from_watch == Some(true) {
         sql.push_str(" AND j.is_new_from_watch = 1");
+    } else {
+        // Pending watch discoveries stay in the review inbox, not the pipeline.
+        sql.push_str(" AND j.is_new_from_watch = 0");
     }
     if let Some(search) = &filters.search {
         sql.push_str(" AND j.title LIKE ?");
@@ -355,9 +382,12 @@ pub struct UpdateJobInput {
 
 use serde::Deserialize;
 
-pub fn update_job(conn: &Connection, job_id: &str, updates: UpdateJobInput) -> AppResult<JobDetail> {
-    let existing = get_job_by_id(conn, job_id)?
-        .ok_or_else(|| AppError::from("Job not found"))?;
+pub fn update_job(
+    conn: &Connection,
+    job_id: &str,
+    updates: UpdateJobInput,
+) -> AppResult<JobDetail> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
     let timestamp = now_iso();
     let mut company_id = existing.company_id.clone();
     let mut next_url = existing.url.clone();
@@ -453,6 +483,38 @@ pub fn update_job(conn: &Connection, job_id: &str, updates: UpdateJobInput) -> A
     get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
 }
 
+/// Move a pending watch discovery onto the wishlist pipeline.
+pub fn approve_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    if !existing.is_new_from_watch {
+        return Ok(existing);
+    }
+    let timestamp = now_iso();
+    conn.execute(
+        "UPDATE jobs SET is_new_from_watch = 0, updated_at = ?1 WHERE id = ?2",
+        params![timestamp, job_id],
+    )
+    .map_err(map_sqlite)?;
+    add_job_event(conn, job_id, "approved_from_watch", None)?;
+    get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after approve"))
+}
+
+/// Dismiss a pending watch discovery so sync will not recreate it.
+pub fn dismiss_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    if !existing.is_new_from_watch {
+        return Ok(existing);
+    }
+    let timestamp = now_iso();
+    conn.execute(
+        "UPDATE jobs SET is_new_from_watch = 0, status = 'closed', updated_at = ?1 WHERE id = ?2",
+        params![timestamp, job_id],
+    )
+    .map_err(map_sqlite)?;
+    add_job_event(conn, job_id, "dismissed_from_watch", None)?;
+    get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after dismiss"))
+}
+
 pub fn add_job_event(
     conn: &Connection,
     job_id: &str,
@@ -499,10 +561,12 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
     .collect();
 
     let mut stmt = conn
-        .prepare("SELECT status, COUNT(*) FROM jobs GROUP BY status")
+        .prepare("SELECT status, COUNT(*) FROM jobs WHERE is_new_from_watch = 0 GROUP BY status")
         .map_err(map_sqlite)?;
     let rows = stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
         .map_err(map_sqlite)?;
 
     let mut total = 0i64;
@@ -577,7 +641,30 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::migrate::migrate;
     use crate::jobs::metadata::extract_job_metadata;
+
+    fn test_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate(&connection).unwrap();
+        connection
+    }
+
+    fn insert_watch_pending_job(conn: &Connection, company_id: &str, title: &str, url: &str) -> String {
+        let id = create_id();
+        let timestamp = now_iso();
+        let canonical = normalize_canonical_url(url).unwrap();
+        conn.execute(
+            r#"INSERT INTO jobs (
+                id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
+                posting_state, last_checked_at, last_check_result, source, notes, location,
+                is_new_from_watch, missing_from_sync_count, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'unknown',NULL,NULL,'ats',NULL,NULL,1,0,?7,?7)"#,
+            params![id, company_id, title, url, canonical, format!("ext-{id}"), timestamp],
+        )
+        .unwrap();
+        id
+    }
 
     #[test]
     fn title_fallback_consumes_shared_metadata() {
@@ -599,5 +686,146 @@ mod tests {
         .await;
 
         assert_eq!(title, "Manually Entered Title");
+    }
+
+    #[test]
+    fn list_jobs_excludes_pending_watch_discoveries_by_default() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+        let (tracked, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/tracked",
+            "Tracked Role",
+            Some("Acme"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let pending_id = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Pending Role",
+            "https://example.com/jobs/pending",
+        );
+
+        let pipeline = list_jobs(&conn, JobFilters::default()).unwrap();
+        let ids: Vec<_> = pipeline.iter().map(|item| item.job.id.as_str()).collect();
+        assert!(ids.contains(&tracked.id.as_str()));
+        assert!(!ids.contains(&pending_id.as_str()));
+
+        let inbox = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].job.id, pending_id);
+    }
+
+    #[test]
+    fn pipeline_counts_exclude_pending_watch_discoveries() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+        create_job_from_url(
+            &conn,
+            "https://example.com/jobs/tracked",
+            "Tracked Role",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Pending Role",
+            "https://example.com/jobs/pending",
+        );
+
+        let counts = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts.get("all"), Some(&1));
+        assert_eq!(counts.get("wishlist"), Some(&1));
+    }
+
+    #[test]
+    fn approve_watch_job_clears_flag_and_keeps_wishlist() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+        let job_id = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Pending Role",
+            "https://example.com/jobs/pending",
+        );
+
+        let approved = approve_watch_job(&conn, &job_id).unwrap();
+        assert!(!approved.is_new_from_watch);
+        assert_eq!(approved.status, "wishlist");
+
+        let events: Vec<String> = conn
+            .prepare("SELECT type FROM job_events WHERE job_id = ?1 ORDER BY occurred_at")
+            .unwrap()
+            .query_map(params![job_id], |row| row.get(0))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect();
+        assert!(events.iter().any(|t| t == "approved_from_watch"));
+
+        let counts = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts.get("wishlist"), Some(&1));
+        let inbox = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert!(inbox.is_empty());
+    }
+
+    #[test]
+    fn dismiss_watch_job_closes_and_clears_flag() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+        let job_id = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Pending Role",
+            "https://example.com/jobs/pending",
+        );
+
+        let dismissed = dismiss_watch_job(&conn, &job_id).unwrap();
+        assert!(!dismissed.is_new_from_watch);
+        assert_eq!(dismissed.status, "closed");
+
+        let events: Vec<String> = conn
+            .prepare("SELECT type FROM job_events WHERE job_id = ?1")
+            .unwrap()
+            .query_map(params![job_id], |row| row.get(0))
+            .unwrap()
+            .map(|row| row.unwrap())
+            .collect();
+        assert!(events.iter().any(|t| t == "dismissed_from_watch"));
+
+        let counts = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts.get("closed"), Some(&1));
+        assert_eq!(counts.get("wishlist"), Some(&0));
+        let inbox = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert!(inbox.is_empty());
     }
 }

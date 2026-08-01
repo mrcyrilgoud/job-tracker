@@ -2,7 +2,8 @@ use scraper::{Html, Selector};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
+use crate::jobs::board_discovery::{discover_from_url, UrlDiscovery};
 use crate::jobs::safe_fetch::safe_fetch;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -10,18 +11,28 @@ use crate::jobs::safe_fetch::safe_fetch;
 pub struct JobMetadata {
     pub title: Option<String>,
     pub company_name: Option<String>,
+    #[serde(flatten)]
+    pub url_discovery: UrlDiscovery,
 }
 
 pub async fn resolve_job_metadata(url: &str) -> AppResult<JobMetadata> {
+    let original_discovery = discover_from_url(url)?;
     let fetched = safe_fetch(url, Some("GET"), Some("text/html,application/xhtml+xml")).await;
     if !fetched.ok {
-        let message = fetched
-            .error
-            .unwrap_or_else(|| format!("Job posting returned HTTP {}", fetched.status));
-        return Err(AppError::from(message));
+        return Ok(JobMetadata {
+            url_discovery: original_discovery,
+            ..JobMetadata::default()
+        });
     }
 
-    Ok(extract_job_metadata(&fetched.body_text))
+    let final_discovery = discover_from_url(&fetched.final_url).unwrap_or_default();
+    let mut metadata = extract_job_metadata(&fetched.body_text);
+    metadata.url_discovery = if final_discovery != UrlDiscovery::default() {
+        final_discovery
+    } else {
+        original_discovery
+    };
+    Ok(metadata)
 }
 
 pub fn extract_job_metadata(html: &str) -> JobMetadata {
@@ -61,6 +72,7 @@ fn extract_json_ld(document: &Html) -> Option<JobMetadata> {
             return Some(JobMetadata {
                 title: string_field(posting, "title"),
                 company_name: company_name(posting),
+                url_discovery: UrlDiscovery::default(),
             });
         }
     }
@@ -163,6 +175,7 @@ fn is_ats_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jobs::board_discovery::DetectedBoard;
 
     #[test]
     fn extracts_job_posting_fields() {
@@ -177,6 +190,7 @@ mod tests {
             JobMetadata {
                 title: Some("Senior Engineer".into()),
                 company_name: Some("Acme & Co".into()),
+                ..JobMetadata::default()
             }
         );
     }
@@ -199,6 +213,7 @@ mod tests {
             JobMetadata {
                 title: Some("Array Role".into()),
                 company_name: Some("Array Co".into()),
+                ..JobMetadata::default()
             }
         );
         assert_eq!(
@@ -206,6 +221,7 @@ mod tests {
             JobMetadata {
                 title: Some("Graph Role".into()),
                 company_name: Some("Graph Co".into()),
+                ..JobMetadata::default()
             }
         );
     }
@@ -222,6 +238,7 @@ mod tests {
             JobMetadata {
                 title: Some("Right".into()),
                 company_name: Some("Employer".into()),
+                ..JobMetadata::default()
             }
         );
     }
@@ -263,6 +280,7 @@ mod tests {
             JobMetadata {
                 title: Some("Role".into()),
                 company_name: None,
+                ..JobMetadata::default()
             }
         );
         assert_eq!(
@@ -270,6 +288,7 @@ mod tests {
             JobMetadata {
                 title: None,
                 company_name: Some("Acme".into()),
+                ..JobMetadata::default()
             }
         );
         assert_eq!(
@@ -295,12 +314,69 @@ mod tests {
         let value = serde_json::to_value(JobMetadata {
             title: Some("Role".into()),
             company_name: None,
+            ..JobMetadata::default()
         })
         .unwrap();
 
         assert_eq!(
             value,
-            serde_json::json!({"title": "Role", "companyName": null})
+            serde_json::json!({
+                "title": "Role",
+                "companyName": null,
+                "board": null,
+                "careersUrl": null
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_detected_board_and_careers_fallback_at_preview_top_level() {
+        let board = serde_json::to_value(JobMetadata {
+            title: Some("Role".into()),
+            company_name: Some("Acme".into()),
+            url_discovery: UrlDiscovery {
+                board: Some(DetectedBoard {
+                    provider: "greenhouse".into(),
+                    board_slug: "acme".into(),
+                    board_url: "https://job-boards.greenhouse.io/acme".into(),
+                    posting_id: Some("123".into()),
+                }),
+                careers_url: None,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            board,
+            serde_json::json!({
+                "title": "Role",
+                "companyName": "Acme",
+                "board": {
+                    "provider": "greenhouse",
+                    "boardSlug": "acme",
+                    "boardUrl": "https://job-boards.greenhouse.io/acme",
+                    "postingId": "123"
+                },
+                "careersUrl": null
+            })
+        );
+
+        let careers = serde_json::to_value(JobMetadata {
+            title: None,
+            company_name: None,
+            url_discovery: UrlDiscovery {
+                board: None,
+                careers_url: Some("https://acme.example/careers".into()),
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            careers,
+            serde_json::json!({
+                "title": null,
+                "companyName": null,
+                "board": null,
+                "careersUrl": "https://acme.example/careers"
+            })
         );
     }
 }

@@ -1,8 +1,10 @@
 import { formatDistanceToNow } from "date-fns";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
+import { CompanyWatchAutomation } from "@/components/CompanyWatchAutomation";
 import { api } from "@/lib/api";
-import { watchProviders, type CompanyRow, type WatchProvider } from "@/lib/schema";
+import type { CompanyRow } from "@/lib/schema";
 import { formatLabel } from "@/lib/utils";
 
 export function CompaniesClient({
@@ -15,11 +17,15 @@ export function CompaniesClient({
   const [name, setName] = useState("");
   const [careersUrl, setCareersUrl] = useState("");
   const [companyId, setCompanyId] = useState(initial[0]?.company.id ?? "");
-  const [provider, setProvider] = useState<WatchProvider>("greenhouse");
-  const [boardSlug, setBoardSlug] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!initial.some((row) => row.company.id === companyId)) {
+      setCompanyId(initial[0]?.company.id ?? "");
+    }
+  }, [companyId, initial]);
 
   async function createCompany() {
     setBusy(true);
@@ -29,26 +35,11 @@ export function CompaniesClient({
       const result = await api.createCompany(name, careersUrl || null);
       setName("");
       setCareersUrl("");
+      setCompanyId(result.company.id);
       setMessage(`Added ${result.company.name}`);
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create company");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createWatch() {
-    setBusy(true);
-    setError(null);
-    setMessage(null);
-    try {
-      await api.createWatch(companyId, provider, boardSlug);
-      setBoardSlug("");
-      setMessage("Board verified and now being watched");
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create watch");
     } finally {
       setBusy(false);
     }
@@ -120,6 +111,8 @@ export function CompaniesClient({
     }
   }
 
+  const selectedRow = initial.find((row) => row.company.id === companyId) ?? null;
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -148,48 +141,37 @@ export function CompaniesClient({
         </div>
 
         <div className="card space-y-3 p-6">
-          <h3 className="font-display text-lg font-medium">Watch a job board</h3>
+          <h3 className="font-display text-lg font-medium">Detect job board</h3>
           <p className="text-sm text-[var(--muted)]">
-            We&apos;ll check the board and pull in new roles for you.
+            Choose a company. We&apos;ll offer tracked posting links when available, or paste any
+            posting URL to detect the ATS board to watch.
           </p>
-          <select
-            value={companyId}
-            onChange={(e) => setCompanyId(e.target.value)}
-            className="field"
-          >
-            {initial.map((row) => (
-              <option key={row.company.id} value={row.company.id}>
-                {row.company.name}
-              </option>
-            ))}
-          </select>
-          <div className="grid grid-cols-2 gap-2">
+          <label className="block space-y-1.5 text-sm">
+            <span className="font-medium">Company</span>
             <select
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as WatchProvider)}
+              value={companyId}
+              onChange={(e) => setCompanyId(e.target.value)}
               className="field"
+              disabled={initial.length === 0}
             >
-              {watchProviders.map((value) => (
-                <option key={value} value={value}>
-                  {formatLabel(value)}
-                </option>
-              ))}
+              {initial.length === 0 ? (
+                <option value="">Add a company first</option>
+              ) : (
+                initial.map((row) => (
+                  <option key={row.company.id} value={row.company.id}>
+                    {row.company.name}
+                  </option>
+                ))
+              )}
             </select>
-            <input
-              value={boardSlug}
-              onChange={(e) => setBoardSlug(e.target.value)}
-              placeholder="Board name"
-              className="field"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => void createWatch()}
-            disabled={busy || !companyId || !boardSlug.trim()}
-            className="btn btn-secondary"
-          >
-            Start watching
-          </button>
+          </label>
+          {selectedRow ? (
+            <CompanyWatchAutomation row={selectedRow} onChanged={onChanged} />
+          ) : (
+            <p className="rounded-xl bg-[var(--surface-muted)] px-3.5 py-3 text-sm text-[var(--muted)]">
+              Add a company on the left, then paste a job posting URL here to detect its board.
+            </p>
+          )}
         </div>
       </div>
 
@@ -205,15 +187,35 @@ export function CompaniesClient({
       ) : null}
 
       <div className="space-y-4">
+        {initial.length === 0 ? (
+          <p className="text-sm text-[var(--muted)]">
+            No companies yet. Add one above to start detecting job boards.
+          </p>
+        ) : null}
         {initial.map((row) => (
-          <section key={row.company.id} className="card p-6">
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <section key={row.company.id} className="card space-y-4 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="font-display text-xl font-medium">{row.company.name}</h3>
-                <p className="text-sm text-[var(--faint)]">
-                  {row.company.careersUrl
-                    ? "Careers page connected"
-                    : "No careers page set"}
+                <Link
+                  to={`/companies/${row.company.id}`}
+                  className="font-display text-xl font-medium text-[var(--accent)] underline-offset-4 hover:underline"
+                >
+                  {row.company.name}
+                </Link>
+                <p className="mt-0.5 text-sm text-[var(--muted)]">
+                  <Link
+                    to={`/companies/${row.company.id}`}
+                    className="text-[var(--accent)] hover:underline"
+                  >
+                    Open company · manage job board →
+                  </Link>
+                  <span className="text-[var(--faint)]">
+                    {" "}
+                    ·{" "}
+                    {row.company.careersUrl
+                      ? "Careers page connected"
+                      : "No careers page set"}
+                  </span>
                 </p>
               </div>
               {row.company.careersUrl ? (
@@ -229,7 +231,7 @@ export function CompaniesClient({
             </div>
 
             {row.reviews.length > 0 ? (
-              <div className="mb-4 space-y-2 rounded-xl bg-[var(--amber-soft)] p-4">
+              <div className="space-y-2 rounded-xl bg-[var(--amber-soft)] p-4">
                 <p className="text-sm font-medium text-[var(--amber-ink)]">
                   This careers page changed
                 </p>
@@ -252,7 +254,7 @@ export function CompaniesClient({
             ) : null}
 
             {row.watches.length === 0 ? (
-              <p className="text-sm text-[var(--muted)]">Not watching any boards yet.</p>
+              <CompanyWatchAutomation row={row} onChanged={onChanged} compact />
             ) : (
               <div className="space-y-3">
                 {row.watches.map((watch) => {
@@ -318,6 +320,14 @@ export function CompaniesClient({
                     </div>
                   );
                 })}
+                <details className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">
+                    Detect another job board
+                  </summary>
+                  <div className="mt-3">
+                    <CompanyWatchAutomation row={row} onChanged={onChanged} compact />
+                  </div>
+                </details>
               </div>
             )}
           </section>

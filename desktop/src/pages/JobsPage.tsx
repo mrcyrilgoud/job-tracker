@@ -38,6 +38,8 @@ export function JobsPage() {
   const [checkingPostings, setCheckingPostings] = useState(false);
   const [checkProgress, setCheckProgress] = useState<JobsRunnerProgress | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
+  const [triagingId, setTriagingId] = useState<string | null>(null);
+  const [triageError, setTriageError] = useState<string | null>(null);
   const checkingPostingsRef = useRef(false);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
@@ -112,6 +114,23 @@ export function JobsPage() {
     } finally {
       checkingPostingsRef.current = false;
       setCheckingPostings(false);
+    }
+  }
+
+  async function triageWatchJob(jobId: string, action: "approve" | "dismiss") {
+    setTriagingId(jobId);
+    setTriageError(null);
+    try {
+      if (action === "approve") {
+        await api.approveWatchJob(jobId);
+      } else {
+        await api.dismissWatchJob(jobId);
+      }
+      await load({ quiet: true });
+    } catch (err) {
+      setTriageError(err instanceof Error ? err.message : `Failed to ${action} watch job`);
+    } finally {
+      setTriagingId(null);
     }
   }
 
@@ -288,9 +307,20 @@ export function JobsPage() {
 
         {newFromWatch.length > 0 ? (
           <div className="rounded-2xl bg-[var(--accent-soft)] p-5">
-            <h3 className="mb-3 font-display text-lg font-medium text-[var(--accent-ink)]">
+            <h3 className="mb-1 font-display text-lg font-medium text-[var(--accent-ink)]">
               New from your watches
             </h3>
+            <p className="mb-3 text-xs text-[var(--muted)]">
+              Not on your wishlist yet — approve to track, or dismiss to skip.
+            </p>
+            {triageError ? (
+              <p
+                role="alert"
+                className="mb-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-xs text-[var(--danger)]"
+              >
+                {triageError}
+              </p>
+            ) : null}
             <div className="space-y-2.5">
               {newFromWatch.slice(0, 5).map(({ job, companyName }) => (
                 <div
@@ -304,12 +334,30 @@ export function JobsPage() {
                       <span className="text-[var(--muted)]"> · {job.location}</span>
                     ) : null}
                   </div>
-                  <Link
-                    to={`/jobs/${job.id}`}
-                    className="font-medium text-[var(--accent-ink)] hover:underline"
-                  >
-                    Take a look →
-                  </Link>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      className="btn btn-primary px-2.5 py-1 text-xs"
+                      disabled={triagingId === job.id}
+                      onClick={() => void triageWatchJob(job.id, "approve")}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary px-2.5 py-1 text-xs"
+                      disabled={triagingId === job.id}
+                      onClick={() => void triageWatchJob(job.id, "dismiss")}
+                    >
+                      Dismiss
+                    </button>
+                    <Link
+                      to={`/jobs/${job.id}`}
+                      className="text-xs font-medium text-[var(--accent-ink)] hover:underline"
+                    >
+                      Open
+                    </Link>
+                  </div>
                 </div>
               ))}
             </div>

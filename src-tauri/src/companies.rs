@@ -5,6 +5,20 @@ use crate::jobs::service::find_or_create_company;
 use crate::models::{CareersPageReview, Company, CompanyWatch};
 use crate::util::{create_id, now_iso};
 
+fn map_watch(row: &rusqlite::Row<'_>) -> rusqlite::Result<CompanyWatch> {
+    Ok(CompanyWatch {
+        id: row.get(0)?,
+        company_id: row.get(1)?,
+        provider: row.get(2)?,
+        board_slug: row.get(3)?,
+        last_synced_at: row.get(4)?,
+        consecutive_sync_failures: row.get(5)?,
+        last_sync_error: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
 pub fn list_companies(conn: &Connection) -> AppResult<Vec<Company>> {
     let mut stmt = conn
         .prepare(
@@ -52,12 +66,27 @@ pub fn insert_watch(
     if company_exists.is_none() {
         return Err(AppError::from("Company not found"));
     }
+    let provider = provider.trim().to_ascii_lowercase();
+    let board_slug = board_slug.trim().to_ascii_lowercase();
+    if let Some(existing) = conn
+        .query_row(
+            "SELECT id, company_id, provider, board_slug, last_synced_at, consecutive_sync_failures, last_sync_error, created_at, updated_at
+             FROM company_watches WHERE company_id = ?1 AND provider = ?2 AND board_slug = ?3",
+            params![company_id, provider, board_slug],
+            map_watch,
+        )
+        .optional()
+        .map_err(map_sqlite)?
+    {
+        return Ok(existing);
+    }
+
     let timestamp = now_iso();
     let watch = CompanyWatch {
         id: create_id(),
         company_id: company_id.to_string(),
-        provider: provider.to_string(),
-        board_slug: board_slug.trim().to_string(),
+        provider,
+        board_slug,
         last_synced_at: None,
         consecutive_sync_failures: 0,
         last_sync_error: None,
@@ -86,19 +115,7 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
         )
         .map_err(map_sqlite)?;
     let watches = watches_stmt
-        .query_map([], |row| {
-            Ok(CompanyWatch {
-                id: row.get(0)?,
-                company_id: row.get(1)?,
-                provider: row.get(2)?,
-                board_slug: row.get(3)?,
-                last_synced_at: row.get(4)?,
-                consecutive_sync_failures: row.get(5)?,
-                last_sync_error: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
-            })
-        })
+        .query_map([], map_watch)
         .map_err(map_sqlite)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(map_sqlite)?;
@@ -184,4 +201,63 @@ pub fn get_watch(conn: &Connection, watch_id: &str) -> AppResult<Option<CompanyW
     )
     .optional()
     .map_err(map_sqlite)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrate::migrate;
+
+    fn test_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate(&connection).unwrap();
+        connection
+    }
+
+    #[test]
+    fn insert_watch_is_idempotent_for_company_provider_and_slug() {
+        let connection = test_connection();
+        let company = create_company(&connection, "Acme", None).unwrap();
+
+        let first = insert_watch(&connection, &company.id, " Greenhouse ", " Acme ").unwrap();
+        let second = insert_watch(&connection, &company.id, "greenhouse", "acme").unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(first.provider, "greenhouse");
+        assert_eq!(first.board_slug, "acme");
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM company_watches", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn insert_watch_rejects_unknown_company_without_writing() {
+        let connection = test_connection();
+        let error = insert_watch(&connection, "missing", "ashby", "acme").unwrap_err();
+
+        assert_eq!(error.to_string(), "Company not found");
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM company_watches", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn create_company_reuses_selected_company_when_confirming_careers_page() {
+        let connection = test_connection();
+        let first = create_company(&connection, "Acme", None).unwrap();
+        let second = create_company(&connection, " Acme ", Some("https://acme.example/careers"))
+            .unwrap();
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(
+            second.careers_url.as_deref(),
+            Some("https://acme.example/careers")
+        );
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM companies", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
 }
