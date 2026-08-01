@@ -37,7 +37,7 @@ Refresh the packaged app **and** retarget the jobs LaunchAgent:
 npm run app:rebuild
 ```
 
-Optional one-time setup so a successful `git push` of app code starts a background rebuild:
+Optional one-time setup so a `git commit` that touches app code starts a background rebuild:
 
 ```bash
 npm run hooks:install
@@ -143,13 +143,13 @@ npm run desktop:build    # Vite UI typecheck + build
 | `npm run tauri:dev` | Run the Mac app (Vite + Rust) |
 | `npm run tauri:build` | Produce `Job Tracker.app` |
 | `npm run app:rebuild` | Build packaged app, retarget LaunchAgent, notify; quit/relaunch if running |
-| `npm run hooks:install` | Install local post-push hook (background rebuild on app-code pushes) |
+| `npm run hooks:install` | Install local post-commit hook (background rebuild on app-code commits) |
 | `npm run jobs` | One-shot posting / ATS / careers / Gmail / CSV cycle |
 | `npm run jobs:install` | Write/retarget the LaunchAgent plist |
 | `npm test` | Rust unit tests |
 | `npm run test:desktop` | Desktop UI unit tests |
 
-`app:rebuild` flags: `--skip-jobs` (build only), `--background` (used by the post-push hook). Concurrent rebuilds use `data/rebuild.lock` and fail clearly if one is already running. Log: `data/rebuild.log`.
+`app:rebuild` flags: `--skip-jobs` (build only), `--background` (used by the post-commit hook). Concurrent rebuilds use `data/rebuild.lock` and fail clearly if one is already running. Log: `data/rebuild.log`.
 
 ## Repo layout
 

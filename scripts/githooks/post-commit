@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# post-commit: background-rebuild Job Tracker when the commit touched app paths.
+# Installed via: npm run hooks:install  (copies into .git/hooks/post-commit)
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+changed="$(
+  git diff-tree --no-commit-id --name-only -r HEAD -- \
+    desktop/ \
+    src-tauri/ \
+    package.json \
+    package-lock.json \
+    2>/dev/null || true
+)"
+
+if [[ -z "${changed//[[:space:]]/}" ]]; then
+  exit 0
+fi
+
+mkdir -p data
+echo "Job Tracker rebuild started in background (data/rebuild.log)"
+nohup npm run app:rebuild -- --background >> data/rebuild.log 2>&1 &

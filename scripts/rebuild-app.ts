@@ -21,7 +21,7 @@ const background = flags.has("--background");
 function appendLog(message: string): void {
   const line = `[${new Date().toISOString()}] ${message}\n`;
   fs.appendFileSync(logPath, line);
-  // When --background (post-push nohup already redirects stdout into the log),
+  // When --background (post-commit nohup already redirects stdout into the log),
   // skip mirroring to stdout to avoid duplicate lines.
   if (!background) {
     process.stdout.write(line);
