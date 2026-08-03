@@ -36,7 +36,10 @@ export function CompaniesPage() {
   return (
     <div className="mx-auto max-w-4xl">
       {error ? (
-        <p className="mb-6 rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+        <p
+          role="alert"
+          className="mb-6 rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]"
+        >
           {error}
         </p>
       ) : null}
