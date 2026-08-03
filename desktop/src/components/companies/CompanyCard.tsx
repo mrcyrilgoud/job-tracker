@@ -90,7 +90,7 @@ export function CompanyCard({
             type="button"
             onClick={onToggleRoles}
             aria-expanded={rolesOpen}
-            className="pill bg-[var(--accent-soft)] text-[var(--accent-ink)] transition-colors hover:bg-[var(--accent)] hover:text-white"
+            className="pill px-3 py-1.5 bg-[var(--accent-soft)] text-[var(--accent-ink)] transition-colors hover:bg-[var(--accent)] hover:text-white"
           >
             {roleCountLabel(roles.length)}
             <span aria-hidden>{rolesOpen ? "▴" : "▾"}</span>
@@ -171,12 +171,16 @@ export function CompanyCard({
             <p className="text-sm font-medium">
               {roleCountLabel(roles.length)} we found that you aren&apos;t tracking
             </p>
-            <Link
-              to={`/?companyId=${company.id}`}
-              className="text-xs text-[var(--accent)] hover:underline"
-            >
-              See what you already track →
-            </Link>
+            {/* The solo route already carries this link at page level; showing
+                both would put two links to one destination on screen. */}
+            {!solo ? (
+              <Link
+                to={`/?companyId=${company.id}`}
+                className="text-xs text-[var(--accent)] hover:underline"
+              >
+                See what you already track →
+              </Link>
+            ) : null}
           </div>
           {roles.length >= SEARCHABLE_FROM ? (
             <input
