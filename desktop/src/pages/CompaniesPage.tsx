@@ -2,23 +2,30 @@ import { useCallback, useEffect, useState } from "react";
 
 import { CompaniesClient } from "@/components/CompaniesClient";
 import { api } from "@/lib/api";
-import type { CompanyRow } from "@/lib/schema";
+import type { CompanyRow, JobListItem } from "@/lib/schema";
 
 export function CompaniesPage() {
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [newRoles, setNewRoles] = useState<JobListItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
-      const result = await api.listCompanies();
-      setCompanies(result.companies);
+      // Roles a watch found but the user hasn't triaged live in `jobs` behind
+      // the is_new_from_watch flag, so they need a second read alongside the
+      // company rows.
+      const [companyResult, roleResult] = await Promise.all([
+        api.listCompanies(),
+        api.listJobs({ newFromWatch: true }),
+      ]);
+      setCompanies(companyResult.companies);
+      setNewRoles(roleResult.jobs);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load companies");
     } finally {
-      setLoading(false);
+      setLoaded(true);
     }
   }, []);
 
@@ -27,24 +34,23 @@ export function CompaniesPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Companies</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Use <span className="font-medium text-[var(--foreground)]">Detect job board</span> below
-          (or open a company) to pick a tracked posting or paste a URL and start watching its ATS
-          board for new roles.
-        </p>
-      </div>
-
-      {loading ? <p className="text-sm text-[var(--muted)]">Loading companies…</p> : null}
+    <div className="mx-auto max-w-4xl">
       {error ? (
-        <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+        <p className="mb-6 rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
 
-      {!loading ? <CompaniesClient initial={companies} onChanged={() => void load()} /> : null}
+      {/* Reloads after an action keep the current view rather than blanking it. */}
+      {loaded ? (
+        <CompaniesClient
+          companies={companies}
+          newRoles={newRoles}
+          onChanged={() => void load()}
+        />
+      ) : (
+        <p className="text-sm text-[var(--muted)]">Loading companies…</p>
+      )}
     </div>
   );
 }
