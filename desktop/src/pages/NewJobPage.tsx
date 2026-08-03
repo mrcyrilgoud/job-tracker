@@ -118,7 +118,7 @@ export function NewJobPage() {
           ) : null}
         </div>
         {preview?.board ? (
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <p className="text-sm font-medium">
@@ -159,7 +159,7 @@ export function NewJobPage() {
           </div>
         ) : null}
         {preview?.careersUrl && !preview.board ? (
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4">
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
                 <p className="text-sm font-medium">

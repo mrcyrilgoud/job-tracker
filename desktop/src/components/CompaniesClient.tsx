@@ -320,7 +320,7 @@ export function CompaniesClient({
                     </div>
                   );
                 })}
-                <details className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+                <details className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
                   <summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">
                     Detect another job board
                   </summary>

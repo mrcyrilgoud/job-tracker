@@ -166,7 +166,7 @@ export function CompanyWatchAutomation({
         : "Paste a job posting URL to detect the ATS board (Greenhouse, Lever, Ashby, etc.), then start watching for new roles.";
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4">
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
       <p className="font-medium">
         {compact ? "Detect job board" : "Job board automation"}
       </p>
@@ -234,7 +234,7 @@ export function CompanyWatchAutomation({
       </div>
 
       {preview?.board ? (
-        <div className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+        <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
           <p className="text-sm font-medium">{isConfirmed ? "Board confirmed" : "Detected job board"}</p>
           <p className="text-sm text-[var(--muted)]">
             {preview.board.provider} / {preview.board.boardSlug}
@@ -255,7 +255,7 @@ export function CompanyWatchAutomation({
           )}
         </div>
       ) : preview?.careersUrl ? (
-        <div className="mt-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3">
+        <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
           <p className="text-sm font-medium">{isConfirmed ? "Careers page confirmed" : "Detected careers page"}</p>
           <a href={preview.careersUrl} target="_blank" rel="noreferrer" className="text-sm text-[var(--accent)] hover:underline">
             {preview.careersUrl}
