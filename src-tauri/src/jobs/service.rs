@@ -251,8 +251,14 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     if filters.new_from_watch == Some(true) {
         sql.push_str(" AND j.is_new_from_watch = 1");
     } else {
-        // Pending watch discoveries stay in the review inbox, not the pipeline.
-        sql.push_str(" AND j.is_new_from_watch = 0");
+        // Pending and dismissed watch discoveries stay out of the pipeline.
+        sql.push_str(
+            " AND j.is_new_from_watch = 0 \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM job_events e \
+               WHERE e.job_id = j.id AND e.type = 'dismissed_from_watch' \
+             )",
+        );
     }
     if let Some(search) = &filters.search {
         sql.push_str(" AND j.title LIKE ?");
@@ -561,7 +567,15 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
     .collect();
 
     let mut stmt = conn
-        .prepare("SELECT status, COUNT(*) FROM jobs WHERE is_new_from_watch = 0 GROUP BY status")
+        .prepare(
+            "SELECT status, COUNT(*) FROM jobs j \
+             WHERE j.is_new_from_watch = 0 \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM job_events e \
+                 WHERE e.job_id = j.id AND e.type = 'dismissed_from_watch' \
+               ) \
+             GROUP BY status",
+        )
         .map_err(map_sqlite)?;
     let rows = stmt
         .query_map([], |row| {
@@ -607,7 +621,11 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
 
     let start_iso = start.with_timezone(&chrono::Utc).to_rfc3339();
     let mut stmt = conn
-        .prepare("SELECT occurred_at FROM job_events WHERE occurred_at >= ?1")
+        .prepare(
+            "SELECT occurred_at FROM job_events \
+             WHERE occurred_at >= ?1 \
+               AND type NOT IN ('discovered_from_watch', 'dismissed_from_watch', 'approved_from_watch')",
+        )
         .map_err(map_sqlite)?;
     let events = stmt
         .query_map(params![start_iso], |row| row.get::<_, String>(0))
@@ -816,8 +834,11 @@ mod tests {
         assert!(events.iter().any(|t| t == "dismissed_from_watch"));
 
         let counts = get_pipeline_counts(&conn).unwrap();
-        assert_eq!(counts.get("closed"), Some(&1));
+        assert_eq!(counts.get("all"), Some(&0));
+        assert_eq!(counts.get("closed"), Some(&0));
         assert_eq!(counts.get("wishlist"), Some(&0));
+        let pipeline = list_jobs(&conn, JobFilters::default()).unwrap();
+        assert!(pipeline.is_empty());
         let inbox = list_jobs(
             &conn,
             JobFilters {
