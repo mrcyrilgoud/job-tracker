@@ -41,3 +41,4 @@ yarn-error.log*
 /src-tauri/target/
 /desktop/dist/
 /desktop/node_modules/
+.gstack/

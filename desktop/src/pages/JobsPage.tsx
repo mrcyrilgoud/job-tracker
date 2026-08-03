@@ -10,7 +10,9 @@ import {
   statusIcons,
   TrophyIcon,
 } from "@/components/icons";
+import { NewRolesList } from "@/components/companies/NewRolesList";
 import { api, type JobsRunnerProgress } from "@/lib/api";
+import { roleCountLabel } from "@/lib/companies-ui";
 import { jobStatuses, type JobListItem, type WeeklyActivity } from "@/lib/schema";
 import { isDesktopShell } from "@/lib/tauri";
 import {
@@ -20,6 +22,9 @@ import {
   postingStatePresentation,
   toneClasses,
 } from "@/lib/ui";
+
+/** How many watch discoveries the Jobs page previews before deferring to Companies. */
+const WATCH_PREVIEW_COUNT = 5;
 
 export function JobsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -316,62 +321,43 @@ export function JobsPage() {
         </form>
 
         {newFromWatch.length > 0 ? (
-          <div className="rounded-2xl bg-[var(--accent-soft)] p-5">
-            <h3 className="mb-1 font-display text-lg font-medium text-[var(--accent-ink)]">
-              New from your watches
-            </h3>
-            <p className="mb-3 text-xs text-[var(--muted)]">
-              Not on your wishlist yet — approve to track, or dismiss to skip.
-            </p>
+          <section className="card p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-lg font-medium">
+                  {roleCountLabel(newFromWatch.length)} from your watches
+                </h3>
+                <p className="mt-0.5 text-sm text-[var(--muted)]">
+                  Not on your list yet. Save the ones worth tracking.
+                </p>
+              </div>
+              {/* This is a preview; Companies is where the full set lives. Saying
+                  so beats silently hiding everything past the fifth role. */}
+              {newFromWatch.length > WATCH_PREVIEW_COUNT ? (
+                <Link to="/companies" className="btn btn-secondary btn-sm">
+                  Browse all {newFromWatch.length}
+                </Link>
+              ) : null}
+            </div>
             {triageError ? (
               <p
                 role="alert"
-                className="mb-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-xs text-[var(--danger)]"
+                className="mt-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-sm text-[var(--danger)]"
               >
                 {triageError}
               </p>
             ) : null}
-            <div className="space-y-2.5">
-              {newFromWatch.slice(0, 5).map(({ job, companyName }) => (
-                <div
-                  key={job.id}
-                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
-                >
-                  <div>
-                    <span className="font-medium">{job.title}</span>
-                    <span className="text-[var(--muted)]"> · {companyName}</span>
-                    {job.location ? (
-                      <span className="text-[var(--muted)]"> · {job.location}</span>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-primary px-2.5 py-1 text-xs"
-                      disabled={triagingId === job.id}
-                      onClick={() => void triageWatchJob(job.id, "approve")}
-                    >
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary px-2.5 py-1 text-xs"
-                      disabled={triagingId === job.id}
-                      onClick={() => void triageWatchJob(job.id, "dismiss")}
-                    >
-                      Dismiss
-                    </button>
-                    <Link
-                      to={`/jobs/${job.id}`}
-                      className="text-xs font-medium text-[var(--accent-ink)] hover:underline"
-                    >
-                      Open
-                    </Link>
-                  </div>
-                </div>
-              ))}
+            <div className="mt-3">
+              <NewRolesList
+                roles={newFromWatch.slice(0, WATCH_PREVIEW_COUNT)}
+                showCompany
+                onTriage={(jobId, action) =>
+                  void triageWatchJob(jobId, action === "save" ? "approve" : "dismiss")
+                }
+                isPending={(jobId) => triagingId === jobId}
+              />
             </div>
-          </div>
+          </section>
         ) : null}
 
         {jobs.length === 0 ? (
