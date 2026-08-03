@@ -1,6 +1,6 @@
 import type { JobSource, JobStatus, PostingState } from "@/lib/schema";
 
-export type Tone = "violet" | "blue" | "amber" | "green" | "stone";
+export type Tone = "violet" | "blue" | "amber" | "green" | "stone" | "danger";
 
 export const toneClasses: Record<Tone, string> = {
   violet: "bg-[var(--violet-soft)] text-[var(--violet-ink)]",
@@ -8,6 +8,7 @@ export const toneClasses: Record<Tone, string> = {
   amber: "bg-[var(--amber-soft)] text-[var(--amber-ink)]",
   green: "bg-[var(--green-soft)] text-[var(--green-ink)]",
   stone: "bg-[var(--stone-soft)] text-[var(--stone-ink)]",
+  danger: "bg-[var(--danger-soft)] text-[var(--danger)]",
 };
 
 export type Presentation = {
