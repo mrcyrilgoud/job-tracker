@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -126,8 +125,6 @@ pub struct CsvStatus {
     pub row_count_csv: Option<usize>,
     pub drift: bool,
 }
-
-static EXPORT_TIMER: Mutex<Option<()>> = Mutex::new(None);
 
 fn normalize_nullable(value: Option<&str>) -> Option<String> {
     value
@@ -390,14 +387,6 @@ pub fn export_jobs_csv(
         exported_at,
         row_count: rows.len(),
     })
-}
-
-pub fn schedule_export_jobs_csv(conn: &Connection, csv_path: &Path) {
-    // Minimal Phase-1 export-on-write: run immediately (debounce not needed across processes).
-    drop(EXPORT_TIMER.lock());
-    if let Err(e) = export_jobs_csv(conn, csv_path, None) {
-        log::error!("[csv-sync] export failed: {e}");
-    }
 }
 
 pub fn get_jobs_csv_status(conn: &Connection, csv_path: &Path) -> AppResult<CsvStatus> {

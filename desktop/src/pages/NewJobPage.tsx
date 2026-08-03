@@ -1,26 +1,16 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { api, type ConfirmedJobDiscovery, type JobUrlPreview } from "@/lib/api";
+import { api } from "@/lib/api";
 import {
-  applyJobUrlPreview,
   confirmJobUrlPreview,
   formatJobSaveError,
   isConfirmedJobDiscovery,
-  resetJobUrlDiscovery,
   serializeConfirmedJobDiscovery,
 } from "@/lib/job-url-preview";
 import { jobStatuses, type JobStatus } from "@/lib/schema";
 import { jobStatusPresentation } from "@/lib/ui";
-
-function isValidPostingUrl(value: string) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
+import { useJobUrlPreview } from "@/lib/use-job-url-preview";
 
 export function NewJobPage() {
   const navigate = useNavigate();
@@ -32,55 +22,23 @@ export function NewJobPage() {
   const [notes, setNotes] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [autofillError, setAutofillError] = useState<string | null>(null);
-  const [autofillStatus, setAutofillStatus] = useState<string | null>(null);
-  const [isAutofilling, setIsAutofilling] = useState(false);
-  const [preview, setPreview] = useState<JobUrlPreview | null>(null);
-  const [confirmedDiscovery, setConfirmedDiscovery] =
-    useState<ConfirmedJobDiscovery | null>(null);
-  const autofillInFlight = useRef(false);
 
-  async function onAutofill() {
-    if (autofillInFlight.current) return;
-
-    const postingUrl = url.trim();
-    setAutofillError(null);
-    setAutofillStatus(null);
-
-    if (!isValidPostingUrl(postingUrl)) {
-      setAutofillError("Enter a valid http or https posting link.");
-      return;
-    }
-
-    autofillInFlight.current = true;
-    setIsAutofilling(true);
-    try {
-      const preview = await api.previewJobUrl(postingUrl);
-      setPreview(preview);
-      setConfirmedDiscovery(resetJobUrlDiscovery().confirmedDiscovery);
-      setTitle((current) =>
-        applyJobUrlPreview({ title: current, companyName }, preview).title,
-      );
-      setCompanyName((current) =>
-        applyJobUrlPreview({ title, companyName: current }, preview).companyName,
-      );
-
-      if (preview.title && preview.companyName) {
-        setAutofillStatus("Found the role title and company.");
-      } else if (preview.title) {
-        setAutofillStatus("Found the role title. Company could not be found.");
-      } else if (preview.companyName) {
-        setAutofillStatus("Found the company. Role title could not be found.");
-      } else {
-        setAutofillStatus("No title or company was found. Enter the details manually.");
-      }
-    } catch {
-      setAutofillError("Could not autofill details. Check the link and try again.");
-    } finally {
-      autofillInFlight.current = false;
-      setIsAutofilling(false);
-    }
-  }
+  const {
+    preview,
+    confirmedDiscovery,
+    setConfirmedDiscovery,
+    autofillError,
+    autofillStatus,
+    isAutofilling,
+    onAutofill,
+    clearDiscoveryForUrlChange,
+  } = useJobUrlPreview({
+    url,
+    title,
+    companyName,
+    setTitle,
+    setCompanyName,
+  });
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -134,10 +92,7 @@ export function NewJobPage() {
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);
-                setAutofillError(null);
-                setAutofillStatus(null);
-                setPreview(null);
-                setConfirmedDiscovery(null);
+                clearDiscoveryForUrlChange();
               }}
               placeholder="https://…"
               className="field"
@@ -197,12 +152,13 @@ export function NewJobPage() {
                   className="btn btn-secondary"
                   onClick={() => setConfirmedDiscovery(confirmJobUrlPreview(preview))}
                 >
-                  Use/Watch this board
+                  Confirm watch
                 </button>
               )}
             </div>
           </div>
-        ) : preview?.careersUrl ? (
+        ) : null}
+        {preview?.careersUrl && !preview.board ? (
           <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="space-y-1">
@@ -234,34 +190,45 @@ export function NewJobPage() {
                   className="btn btn-secondary"
                   onClick={() => setConfirmedDiscovery(confirmJobUrlPreview(preview))}
                 >
-                  Use this careers page
+                  Confirm
                 </button>
               )}
             </div>
           </div>
         ) : null}
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block space-y-1.5 text-sm">
-            <span className="font-medium">
-              Role title <span className="text-[var(--faint)]">(optional)</span>
-            </span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} className="field" />
-          </label>
-          <label className="block space-y-1.5 text-sm">
-            <span className="font-medium">
-              Company <span className="text-[var(--faint)]">(optional)</span>
-            </span>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5 text-sm">
+            <label htmlFor="title" className="block font-medium">
+              Title
+            </label>
             <input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="field"
+            />
+          </div>
+          <div className="space-y-1.5 text-sm">
+            <label htmlFor="company" className="block font-medium">
+              Company
+            </label>
+            <input
+              id="company"
               value={companyName}
               onChange={(e) => setCompanyName(e.target.value)}
               className="field"
             />
-          </label>
+          </div>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block space-y-1.5 text-sm">
-            <span className="font-medium">Stage</span>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5 text-sm">
+            <label htmlFor="status" className="block font-medium">
+              Status
+            </label>
             <select
+              id="status"
               value={status}
               onChange={(e) => setStatus(e.target.value as JobStatus)}
               className="field"
@@ -272,36 +239,42 @@ export function NewJobPage() {
                 </option>
               ))}
             </select>
-          </label>
-          <label className="block space-y-1.5 text-sm">
-            <span className="font-medium">
-              Applied on <span className="text-[var(--faint)]">(optional)</span>
-            </span>
+          </div>
+          <div className="space-y-1.5 text-sm">
+            <label htmlFor="applied-at" className="block font-medium">
+              Applied on
+            </label>
             <input
+              id="applied-at"
               type="date"
               value={appliedAt}
               onChange={(e) => setAppliedAt(e.target.value)}
               className="field"
             />
-          </label>
+          </div>
         </div>
-        <label className="block space-y-1.5 text-sm">
-          <span className="font-medium">Notes</span>
+
+        <div className="space-y-1.5 text-sm">
+          <label htmlFor="notes" className="block font-medium">
+            Notes
+          </label>
           <textarea
+            id="notes"
+            rows={4}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            rows={4}
-            placeholder="Anything worth remembering about this one…"
             className="field"
           />
-        </label>
+        </div>
+
         {submitError ? (
           <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
             {submitError}
           </p>
         ) : null}
+
         <button type="submit" disabled={isSaving} className="btn btn-primary">
-          {isSaving ? "Saving…" : "Track this job"}
+          {isSaving ? "Saving…" : "Save job"}
         </button>
       </form>
     </div>

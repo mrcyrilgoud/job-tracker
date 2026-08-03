@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
+use rusqlite::Connection;
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_shell::ShellExt;
@@ -16,16 +17,15 @@ use crate::error::AppResult;
 use crate::gmail;
 use crate::jobs::board_discovery::discover_from_url;
 use crate::jobs::check_active::{apply_posting_check, fetch_posting_state, load_job_check_context};
-use crate::jobs::csv::{
-    export_jobs_csv, get_jobs_csv_status, import_jobs_csv, schedule_export_jobs_csv, ImportMode,
-};
+use crate::jobs::csv::{export_jobs_csv, get_jobs_csv_status, import_jobs_csv, ImportMode};
+use crate::jobs::csv_export::with_csv_file_lock;
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::service::{
     approve_watch_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_detail,
     get_pipeline_counts, get_weekly_activity, list_jobs, resolve_title_from_url, update_job,
     JobFilters, UpdateJobInput,
 };
-use crate::runner::{check_all_postings, run_jobs_cycle};
+use crate::runner::{check_all_postings, run_jobs_cycle, try_lock_runner};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,13 +148,15 @@ where
         .as_ref()
         .and_then(|discovery| discovery.careers_url.as_deref())
     {
-        Some(careers_url) => Some(discover_from_url(careers_url)?.careers_url.ok_or_else(
-            || crate::error::AppError::from("Confirmed careers URL must point to a careers page"),
-        )?),
+        Some(careers_url) => {
+            Some(discover_from_url(careers_url)?.careers_url.ok_or_else(|| {
+                crate::error::AppError::from("Confirmed careers URL must point to a careers page")
+            })?)
+        }
         None => None,
     };
     let title = resolve_title_from_url(&input.url, input.title.as_deref()).await;
-    let result = state.with_db(|conn| {
+    let result = state.with_db_tx(|conn| {
         let (job, company) = create_job_from_url_with_careers(
             conn,
             &input.url,
@@ -172,9 +174,9 @@ where
                 companies::insert_watch(conn, &company.id, provider, board_slug)
             })
             .transpose()?;
-        schedule_export_jobs_csv(conn, &state.paths.jobs_csv_path);
         Ok(serde_json::json!({ "job": job, "company": company, "watch": watch }))
     })?;
+    state.csv_export.mark_dirty();
     Ok(result)
 }
 
@@ -264,7 +266,10 @@ mod tests {
                 let provider = provider.to_string();
                 let slug = slug.to_string();
                 Box::pin(async move {
-                    assert_eq!((provider.as_str(), slug.as_str()), ("ashby", "bayesianhealth"));
+                    assert_eq!(
+                        (provider.as_str(), slug.as_str()),
+                        ("ashby", "bayesianhealth")
+                    );
                     Ok(())
                 })
             },
@@ -290,7 +295,10 @@ mod tests {
                 let provider = provider.to_string();
                 let slug = slug.to_string();
                 Box::pin(async move {
-                    assert_eq!((provider.as_str(), slug.as_str()), ("ashby", "bayesianhealth"));
+                    assert_eq!(
+                        (provider.as_str(), slug.as_str()),
+                        ("ashby", "bayesianhealth")
+                    );
                     Ok(())
                 })
             },
@@ -407,9 +415,7 @@ mod tests {
                 Some(confirmed_board(url)),
             ),
             |_provider, _slug| {
-                Box::pin(async {
-                    Err(crate::error::AppError::from("Ashby board unavailable"))
-                })
+                Box::pin(async { Err(crate::error::AppError::from("Ashby board unavailable")) })
             },
         )
         .await
@@ -463,11 +469,12 @@ pub async fn update_job_cmd(
     id: String,
     updates: UpdateJobInput,
 ) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
+    let result = state.with_db_tx(|conn| {
         let detail = update_job(conn, &id, updates)?;
-        schedule_export_jobs_csv(conn, &state.paths.jobs_csv_path);
         Ok(serde_json::json!({ "detail": detail }))
-    })
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
 }
 
 #[tauri::command]
@@ -478,8 +485,7 @@ pub async fn check_job_posting(
     let (url, previous) = state.with_db(|conn| load_job_check_context(conn, &id))?;
     let (posting_state, last_check_result) = fetch_posting_state(&url).await;
     state.with_db(|conn| {
-        let result =
-            apply_posting_check(conn, &id, &previous, &posting_state, &last_check_result)?;
+        let result = apply_posting_check(conn, &id, &previous, &posting_state, &last_check_result)?;
         Ok(serde_json::json!(result))
     })
 }
@@ -505,8 +511,7 @@ pub async fn create_company(
     input: CreateCompanyArgs,
 ) -> AppResult<serde_json::Value> {
     state.with_db(|conn| {
-        let company =
-            companies::create_company(conn, &input.name, input.careers_url.as_deref())?;
+        let company = companies::create_company(conn, &input.name, input.careers_url.as_deref())?;
         Ok(serde_json::json!({ "company": company }))
     })
 }
@@ -526,12 +531,8 @@ pub async fn create_watch(
 ) -> AppResult<serde_json::Value> {
     ats::validate_board(&input.provider, &input.board_slug).await?;
     state.with_db(|conn| {
-        let watch = companies::insert_watch(
-            conn,
-            &input.company_id,
-            &input.provider,
-            &input.board_slug,
-        )?;
+        let watch =
+            companies::insert_watch(conn, &input.company_id, &input.provider, &input.board_slug)?;
         Ok(serde_json::json!({ "watch": watch }))
     })
 }
@@ -546,6 +547,11 @@ pub async fn sync_watch(
     state: State<'_, AppState>,
     watch_id: String,
 ) -> AppResult<serde_json::Value> {
+    let _runner_guard = state
+        .runner_lock
+        .try_lock()
+        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
+    let _runner_file = try_lock_runner(&state.paths)?;
     let (provider, board_slug) = state.with_db(|conn| {
         let watch = companies::get_watch(conn, &watch_id)?
             .ok_or_else(|| crate::error::AppError::from("Watch not found"))?;
@@ -589,10 +595,12 @@ pub async fn approve_watch_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
+    let result = state.with_db_tx(|conn| {
         let job = approve_watch_job(conn, &job_id)?;
         Ok(serde_json::json!({ "job": job }))
-    })
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
 }
 
 #[tauri::command]
@@ -600,10 +608,12 @@ pub async fn dismiss_watch_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
+    let result = state.with_db_tx(|conn| {
         let job = dismiss_watch_job(conn, &job_id)?;
         Ok(serde_json::json!({ "job": job }))
-    })
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
 }
 
 #[tauri::command]
@@ -633,26 +643,42 @@ pub async fn import_document(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(input.bytes_base64.as_bytes())
         .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-    state.with_db(|conn| {
-        let doc = documents::import_document(
-            conn,
-            &state.paths.documents_dir,
-            &input.original_filename,
-            &input.mime_type,
-            &bytes,
-        )?;
-        if let (Some(job_id), Some(kind)) = (input.job_id.as_deref(), input.kind.as_deref()) {
-            let attachment = documents::attach_document_to_job(conn, job_id, &doc.id, kind)?;
-            crate::jobs::service::add_job_event(
+    state
+        .with_db_tx(|conn| {
+            let doc = documents::import_document(
                 conn,
-                job_id,
-                "document_attached",
-                Some(&format!("Attached {} ({kind})", doc.original_filename)),
+                &state.paths.documents_dir,
+                &input.original_filename,
+                &input.mime_type,
+                &bytes,
             )?;
-            return Ok(serde_json::json!({ "document": doc, "attachment": attachment }));
-        }
-        Ok(serde_json::json!({ "document": doc }))
-    })
+            if let (Some(job_id), Some(kind)) = (input.job_id.as_deref(), input.kind.as_deref()) {
+                let attachment = documents::attach_document_to_job(conn, job_id, &doc.id, kind)?;
+                crate::jobs::service::add_job_event(
+                    conn,
+                    job_id,
+                    "document_attached",
+                    Some(&format!("Attached {} ({kind})", doc.original_filename)),
+                )?;
+                return Ok(serde_json::json!({ "document": doc, "attachment": attachment }));
+            }
+            Ok(serde_json::json!({ "document": doc }))
+        })
+        .and_then(|value| {
+            // Finalize file only after the DB transaction commits.
+            if let Some(doc_val) = value.get("document") {
+                let doc: crate::models::Document = serde_json::from_value(doc_val.clone())
+                    .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+                state.with_db(|conn| {
+                    documents::finalize_staged_document(conn, &state.paths.documents_dir, &doc)
+                })?;
+            }
+            Ok(value)
+        })
+        .map_err(|err| {
+            // Best-effort temp cleanup if the transaction failed after staging bytes.
+            err
+        })
 }
 
 #[derive(Debug, Deserialize)]
@@ -668,7 +694,7 @@ pub async fn attach_document(
     state: State<'_, AppState>,
     input: AttachArgs,
 ) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
+    state.with_db_tx(|conn| {
         let attachment = documents::attach_document_to_job(
             conn,
             &input.job_id,
@@ -686,10 +712,7 @@ pub async fn attach_document(
 }
 
 #[tauri::command]
-pub async fn detach_document(
-    state: State<'_, AppState>,
-    attachment_id: String,
-) -> AppResult<()> {
+pub async fn detach_document(state: State<'_, AppState>, attachment_id: String) -> AppResult<()> {
     state.with_db(|conn| documents::detach_document(conn, &attachment_id))
 }
 
@@ -720,10 +743,16 @@ pub async fn csv_status(state: State<'_, AppState>) -> AppResult<serde_json::Val
 
 #[tauri::command]
 pub async fn csv_export(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
-        let result = export_jobs_csv(conn, &state.paths.jobs_csv_path, None)?;
-        Ok(serde_json::json!(result))
-    })
+    let paths = state.paths.clone();
+    let result = with_csv_file_lock(&paths.jobs_csv_lock_path, || {
+        // Dedicated connection so interactive export does not hold the UI mutex for CSV I/O.
+        let conn = Connection::open(&paths.db_path)
+            .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+        conn.pragma_update(None, "busy_timeout", 5000i32)
+            .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+        export_jobs_csv(&conn, &paths.jobs_csv_path, None)
+    })?;
+    Ok(serde_json::json!(result))
 }
 
 #[derive(Debug, Deserialize)]
@@ -779,10 +808,7 @@ pub struct GmailConfigArgs {
 }
 
 #[tauri::command]
-pub async fn gmail_configure(
-    state: State<'_, AppState>,
-    input: GmailConfigArgs,
-) -> AppResult<()> {
+pub async fn gmail_configure(state: State<'_, AppState>, input: GmailConfigArgs) -> AppResult<()> {
     state.with_db(|conn| {
         gmail::save_gmail_config(
             conn,
@@ -816,7 +842,7 @@ pub async fn gmail_disconnect() -> AppResult<()> {
 
 #[tauri::command]
 pub async fn gmail_poll(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
-    gmail::poll_gmail_matches(&state.paths.db_path).await
+    gmail::poll_gmail_matches(&state.paths.db_path, &state.paths.gmail_poll_lock_path).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -831,9 +857,7 @@ pub async fn gmail_triage(
     state: State<'_, AppState>,
     input: TriageArgs,
 ) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
-        gmail::confirm_email_match(conn, &input.match_id, input.job_id.as_deref())
-    })
+    state.with_db(|conn| gmail::confirm_email_match(conn, &input.match_id, input.job_id.as_deref()))
 }
 
 #[tauri::command]
@@ -841,16 +865,10 @@ pub async fn run_jobs_cycle_cmd(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<serde_json::Value> {
-    // In-memory single-flight check; drop guard before await (MutexGuard is !Send).
-    // File flock inside run_jobs_cycle covers cross-process exclusivity.
-    {
-        let guard = state.runner_lock.try_lock();
-        if guard.is_none() {
-            return Err(crate::error::AppError::from(
-                "Jobs runner is already in progress",
-            ));
-        }
-    }
+    let _runner_guard = state
+        .runner_lock
+        .try_lock()
+        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
     let paths = state.paths.clone();
     run_jobs_cycle(&paths, Some(app)).await
 }
@@ -860,16 +878,10 @@ pub async fn check_all_postings_cmd(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<serde_json::Value> {
-    // In-memory single-flight check; drop guard before await (MutexGuard is !Send).
-    // File flock inside check_all_postings covers cross-process exclusivity.
-    {
-        let guard = state.runner_lock.try_lock();
-        if guard.is_none() {
-            return Err(crate::error::AppError::from(
-                "Jobs runner is already in progress",
-            ));
-        }
-    }
+    let _runner_guard = state
+        .runner_lock
+        .try_lock()
+        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
     let paths = state.paths.clone();
     check_all_postings(&paths, Some(app)).await
 }

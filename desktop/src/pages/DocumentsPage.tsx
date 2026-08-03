@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DocumentsClient } from "@/components/DocumentsClient";
 import { api } from "@/lib/api";
@@ -7,25 +7,40 @@ import { formatLabel } from "@/lib/utils";
 
 export function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentListItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sequenceRef = useRef(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
+    const sequence = ++sequenceRef.current;
+    const quiet = Boolean(opts?.quiet);
+    if (quiet) {
+      setRefreshing(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
     try {
       const result = await api.listDocuments();
+      if (sequence !== sequenceRef.current) return;
       setDocuments(result.documents);
     } catch (err) {
+      if (sequence !== sequenceRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load documents");
     } finally {
-      setLoading(false);
+      if (sequence === sequenceRef.current) {
+        setInitialLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // Initial mount only; subsequent reloads go through onImported.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -36,16 +51,21 @@ export function DocumentsPage() {
         </p>
       </div>
 
-      <DocumentsClient onImported={() => void load()} />
+      <DocumentsClient onImported={() => void load({ quiet: true })} />
 
-      {loading ? <p className="text-sm text-[var(--muted)]">Loading documents…</p> : null}
+      {initialLoading ? <p className="text-sm text-[var(--muted)]">Loading documents…</p> : null}
+      {refreshing ? (
+        <p className="sr-only" aria-live="polite">
+          Refreshing documents…
+        </p>
+      ) : null}
       {error ? (
         <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
           {error}
         </p>
       ) : null}
 
-      {!loading && documents.length === 0 ? (
+      {!initialLoading && documents.length === 0 ? (
         <div className="card px-6 py-16 text-center">
           <p className="font-display text-lg">No documents yet</p>
           <p className="mt-1 text-sm text-[var(--muted)]">
@@ -54,7 +74,7 @@ export function DocumentsPage() {
         </div>
       ) : null}
 
-      {!loading && documents.length > 0 ? (
+      {!initialLoading && documents.length > 0 ? (
         <ul className="space-y-2">
           {documents.map((doc) => {
             const kinds = doc.kinds ?? [];

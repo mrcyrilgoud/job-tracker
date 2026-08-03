@@ -1,44 +1,105 @@
 import { formatDistanceToNow } from "date-fns";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { AttachDocumentForm } from "@/components/AttachDocumentForm";
-import { JobDetailClient } from "@/components/JobDetailClient";
+import {
+  JobDetailClient,
+  type JobDetailUpdateMode,
+} from "@/components/JobDetailClient";
 import { api } from "@/lib/api";
-import type { Document, JobDetail } from "@/lib/schema";
+import type { DocumentListItem, JobDetail } from "@/lib/schema";
 import { formatLabel } from "@/lib/utils";
 
 export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [detail, setDetail] = useState<JobDetail | null>(null);
-  const [library, setLibrary] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [library, setLibrary] = useState<DocumentListItem[]>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sequenceRef = useRef(0);
+  const idRef = useRef(id);
+  idRef.current = id;
 
-  const load = useCallback(async () => {
+  const loadDetail = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!id) return;
-    setLoading(true);
+    const requestId = id;
+    const sequence = ++sequenceRef.current;
+    const quiet = Boolean(opts?.quiet);
+    if (quiet) {
+      setRefreshing(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
     try {
-      const [jobResult, docsResult] = await Promise.all([api.getJob(id), api.listDocuments()]);
+      const jobResult = await api.getJob(requestId);
+      if (sequence !== sequenceRef.current || idRef.current !== requestId) return;
       setDetail(jobResult.detail);
-      setLibrary(docsResult.documents);
     } catch (err) {
+      if (sequence !== sequenceRef.current || idRef.current !== requestId) return;
       setError(err instanceof Error ? err.message : "Failed to load job");
     } finally {
-      setLoading(false);
+      if (sequence === sequenceRef.current) {
+        setInitialLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [id]);
+
+  const loadLibrary = useCallback(async () => {
+    if (!id) return;
+    const requestId = id;
+    try {
+      const docsResult = await api.listDocuments();
+      if (idRef.current !== requestId) return;
+      setLibrary(docsResult.documents);
+    } catch {
+      // Library is secondary; detail error handling covers the page shell.
     }
   }, [id]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadDetail();
+    void loadLibrary();
+  }, [loadDetail, loadLibrary]);
 
-  if (loading) {
+  const onUpdated = useCallback(
+    (payload: { detail?: JobDetail; mode: JobDetailUpdateMode }) => {
+      if (payload.mode === "save" && payload.detail) {
+        setDetail((current) => {
+          if (!current) return payload.detail ?? null;
+          return {
+            ...payload.detail!,
+            attached: current.attached,
+            events: payload.detail!.events.length
+              ? payload.detail!.events
+              : current.events,
+          };
+        });
+        return;
+      }
+      if (payload.mode === "check") {
+        void loadDetail({ quiet: true });
+        return;
+      }
+      if (payload.mode === "attachment") {
+        void loadDetail({ quiet: true });
+        void loadLibrary();
+        return;
+      }
+      void loadDetail({ quiet: true });
+      void loadLibrary();
+    },
+    [loadDetail, loadLibrary],
+  );
+
+  if (initialLoading && !detail) {
     return <p className="text-sm text-[var(--muted)]">Loading job…</p>;
   }
 
-  if (error || !detail) {
+  if ((error && !detail) || !detail) {
     return (
       <div className="mx-auto max-w-4xl space-y-4">
         <Link to="/" className="text-sm text-[var(--muted)] hover:text-[var(--accent)]">
@@ -60,6 +121,12 @@ export function JobDetailPage() {
         ← All jobs
       </Link>
 
+      {refreshing ? (
+        <p className="sr-only" aria-live="polite">
+          Refreshing job…
+        </p>
+      ) : null}
+
       <JobDetailClient
         jobId={detail.job.id}
         initial={{
@@ -74,7 +141,7 @@ export function JobDetailPage() {
           url: detail.job.url,
           isNewFromWatch: detail.job.isNewFromWatch,
         }}
-        onUpdated={() => void load()}
+        onUpdated={onUpdated}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -117,7 +184,7 @@ export function JobDetailPage() {
                 id: doc.id,
                 originalFilename: doc.originalFilename,
               }))}
-              onAttached={() => void load()}
+              onAttached={() => onUpdated({ mode: "attachment" })}
             />
           </div>
         </section>

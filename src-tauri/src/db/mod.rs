@@ -7,18 +7,21 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
+use crate::jobs::csv_export::CsvExportCoordinator;
 
 pub mod migrate;
 pub mod paths;
 
 pub use paths::{resolve_data_dir, DataPaths};
 
-/// Shared app state. Never hold the mutex across `.await`.
+/// Shared app state. The runner mutex is held across background-operation
+/// awaits to provide in-process single-flight.
 #[derive(Clone)]
 pub struct AppState {
     pub paths: DataPaths,
     pub db: Arc<Mutex<Connection>>,
-    pub runner_lock: Arc<Mutex<()>>,
+    pub runner_lock: Arc<tokio::sync::Mutex<()>>,
+    pub csv_export: CsvExportCoordinator,
 }
 
 impl AppState {
@@ -31,16 +34,37 @@ impl AppState {
         conn.pragma_update(None, "busy_timeout", 5000i32)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         migrate::migrate(&conn)?;
+        let csv_export = CsvExportCoordinator::new(
+            paths.db_path.clone(),
+            paths.jobs_csv_path.clone(),
+            paths.jobs_csv_lock_path.clone(),
+        );
         Ok(Self {
             paths,
             db: Arc::new(Mutex::new(conn)),
-            runner_lock: Arc::new(Mutex::new(())),
+            runner_lock: Arc::new(tokio::sync::Mutex::new(())),
+            csv_export,
         })
     }
 
     pub fn with_db<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
         let guard = self.db.lock();
         f(&guard)
+    }
+
+    pub fn with_db_tx<T>(&self, f: impl FnOnce(&Connection) -> AppResult<T>) -> AppResult<T> {
+        let guard = self.db.lock();
+        guard.execute_batch("BEGIN IMMEDIATE")?;
+        match f(&guard) {
+            Ok(value) => {
+                guard.execute_batch("COMMIT")?;
+                Ok(value)
+            }
+            Err(err) => {
+                let _ = guard.execute_batch("ROLLBACK");
+                Err(err)
+            }
+        }
     }
 }
 

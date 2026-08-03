@@ -1,3 +1,7 @@
+use std::fs::OpenOptions;
+use std::path::Path;
+
+use fs2::FileExt;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{map_sqlite, AppError, AppResult};
@@ -7,7 +11,16 @@ use crate::models::EmailMatch;
 use crate::util::{create_id, now_iso};
 
 /// Poll Gmail using a connection that is only used between awaits (not held across them).
-pub async fn poll_gmail_matches(db_path: &std::path::Path) -> AppResult<serde_json::Value> {
+pub async fn poll_gmail_matches(db_path: &Path, lock_path: &Path) -> AppResult<serde_json::Value> {
+    let lock_file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .map_err(|e| AppError::from(e.to_string()))?;
+    lock_file
+        .try_lock_exclusive()
+        .map_err(|_| AppError::from("operation_in_progress:gmail-poll"))?;
     let (access_token, checkpoint, tracked) = {
         let conn = open_conn(db_path)?;
         let config = crate::gmail::oauth::get_gmail_config(&conn)?;
@@ -72,7 +85,11 @@ pub async fn poll_gmail_matches(db_path: &std::path::Path) -> AppResult<serde_js
     let mut pending_writes: Vec<PendingWrite> = Vec::new();
 
     for item in messages {
-        let Some(id) = item.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()) else {
+        let Some(id) = item
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+        else {
             continue;
         };
 
@@ -181,11 +198,12 @@ pub async fn poll_gmail_matches(db_path: &std::path::Path) -> AppResult<serde_js
 
     {
         let conn = open_conn(db_path)?;
+        conn.execute_batch("BEGIN IMMEDIATE").map_err(map_sqlite)?;
         for write in pending_writes {
             let created_at = now_iso();
             if write.auto_link {
-                conn.execute(
-                    "INSERT INTO email_matches (id, job_id, gmail_message_id, thread_id, subject, snippet, from_address, received_at, confidence, triage_status, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'auto_linked',?10)",
+                let inserted = conn.execute(
+                    "INSERT OR IGNORE INTO email_matches (id, job_id, gmail_message_id, thread_id, subject, snippet, from_address, received_at, confidence, triage_status, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'auto_linked',?10)",
                     params![
                         create_id(),
                         write.job_id,
@@ -200,6 +218,9 @@ pub async fn poll_gmail_matches(db_path: &std::path::Path) -> AppResult<serde_js
                     ],
                 )
                 .map_err(map_sqlite)?;
+                if inserted == 0 {
+                    continue;
+                }
                 conn.execute(
                     "INSERT INTO job_events (id, job_id, type, note, occurred_at) VALUES (?1,?2,'email_update',?3,?4)",
                     params![
@@ -212,8 +233,8 @@ pub async fn poll_gmail_matches(db_path: &std::path::Path) -> AppResult<serde_js
                 .map_err(map_sqlite)?;
                 linked += 1;
             } else {
-                conn.execute(
-                    "INSERT INTO email_matches (id, job_id, gmail_message_id, thread_id, subject, snippet, from_address, received_at, confidence, triage_status, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)",
+                let inserted = conn.execute(
+                    "INSERT OR IGNORE INTO email_matches (id, job_id, gmail_message_id, thread_id, subject, snippet, from_address, received_at, confidence, triage_status, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,'pending',?10)",
                     params![
                         create_id(),
                         write.job_id,
@@ -228,12 +249,13 @@ pub async fn poll_gmail_matches(db_path: &std::path::Path) -> AppResult<serde_js
                     ],
                 )
                 .map_err(map_sqlite)?;
-                triaged += 1;
+                triaged += inserted;
             }
         }
         if !newest.is_empty() {
             set_checkpoint(&conn, &newest)?;
         }
+        conn.execute_batch("COMMIT").map_err(map_sqlite)?;
     }
 
     Ok(serde_json::json!({

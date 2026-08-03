@@ -117,6 +117,15 @@ pub struct JobListItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DocumentListItem {
+    #[serde(flatten)]
+    pub document: Document,
+    pub kinds: Vec<String>,
+    pub used_by: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AttachedDocument {
     pub attachment: JobDocument,
     pub document: Document,

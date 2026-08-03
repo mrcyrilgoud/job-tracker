@@ -41,8 +41,11 @@ export function JobsPage() {
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const checkingPostingsRef = useRef(false);
+  const loadSequenceRef = useRef(0);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
+    const requestKey = JSON.stringify({ status, companyId, postingState, search });
+    const sequence = ++loadSequenceRef.current;
     if (!opts?.quiet) {
       setLoading(true);
     }
@@ -53,15 +56,22 @@ export function JobsPage() {
         api.listCompanies(),
         api.listJobs({ newFromWatch: true }),
       ]);
+      if (sequence !== loadSequenceRef.current) return;
+      if (
+        JSON.stringify({ status, companyId, postingState, search }) !== requestKey
+      ) {
+        return;
+      }
       setJobs(listResult.jobs);
       setCounts(listResult.counts);
       setActivity(listResult.weeklyActivity);
       setCompanies(companiesResult.companies.map((row) => row.company));
       setNewFromWatch(watchResult.jobs);
     } catch (err) {
+      if (sequence !== loadSequenceRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load jobs");
     } finally {
-      if (!opts?.quiet) {
+      if (sequence === loadSequenceRef.current && !opts?.quiet) {
         setLoading(false);
       }
     }
@@ -151,11 +161,11 @@ export function JobsPage() {
     setSearchParams(next);
   }
 
-  if (loading) {
+  if (loading && jobs.length === 0) {
     return <p className="text-sm text-[var(--muted)]">Loading jobs…</p>;
   }
 
-  if (error) {
+  if (error && jobs.length === 0) {
     return (
       <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
         {error}

@@ -118,6 +118,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS company_watches_company_provider_slug_uidx
+      ON company_watches(company_id, provider, board_slug);
+    CREATE UNIQUE INDEX IF NOT EXISTS job_documents_job_document_kind_uidx
+      ON job_documents(job_id, document_id, kind);
+    CREATE INDEX IF NOT EXISTS job_events_job_id_type_idx ON job_events(job_id, type);
+    CREATE INDEX IF NOT EXISTS job_events_occurred_at_idx ON job_events(occurred_at);
+    CREATE INDEX IF NOT EXISTS jobs_company_id_updated_at_idx ON jobs(company_id, updated_at);
+    CREATE INDEX IF NOT EXISTS jobs_status_updated_at_idx ON jobs(status, updated_at);
+    CREATE INDEX IF NOT EXISTS jobs_is_new_from_watch_updated_at_idx ON jobs(is_new_from_watch, updated_at);
+    CREATE INDEX IF NOT EXISTS job_documents_document_id_idx ON job_documents(document_id);
+    CREATE INDEX IF NOT EXISTS job_documents_job_id_idx ON job_documents(job_id);
+    CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);
     "#,
     )?;
     Ok(())

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AlertIcon, ArrowUpRightIcon, CheckIcon } from "@/components/icons";
 import { api } from "@/lib/api";
-import { jobStatuses, type JobStatus, type PostingState } from "@/lib/schema";
+import { jobStatuses, type JobDetail, type JobStatus, type PostingState } from "@/lib/schema";
 import {
   checkResultNote,
   jobStatusPresentation,
@@ -34,6 +34,8 @@ type Draft = {
   appliedAt: string;
   notes: string;
 };
+
+export type JobDetailUpdateMode = "save" | "check" | "attachment" | "full";
 
 type SaveState = "saving" | "unsaved" | "just-saved" | "clean";
 
@@ -81,7 +83,7 @@ export function JobDetailClient({
 }: {
   jobId: string;
   initial: Initial;
-  onUpdated: () => void;
+  onUpdated: (payload: { detail?: JobDetail; mode: JobDetailUpdateMode }) => void;
 }) {
   // `saved` mirrors what the database holds; `draft` is what the person sees.
   // The gap between the two is the entire save story this card tells.
@@ -138,7 +140,7 @@ export function JobDetailClient({
     setError(null);
     const attempted = draft;
     try {
-      await api.updateJob(jobId, {
+      const result = await api.updateJob(jobId, {
         title: attempted.title,
         companyName: attempted.companyName,
         status: attempted.status,
@@ -146,9 +148,19 @@ export function JobDetailClient({
         notes: attempted.notes,
         isNewFromWatch: false,
       });
-      setSaved(attempted);
+      const detail = result.detail;
+      const baseline: Draft = {
+        title: detail.job.title,
+        companyName: detail.company.name,
+        status: detail.job.status,
+        appliedAt: detail.job.appliedAt ? detail.job.appliedAt.slice(0, 10) : "",
+        notes: detail.job.notes ?? "",
+      };
+      setSaved(baseline);
+      // If the user typed more while save was in flight, keep the newer draft.
+      setDraft((current) => (draftsMatch(current, attempted) ? baseline : current));
       setJustSaved(true);
-      onUpdated();
+      onUpdated({ detail, mode: "save" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -176,7 +188,7 @@ export function JobDetailClient({
         lastCheckedAt: result.lastCheckedAt,
         lastCheckResult: result.lastCheckResult,
       });
-      onUpdated();
+      onUpdated({ mode: "check" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Check failed");
     } finally {

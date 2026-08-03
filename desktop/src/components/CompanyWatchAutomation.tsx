@@ -43,7 +43,7 @@ export function CompanyWatchAutomation({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const previewInFlight = useRef(false);
+  const previewRequestId = useRef(0);
   const companyId = row.company.id;
 
   function clearDiscovery() {
@@ -84,28 +84,34 @@ export function CompanyWatchAutomation({
   }, [companyId]);
 
   async function detectBoard() {
-    if (previewInFlight.current) return;
     const postingUrl = url.trim();
+    const requestId = ++previewRequestId.current;
     setError(null);
     setMessage(null);
     if (!isValidPostingUrl(postingUrl)) {
       setError("Enter a valid http or https posting link.");
       return;
     }
-    previewInFlight.current = true;
     setBusy(true);
     try {
       const result = await api.previewJobUrl(postingUrl);
+      if (requestId !== previewRequestId.current || url.trim() !== postingUrl) {
+        return;
+      }
       setPreview(result);
       setConfirmed(null);
       if (!result.board && !result.careersUrl) {
         setError("No supported job board or careers page was found in that link.");
       }
     } catch (err) {
+      if (requestId !== previewRequestId.current || url.trim() !== postingUrl) {
+        return;
+      }
       setError(formatInvokeError(err, "Could not inspect that posting link."));
     } finally {
-      previewInFlight.current = false;
-      setBusy(false);
+      if (requestId === previewRequestId.current) {
+        setBusy(false);
+      }
     }
   }
 
@@ -203,6 +209,7 @@ export function CompanyWatchAutomation({
           value={url}
           onChange={(event) => {
             setUrl(event.target.value);
+            previewRequestId.current += 1;
             setError(null);
             setMessage(null);
             clearDiscovery();
