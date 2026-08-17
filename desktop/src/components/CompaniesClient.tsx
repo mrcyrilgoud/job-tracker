@@ -97,13 +97,11 @@ export function CompaniesClient({
         </p>
       ) : null}
 
-      {newRoles.length > 0 ? (
-        <NewRolesPanel
-          roles={newRoles}
-          onTriage={actions.triageRole}
-          isPending={(jobId) => actions.isPending(`triage:${jobId}`)}
-        />
-      ) : null}
+      <NewRolesPanel
+        roles={newRoles}
+        onTriage={actions.triageRole}
+        isPending={(jobId) => actions.isPending(`triage:${jobId}`)}
+      />
 
       {companies.length >= SEARCHABLE_FROM ? (
         <div className="flex flex-wrap items-center gap-2">

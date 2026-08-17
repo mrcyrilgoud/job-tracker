@@ -28,6 +28,7 @@ pub struct Job {
     pub notes: Option<String>,
     pub location: Option<String>,
     pub is_new_from_watch: bool,
+    pub watch_disposition: Option<String>,
     pub missing_from_sync_count: i64,
     pub created_at: String,
     pub updated_at: String,

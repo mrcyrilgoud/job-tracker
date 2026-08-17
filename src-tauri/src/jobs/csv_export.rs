@@ -18,6 +18,7 @@ use serde::Serialize;
 use crate::db::migrate;
 use crate::error::{AppError, AppResult};
 use crate::jobs::csv::export_jobs_csv;
+use crate::jobs::csv_config::{active_csv_path, csv_lock_path};
 use crate::util::now_iso;
 
 const EXPORT_DEBOUNCE_MS: u64 = 500;
@@ -33,8 +34,7 @@ pub struct CsvExportStatus {
 #[derive(Clone)]
 pub struct CsvExportCoordinator {
     db_path: PathBuf,
-    csv_path: PathBuf,
-    lock_path: PathBuf,
+    default_csv_path: PathBuf,
     generation: Arc<AtomicU64>,
     last_exported: Arc<AtomicU64>,
     status: Arc<Mutex<CsvExportStatus>>,
@@ -42,11 +42,10 @@ pub struct CsvExportCoordinator {
 }
 
 impl CsvExportCoordinator {
-    pub fn new(db_path: PathBuf, csv_path: PathBuf, lock_path: PathBuf) -> Self {
+    pub fn new(db_path: PathBuf, default_csv_path: PathBuf) -> Self {
         Self {
             db_path,
-            csv_path,
-            lock_path,
+            default_csv_path,
             generation: Arc::new(AtomicU64::new(0)),
             last_exported: Arc::new(AtomicU64::new(0)),
             status: Arc::new(Mutex::new(CsvExportStatus::default())),
@@ -81,10 +80,9 @@ impl CsvExportCoordinator {
             }
 
             let db_path = self.db_path.clone();
-            let csv_path = self.csv_path.clone();
-            let lock_path = self.lock_path.clone();
+            let default_csv_path = self.default_csv_path.clone();
             let result = tokio::task::spawn_blocking(move || {
-                export_with_own_connection(&db_path, &csv_path, &lock_path)
+                export_with_own_connection(&db_path, &default_csv_path)
             })
             .await;
 
@@ -116,16 +114,24 @@ impl CsvExportCoordinator {
             // Dirtied during export — run one follow-up with the newest generation.
         }
     }
+
+    /// Run a configuration change exclusively with the exporter. Queued and
+    /// future exports resolve the destination after this operation completes.
+    pub async fn with_exclusive<T>(&self, f: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+        let _guard = self.export_lock.lock().await;
+        f()
+    }
 }
 
 fn export_with_own_connection(
     db_path: &std::path::Path,
-    csv_path: &std::path::Path,
-    lock_path: &std::path::Path,
+    default_csv_path: &std::path::Path,
 ) -> AppResult<()> {
     let conn = open_export_conn(db_path)?;
-    with_csv_file_lock(lock_path, || {
-        export_jobs_csv(&conn, csv_path, None)?;
+    let csv_path = active_csv_path(&conn, default_csv_path)?;
+    let lock_path = csv_lock_path(&csv_path);
+    with_csv_file_lock(&lock_path, || {
+        export_jobs_csv(&conn, &csv_path, None)?;
         Ok(())
     })
 }
@@ -168,6 +174,7 @@ mod tests {
     use super::*;
     use crate::db::migrate::migrate;
     use crate::db::paths::DataPaths;
+    use crate::jobs::csv_config::set_custom_csv_path;
     use crate::jobs::service::create_job_from_url;
     use std::sync::atomic::AtomicUsize;
     use tempfile::tempdir;
@@ -196,7 +203,6 @@ mod tests {
         let coordinator = CsvExportCoordinator::new(
             paths.db_path.clone(),
             paths.jobs_csv_path.clone(),
-            paths.jobs_csv_lock_path.clone(),
         );
 
         for _ in 0..10 {
@@ -217,6 +223,39 @@ mod tests {
             coordinator.last_exported.load(Ordering::SeqCst)
         );
         let _ = export_count;
+    }
+
+    #[tokio::test]
+    async fn uses_configured_csv_destination() {
+        let directory = tempdir().unwrap();
+        let custom_path = directory.path().join("shared").join("jobs.csv");
+        std::fs::create_dir_all(custom_path.parent().unwrap()).unwrap();
+        let paths = DataPaths::from_data_dir(directory.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate(&conn).unwrap();
+        set_custom_csv_path(&conn, &paths.jobs_csv_path, &custom_path).unwrap();
+        create_job_from_url(
+            &conn,
+            "https://example.com/jobs/custom",
+            "Role",
+            Some("Acme"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        drop(conn);
+
+        let coordinator =
+            CsvExportCoordinator::new(paths.db_path.clone(), paths.jobs_csv_path.clone());
+        coordinator.mark_dirty();
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+
+        assert!(custom_path.exists());
+        assert!(std::path::PathBuf::from(format!("{}.sync.json", custom_path.display())).exists());
+        assert!(!paths.jobs_csv_path.exists());
     }
 
     #[tokio::test]

@@ -30,6 +30,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       notes TEXT,
       location TEXT,
       is_new_from_watch INTEGER NOT NULL DEFAULT 0,
+      watch_disposition TEXT,
       missing_from_sync_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -132,6 +133,40 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS job_documents_job_id_idx ON job_documents(job_id);
     CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);
     "#,
+    )?;
+
+    // `CREATE TABLE IF NOT EXISTS` does not evolve databases created by older
+    // releases, so add this column separately before reading or writing it.
+    let has_disposition = conn
+        .prepare("PRAGMA table_info(jobs)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == "watch_disposition");
+    if !has_disposition {
+        conn.execute("ALTER TABLE jobs ADD COLUMN watch_disposition TEXT", [])?;
+    }
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS jobs_company_open_watch_idx ON jobs(company_id, posting_state, watch_disposition)",
+        [],
+    )?;
+
+    // Existing watch jobs used an event plus `is_new_from_watch` to represent
+    // triage. Preserve that history in the explicit state introduced above.
+    conn.execute_batch(
+        r#"
+        UPDATE jobs
+        SET watch_disposition = CASE
+          WHEN is_new_from_watch = 1 THEN 'new'
+          WHEN EXISTS (
+            SELECT 1 FROM job_events e
+            WHERE e.job_id = jobs.id AND e.type = 'dismissed_from_watch'
+          ) THEN 'dismissed'
+          ELSE 'saved'
+        END
+        WHERE watch_disposition IS NULL
+          AND source IN ('greenhouse', 'lever', 'ashby');
+        "#,
     )?;
     Ok(())
 }

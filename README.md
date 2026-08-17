@@ -80,6 +80,9 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 - Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`
 - Conflicts (merge mode): DB wins when both sides changed since last export
 - Blank `id` + url/title/company creates a job; missing CSV rows do not delete jobs
+- By default, the mirror is `<data directory>/jobs.csv`. In **Settings**, choose another local
+  `.csv` file to keep that mirror elsewhere; the app and background worker use the same saved
+  location. Its `.sync.json` and `.lock` companion files live beside the selected CSV.
 
 ## Background worker
 

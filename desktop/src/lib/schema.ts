@@ -19,6 +19,8 @@ export type JobSource =
 
 export type PostingState = "active" | "inactive" | "unknown";
 
+export type WatchDisposition = "new" | "saved" | "dismissed";
+
 export const documentKinds = [
   "resume",
   "cover_letter",
@@ -64,6 +66,7 @@ export type Job = {
   notes: string | null;
   location: string | null;
   isNewFromWatch: boolean;
+  watchDisposition: WatchDisposition | null;
   missingFromSyncCount: number;
   createdAt: string;
   updatedAt: string;
@@ -155,6 +158,7 @@ export type CompanyRow = {
   company: Company;
   watches: CompanyWatch[];
   reviews: CareersPageReview[];
+  openPositionCount: number;
 };
 
 export type DocumentListItem = Document & {

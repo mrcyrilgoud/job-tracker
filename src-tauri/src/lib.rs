@@ -61,6 +61,7 @@ pub fn run() {
             commands::update_job_cmd,
             commands::check_job_posting,
             commands::list_companies,
+            commands::list_open_watch_positions_cmd,
             commands::create_company,
             commands::create_watch,
             commands::delete_watch,
@@ -69,6 +70,8 @@ pub fn run() {
             commands::dismiss_review,
             commands::approve_watch_job_cmd,
             commands::dismiss_watch_job_cmd,
+            commands::save_open_watch_job_cmd,
+            commands::reset_dismissed_watch_job_cmd,
             commands::list_documents,
             commands::import_document,
             commands::attach_document,
@@ -77,6 +80,10 @@ pub fn run() {
             commands::csv_status,
             commands::csv_export,
             commands::csv_import,
+            commands::csv_config,
+            commands::csv_path_status,
+            commands::csv_configure,
+            commands::csv_reset_config,
             commands::gmail_status,
             commands::gmail_configure,
             commands::gmail_connect,
@@ -86,6 +93,10 @@ pub fn run() {
             commands::run_jobs_cycle_cmd,
             commands::check_all_postings_cmd,
             commands::get_data_dir,
+            commands::get_watch_role_keywords,
+            commands::set_watch_role_keywords,
+            commands::get_location_settings_cmd,
+            commands::set_location_settings_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

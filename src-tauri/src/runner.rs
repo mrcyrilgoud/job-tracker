@@ -17,6 +17,8 @@ use crate::error::{AppError, AppResult};
 use crate::gmail::{is_gmail_connected, poll_gmail_matches};
 use crate::jobs::check_active::{apply_posting_check, fetch_posting_state};
 use crate::jobs::csv::sync_jobs_csv_with_disk;
+use crate::jobs::csv_config::{active_csv_path, csv_lock_path};
+use crate::jobs::csv_export::with_csv_file_lock;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -332,7 +334,10 @@ pub async fn run_jobs_cycle(
             done: false,
         },
     );
-    let csv = sync_jobs_csv_with_disk(&paths.db_path, &paths.jobs_csv_path)?;
+    let csv_path = active_csv_path(&conn, &paths.jobs_csv_path)?;
+    let csv = with_csv_file_lock(&csv_lock_path(&csv_path), || {
+        sync_jobs_csv_with_disk(&paths.db_path, &csv_path)
+    })?;
 
     let summary = serde_json::json!({
         "postings": posting_results.len(),

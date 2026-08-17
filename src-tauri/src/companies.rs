@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{map_sqlite, AppError, AppResult};
@@ -141,6 +143,17 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
         .collect::<Result<Vec<_>, _>>()
         .map_err(map_sqlite)?;
 
+    let mut counts_stmt = conn
+        .prepare(
+            "SELECT company_id, COUNT(*) FROM jobs WHERE posting_state = 'active' AND source IN ('greenhouse', 'lever', 'ashby') GROUP BY company_id",
+        )
+        .map_err(map_sqlite)?;
+    let open_position_counts: HashMap<String, i64> = counts_stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(map_sqlite)?
+        .collect::<Result<_, _>>()
+        .map_err(map_sqlite)?;
+
     Ok(companies
         .into_iter()
         .map(|company| {
@@ -154,10 +167,12 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
                 .filter(|r| r.company_id == company.id)
                 .cloned()
                 .collect();
+            let open_position_count = open_position_counts.get(&company.id).copied().unwrap_or(0);
             serde_json::json!({
                 "company": company,
                 "watches": company_watches,
-                "reviews": company_reviews
+                "reviews": company_reviews,
+                "openPositionCount": open_position_count
             })
         })
         .collect())
@@ -247,8 +262,8 @@ mod tests {
     fn create_company_reuses_selected_company_when_confirming_careers_page() {
         let connection = test_connection();
         let first = create_company(&connection, "Acme", None).unwrap();
-        let second = create_company(&connection, " Acme ", Some("https://acme.example/careers"))
-            .unwrap();
+        let second =
+            create_company(&connection, " Acme ", Some("https://acme.example/careers")).unwrap();
 
         assert_eq!(first.id, second.id);
         assert_eq!(

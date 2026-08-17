@@ -14,6 +14,7 @@ import type {
   Job,
   JobListItem,
   JobStatus,
+  WatchDisposition,
   WatchProvider,
 } from "@/lib/schema";
 
@@ -59,7 +60,12 @@ function job(
   companyId: string,
   title: string,
   location: string | null,
-  opts: { isNewFromWatch?: boolean; status?: JobStatus; source?: Job["source"] } = {},
+  opts: {
+    isNewFromWatch?: boolean;
+    status?: JobStatus;
+    source?: Job["source"];
+    watchDisposition?: WatchDisposition;
+  } = {},
 ): Job {
   jobSeq += 1;
   const id = `job-${jobSeq}`;
@@ -80,6 +86,7 @@ function job(
     notes: null,
     location,
     isNewFromWatch: opts.isNewFromWatch ?? false,
+    watchDisposition: opts.watchDisposition ?? (opts.isNewFromWatch ? "new" : "saved"),
     missingFromSyncCount: 0,
     createdAt: ago(5 * days),
     updatedAt: ago(1 * hours),
@@ -129,6 +136,10 @@ export function createFixtureBackend() {
       status: "applied",
     }),
     job("c-stripe", "Staff Frontend Engineer", "Remote (US)", { status: "interviewing" }),
+    job("c-anthropic", "Research Engineer, Safety", "Remote (US)", {
+      status: "closed",
+      watchDisposition: "dismissed",
+    }),
 
     // Discovered by a watch, awaiting triage. These are the roles the user
     // currently has no way to browse from the Companies tab.
@@ -165,6 +176,9 @@ export function createFixtureBackend() {
       company: c,
       watches: watches.filter((w) => w.companyId === c.id),
       reviews: reviews.filter((r) => r.companyId === c.id && r.status === "pending"),
+      openPositionCount: jobs.filter(
+        (j) => j.companyId === c.id && j.postingState === "active" && j.source !== "manual",
+      ).length,
     }));
   }
 
@@ -184,6 +198,16 @@ export function createFixtureBackend() {
 
   const handlers: Record<string, (args?: Record<string, unknown>) => unknown> = {
     list_companies: () => ({ companies: companyRows() }),
+
+    list_open_watch_positions_cmd: (args) => ({
+      positions: jobs
+        .filter((j) => j.companyId === args?.companyId)
+        .filter((j) => j.postingState === "active" && j.source !== "manual")
+        .map((j) => ({
+          job: j,
+          companyName: companies.find((c) => c.id === j.companyId)?.name ?? "Unknown",
+        })),
+    }),
 
     list_jobs_cmd: (args) => {
       const filters = (args?.filters ?? null) as Record<string, unknown> | null;
@@ -258,14 +282,39 @@ export function createFixtureBackend() {
 
     approve_watch_job_cmd: (args) => {
       const found = jobs.find((j) => j.id === args?.jobId);
-      if (found) found.isNewFromWatch = false;
+      if (found) {
+        found.isNewFromWatch = false;
+        found.watchDisposition = "saved";
+      }
       return { job: found };
     },
 
     dismiss_watch_job_cmd: (args) => {
-      const index = jobs.findIndex((j) => j.id === args?.jobId);
-      if (index >= 0) jobs.splice(index, 1);
-      return { job: null };
+      const found = jobs.find((j) => j.id === args?.jobId);
+      if (found) {
+        found.isNewFromWatch = false;
+        found.watchDisposition = "dismissed";
+      }
+      return { job: found };
+    },
+
+    save_open_watch_job_cmd: (args) => {
+      const found = jobs.find((j) => j.id === args?.jobId);
+      if (found) {
+        found.isNewFromWatch = false;
+        found.watchDisposition = "saved";
+      }
+      return { job: found };
+    },
+
+    reset_dismissed_watch_job_cmd: (args) => {
+      const found = jobs.find((j) => j.id === args?.jobId);
+      if (found) {
+        found.isNewFromWatch = true;
+        found.watchDisposition = "new";
+        found.status = "wishlist";
+      }
+      return { job: found };
     },
 
     preview_job_url: (args) => {

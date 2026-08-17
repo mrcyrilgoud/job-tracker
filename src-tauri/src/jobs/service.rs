@@ -38,13 +38,14 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         notes: row.get(12)?,
         location: row.get(13)?,
         is_new_from_watch: row.get::<_, i64>(14)? != 0,
-        missing_from_sync_count: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        watch_disposition: row.get(15)?,
+        missing_from_sync_count: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 
-const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, missing_from_sync_count, created_at, updated_at";
+const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at";
 
 /// Resolve a page title via network. Callers must not hold a DB mutex across this.
 pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
@@ -130,8 +131,8 @@ pub fn create_job_from_url_with_careers(
         r#"INSERT INTO jobs (
             id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
             posting_state, last_checked_at, last_check_result, source, notes, location,
-            is_new_from_watch, missing_from_sync_count, created_at, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,0,0,?10,?10)"#,
+            is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at
+        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,0,NULL,0,?10,?10)"#,
         params![
             job_id,
             company.id,
@@ -226,12 +227,139 @@ pub struct JobFilters {
     pub company_id: Option<String>,
     pub posting_state: Option<String>,
     pub search: Option<String>,
+    pub location: Option<String>,
     pub new_from_watch: Option<bool>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+pub struct LocationSettings {
+    pub country: String,
+    pub cities: String,
+}
+
+fn expand_country_keywords(country: &str) -> Vec<String> {
+    let mut expanded = Vec::new();
+    let lower_country = country.trim().to_lowercase();
+    
+    if lower_country.is_empty() {
+        return expanded;
+    }
+
+    expanded.push(lower_country.clone());
+
+    if lower_country == "united states" || lower_country == "usa" || lower_country == "us" {
+        expanded.push("united states".to_string());
+        expanded.push("usa".to_string());
+        expanded.push(", us".to_string());
+        expanded.push("remote - us".to_string());
+        
+        let states = vec![
+            "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", 
+            "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md", 
+            "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", 
+            "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", 
+            "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy"
+        ];
+        for state in states {
+            expanded.push(format!(", {}", state));
+        }
+
+        let hubs = vec![
+            "san francisco", "san jose", "new york", "nyc", "seattle", "austin", 
+            "boston", "chicago", "los angeles", "palo alto", "mountain view", 
+            "sunnyvale", "santa clara", "menlo park", "redwood city", "san mateo", 
+            "oakland", "berkeley", "santa monica", "venice", "culver city", "irvine", 
+            "brooklyn", "manhattan", "queens", "jersey city", "bellevue", "redmond", 
+            "kirkland", "cambridge", "atlanta", "denver", "boulder", "salt lake city", 
+            "washington dc", "miami", "dallas", "houston", "raleigh", "bay area"
+        ];
+        for hub in hubs {
+            expanded.push(hub.to_string());
+        }
+    } else if lower_country == "united kingdom" || lower_country == "uk" {
+        expanded.push("united kingdom".to_string());
+        expanded.push("uk".to_string());
+        expanded.push(", uk".to_string());
+        expanded.push("london".to_string());
+    } else if lower_country == "canada" {
+        expanded.push("canada".to_string());
+        // Careful with "ca" which is California in the US context
+        expanded.push(", on".to_string());
+        expanded.push(", bc".to_string());
+        expanded.push(", qc".to_string());
+        expanded.push(", ab".to_string());
+    }
+
+    let mut unique = Vec::new();
+    for e in expanded {
+        if !unique.contains(&e) {
+            unique.push(e);
+        }
+    }
+    unique
+}
+
+fn expand_location_keywords(cities: &str) -> Vec<String> {
+    let mut expanded = Vec::new();
+    let lower_cities = cities.to_lowercase();
+    
+    // Simple predefined regions mapping for smarter "dynamic" filtering
+    if lower_cities.contains("san jose") || lower_cities.contains("san francisco") || lower_cities.contains("oakland") || lower_cities.contains("bay area") {
+        expanded.push("san jose".to_string());
+        expanded.push("san francisco".to_string());
+        expanded.push("oakland".to_string());
+        expanded.push("santa clara".to_string());
+        expanded.push("palo alto".to_string());
+        expanded.push("mountain view".to_string());
+        expanded.push("sunnyvale".to_string());
+        expanded.push("cupertino".to_string());
+        expanded.push("menlo park".to_string());
+        expanded.push("san mateo".to_string());
+        expanded.push("redwood city".to_string());
+        expanded.push("bay area".to_string());
+    }
+    
+    if lower_cities.contains("new york") || lower_cities.contains("nyc") || lower_cities.contains("brooklyn") {
+        expanded.push("new york".to_string());
+        expanded.push("nyc".to_string());
+        expanded.push("brooklyn".to_string());
+        expanded.push("manhattan".to_string());
+        expanded.push("queens".to_string());
+        expanded.push("jersey city".to_string());
+    }
+
+    if lower_cities.contains("seattle") || lower_cities.contains("bellevue") || lower_cities.contains("redmond") {
+        expanded.push("seattle".to_string());
+        expanded.push("bellevue".to_string());
+        expanded.push("redmond".to_string());
+        expanded.push("kirkland".to_string());
+    }
+
+    if lower_cities.contains("los angeles") || lower_cities.contains("santa monica") || lower_cities.contains("la") || lower_cities.contains("socal") {
+        expanded.push("los angeles".to_string());
+        expanded.push("santa monica".to_string());
+        expanded.push("venice".to_string());
+        expanded.push("culver city".to_string());
+        expanded.push("irvine".to_string());
+    }
+
+    // Include user typed cities
+    for city in cities.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        expanded.push(city.to_lowercase());
+    }
+
+    let mut unique = Vec::new();
+    for e in expanded {
+        if !unique.contains(&e) {
+            unique.push(e);
+        }
+    }
+    unique
 }
 
 pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
     let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE 1=1",
     );
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -254,16 +382,62 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         // Pending and dismissed watch discoveries stay out of the pipeline.
         sql.push_str(
             " AND j.is_new_from_watch = 0 \
-             AND NOT EXISTS ( \
-               SELECT 1 FROM job_events e \
-               WHERE e.job_id = j.id AND e.type = 'dismissed_from_watch' \
-             )",
+             AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed')",
         );
     }
     if let Some(search) = &filters.search {
         sql.push_str(" AND j.title LIKE ?");
         values.push(Box::new(format!("%{search}%")));
     }
+
+    // Location filtering based on global settings
+    let loc_settings = get_location_settings(conn).unwrap_or_default();
+    let mut location_clauses = Vec::new();
+    
+    if !loc_settings.country.trim().is_empty() {
+        let expanded_country = expand_country_keywords(&loc_settings.country);
+        for c in expanded_country {
+            location_clauses.push("j.location LIKE ?");
+            values.push(Box::new(format!("%{}%", c)));
+        }
+    }
+    if !loc_settings.cities.trim().is_empty() {
+        let expanded_cities = expand_location_keywords(&loc_settings.cities);
+        for city in expanded_cities {
+            location_clauses.push("j.location LIKE ?");
+            values.push(Box::new(format!("%{}%", city)));
+        }
+    }
+    
+    if !location_clauses.is_empty() {
+        sql.push_str(" AND (");
+        sql.push_str(&location_clauses.join(" OR "));
+        sql.push_str(")");
+    }
+
+    // Optionally still support the UI location filter if passed
+    if let Some(location) = &filters.location {
+        sql.push_str(" AND j.location LIKE ?");
+        values.push(Box::new(format!("%{location}%")));
+    }
+
+    if filters.new_from_watch == Some(true) {
+        let keywords = get_watch_role_keywords(conn).unwrap_or_default();
+        if !keywords.trim().is_empty() {
+            let terms: Vec<&str> = keywords.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            if !terms.is_empty() {
+                let mut keyword_clauses = Vec::new();
+                for term in terms {
+                    keyword_clauses.push("j.title LIKE ?");
+                    values.push(Box::new(format!("%{term}%")));
+                }
+                sql.push_str(" AND (");
+                sql.push_str(&keyword_clauses.join(" OR "));
+                sql.push_str(")");
+            }
+        }
+    }
+
     sql.push_str(" ORDER BY j.updated_at DESC");
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
@@ -272,7 +446,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         .query_map(params_ref.as_slice(), |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(18)?,
+                company_name: row.get(19)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -284,10 +458,71 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     Ok(out)
 }
 
+/// The latest known open snapshot from a company's connected ATS boards.
+/// This intentionally includes roles the user previously dismissed: declining
+/// a role is a personal triage choice, not evidence that the company closed it.
+pub fn list_open_watch_positions(
+    conn: &Connection,
+    company_id: &str,
+) -> AppResult<Vec<JobListItem>> {
+    let loc_settings = get_location_settings(conn).unwrap_or_default();
+    let mut sql = String::from(
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
+         FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+         WHERE j.company_id = ?1
+           AND j.posting_state = 'active'
+           AND j.source IN ('greenhouse', 'lever', 'ashby')"
+    );
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(company_id.to_string())];
+
+    let mut location_clauses = Vec::new();
+    
+    if !loc_settings.country.trim().is_empty() {
+        let expanded_country = expand_country_keywords(&loc_settings.country);
+        for c in expanded_country {
+            location_clauses.push("j.location LIKE ?");
+            values.push(Box::new(format!("%{}%", c)));
+        }
+    }
+    if !loc_settings.cities.trim().is_empty() {
+        let expanded_cities = expand_location_keywords(&loc_settings.cities);
+        for city in expanded_cities {
+            location_clauses.push("j.location LIKE ?");
+            values.push(Box::new(format!("%{}%", city)));
+        }
+    }
+    
+    if !location_clauses.is_empty() {
+        sql.push_str(" AND (");
+        sql.push_str(&location_clauses.join(" OR "));
+        sql.push_str(")");
+    }
+
+    sql.push_str(" ORDER BY CASE j.watch_disposition
+       WHEN 'new' THEN 0
+       WHEN 'saved' THEN 1
+       WHEN 'dismissed' THEN 2
+       ELSE 1
+     END, j.title COLLATE NOCASE");
+
+    let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let rows = stmt
+        .query_map(params_ref.as_slice(), |row| {
+            Ok(JobListItem {
+                job: map_job(row)?,
+                company_name: row.get(19)?,
+            })
+        })
+        .map_err(map_sqlite)?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)
+}
+
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
         .prepare(
-            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.missing_from_sync_count, j.created_at, j.updated_at,
+            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at,
                     c.id, c.name, c.careers_url, c.created_at, c.updated_at
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
         )
@@ -298,11 +533,11 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
             Ok((
                 map_job(row)?,
                 Company {
-                    id: row.get(18)?,
-                    name: row.get(19)?,
-                    careers_url: row.get(20)?,
-                    created_at: row.get(21)?,
-                    updated_at: row.get(22)?,
+                    id: row.get(19)?,
+                    name: row.get(20)?,
+                    careers_url: row.get(21)?,
+                    created_at: row.get(22)?,
+                    updated_at: row.get(23)?,
                 },
             ))
         })
@@ -497,7 +732,7 @@ pub fn approve_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
     }
     let timestamp = now_iso();
     conn.execute(
-        "UPDATE jobs SET is_new_from_watch = 0, updated_at = ?1 WHERE id = ?2",
+        "UPDATE jobs SET is_new_from_watch = 0, watch_disposition = 'saved', updated_at = ?1 WHERE id = ?2",
         params![timestamp, job_id],
     )
     .map_err(map_sqlite)?;
@@ -513,12 +748,60 @@ pub fn dismiss_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
     }
     let timestamp = now_iso();
     conn.execute(
-        "UPDATE jobs SET is_new_from_watch = 0, status = 'closed', updated_at = ?1 WHERE id = ?2",
+        "UPDATE jobs SET is_new_from_watch = 0, watch_disposition = 'dismissed', updated_at = ?1 WHERE id = ?2",
         params![timestamp, job_id],
     )
     .map_err(map_sqlite)?;
     add_job_event(conn, job_id, "dismissed_from_watch", None)?;
     get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after dismiss"))
+}
+
+/// Save an open board role to the user's Jobs pipeline, including one that was
+/// previously marked "Not for me".
+pub fn save_open_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    if !matches!(existing.source.as_str(), "greenhouse" | "lever" | "ashby") {
+        return Err(AppError::from("This job did not come from a watched board"));
+    }
+    if existing.posting_state != "active" {
+        return Err(AppError::from("This position is no longer open"));
+    }
+    if existing.watch_disposition.as_deref() == Some("saved") && !existing.is_new_from_watch {
+        return Ok(existing);
+    }
+
+    let timestamp = now_iso();
+    conn.execute(
+        "UPDATE jobs SET is_new_from_watch = 0, watch_disposition = 'saved', status = CASE WHEN status = 'closed' THEN 'wishlist' ELSE status END, updated_at = ?1 WHERE id = ?2",
+        params![timestamp, job_id],
+    )
+    .map_err(map_sqlite)?;
+    add_job_event(conn, job_id, "saved_from_open_board", None)?;
+    get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after save"))
+}
+
+/// Return a role closed by the legacy bulk-dismiss workflow to the New roles
+/// inbox. Jobs already in the user's wishlist or application pipeline retain
+/// their own state and are intentionally not resettable.
+pub fn reset_dismissed_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    if existing.watch_disposition.as_deref() != Some("dismissed") {
+        return Err(AppError::from("This role is not marked Not for me"));
+    }
+    if existing.status != "closed" {
+        return Err(AppError::from(
+            "Only closed watch roles can be reset; wishlist and applied jobs stay unchanged",
+        ));
+    }
+
+    let timestamp = now_iso();
+    conn.execute(
+        "UPDATE jobs SET is_new_from_watch = 1, watch_disposition = 'new', status = 'wishlist', updated_at = ?1 WHERE id = ?2",
+        params![timestamp, job_id],
+    )
+    .map_err(map_sqlite)?;
+    add_job_event(conn, job_id, "reset_watch_dismissal", None)?;
+    get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after reset"))
 }
 
 pub fn add_job_event(
@@ -570,10 +853,7 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
         .prepare(
             "SELECT status, COUNT(*) FROM jobs j \
              WHERE j.is_new_from_watch = 0 \
-               AND NOT EXISTS ( \
-                 SELECT 1 FROM job_events e \
-                 WHERE e.job_id = j.id AND e.type = 'dismissed_from_watch' \
-               ) \
+               AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed') \
              GROUP BY status",
         )
         .map_err(map_sqlite)?;
@@ -656,6 +936,57 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
     Ok(WeeklyActivity { total, days })
 }
 
+pub fn get_watch_role_keywords(conn: &Connection) -> AppResult<String> {
+    let value: Option<String> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'watch_role_keywords'",
+        [],
+        |row| row.get(0),
+    ).optional().map_err(map_sqlite)?;
+    Ok(value.unwrap_or_default())
+}
+
+pub fn set_watch_role_keywords(conn: &Connection, keywords: &str) -> AppResult<()> {
+    let timestamp = now_iso();
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES ('watch_role_keywords', ?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![keywords, timestamp],
+    ).map_err(map_sqlite)?;
+    Ok(())
+}
+
+pub fn get_location_settings(conn: &Connection) -> AppResult<LocationSettings> {
+    let country: Option<String> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'location_country'",
+        [],
+        |row| row.get(0),
+    ).optional().map_err(map_sqlite)?;
+    let cities: Option<String> = conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'location_cities'",
+        [],
+        |row| row.get(0),
+    ).optional().map_err(map_sqlite)?;
+    Ok(LocationSettings {
+        country: country.unwrap_or_default(),
+        cities: cities.unwrap_or_default(),
+    })
+}
+
+pub fn set_location_settings(conn: &Connection, settings: &LocationSettings) -> AppResult<()> {
+    let timestamp = now_iso();
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES ('location_country', ?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![settings.country, timestamp],
+    ).map_err(map_sqlite)?;
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at) VALUES ('location_cities', ?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        params![settings.cities, timestamp],
+    ).map_err(map_sqlite)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -668,7 +999,12 @@ mod tests {
         connection
     }
 
-    fn insert_watch_pending_job(conn: &Connection, company_id: &str, title: &str, url: &str) -> String {
+    fn insert_watch_pending_job(
+        conn: &Connection,
+        company_id: &str,
+        title: &str,
+        url: &str,
+    ) -> String {
         let id = create_id();
         let timestamp = now_iso();
         let canonical = normalize_canonical_url(url).unwrap();
@@ -810,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn dismiss_watch_job_closes_and_clears_flag() {
+    fn dismiss_watch_job_keeps_posting_open_but_hides_it_from_pipeline() {
         let conn = test_connection();
         let company = find_or_create_company(&conn, "Acme", None).unwrap();
         let job_id = insert_watch_pending_job(
@@ -822,7 +1158,8 @@ mod tests {
 
         let dismissed = dismiss_watch_job(&conn, &job_id).unwrap();
         assert!(!dismissed.is_new_from_watch);
-        assert_eq!(dismissed.status, "closed");
+        assert_eq!(dismissed.status, "wishlist");
+        assert_eq!(dismissed.watch_disposition.as_deref(), Some("dismissed"));
 
         let events: Vec<String> = conn
             .prepare("SELECT type FROM job_events WHERE job_id = ?1")
@@ -848,5 +1185,143 @@ mod tests {
         )
         .unwrap();
         assert!(inbox.is_empty());
+    }
+
+    #[test]
+    fn open_watch_positions_include_dismissed_roles_and_can_save_them_again() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+        let job_id = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Pending Role",
+            "https://example.com/jobs/pending",
+        );
+        conn.execute(
+            "UPDATE jobs SET source = 'greenhouse', posting_state = 'active' WHERE id = ?1",
+            params![job_id],
+        )
+        .unwrap();
+
+        dismiss_watch_job(&conn, &job_id).unwrap();
+        let positions = list_open_watch_positions(&conn, &company.id).unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(
+            positions[0].job.watch_disposition.as_deref(),
+            Some("dismissed")
+        );
+
+        let saved = save_open_watch_job(&conn, &job_id).unwrap();
+        assert_eq!(saved.watch_disposition.as_deref(), Some("saved"));
+        assert_eq!(saved.status, "wishlist");
+        assert_eq!(list_jobs(&conn, JobFilters::default()).unwrap().len(), 1);
+        assert_eq!(
+            get_pipeline_counts(&conn).unwrap().get("wishlist"),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn reset_dismissed_watch_job_only_allows_closed_legacy_roles() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+        let job_id = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Pending Role",
+            "https://example.com/jobs/pending",
+        );
+        conn.execute(
+            "UPDATE jobs SET source = 'greenhouse', posting_state = 'active', status = 'closed' WHERE id = ?1",
+            params![job_id],
+        )
+        .unwrap();
+        dismiss_watch_job(&conn, &job_id).unwrap();
+
+        let reset = reset_dismissed_watch_job(&conn, &job_id).unwrap();
+        assert!(reset.is_new_from_watch);
+        assert_eq!(reset.watch_disposition.as_deref(), Some("new"));
+        assert_eq!(reset.status, "wishlist");
+
+        conn.execute(
+            "UPDATE jobs SET is_new_from_watch = 0, watch_disposition = 'dismissed', status = 'applied' WHERE id = ?1",
+            params![job_id],
+        )
+        .unwrap();
+        assert!(reset_dismissed_watch_job(&conn, &job_id).is_err());
+    }
+
+    #[test]
+    fn watch_role_keywords_filter_new_roles_only() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Thinking Machine Labs", None).unwrap();
+        
+        let id1 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer, Developer Productivity, AI Tools",
+            "https://example.com/jobs/1",
+        );
+        let id2 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Research Engineer, Developer Experience, Tinker",
+            "https://example.com/jobs/2",
+        );
+        let id3 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer, Full stack",
+            "https://example.com/jobs/3",
+        );
+
+        // A job that's manually added (is_new_from_watch = 0)
+        let (tracked, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/tracked",
+            "Product Designer",
+            Some("Thinking Machine Labs"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Without keywords, all new_from_watch jobs are returned
+        let inbox = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(inbox.len(), 3);
+
+        // Set keyword to "Software Engineer"
+        set_watch_role_keywords(&conn, "Software Engineer").unwrap();
+
+        // Now inbox should only have the two Software Engineer jobs
+        let filtered_inbox = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(filtered_inbox.len(), 2);
+        let ids: Vec<_> = filtered_inbox.iter().map(|item| item.job.id.as_str()).collect();
+        assert!(ids.contains(&id1.as_str()));
+        assert!(ids.contains(&id3.as_str()));
+        assert!(!ids.contains(&id2.as_str()));
+
+        // The regular pipeline should still include the tracked job,
+        // even though it doesn't match the "Software Engineer" keyword,
+        // because keywords only apply to new_from_watch.
+        let pipeline = list_jobs(&conn, JobFilters::default()).unwrap();
+        let pipeline_ids: Vec<_> = pipeline.iter().map(|item| item.job.id.as_str()).collect();
+        assert!(pipeline_ids.contains(&tracked.id.as_str()));
     }
 }

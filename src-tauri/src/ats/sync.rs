@@ -43,9 +43,10 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         notes: row.get(12)?,
         location: row.get(13)?,
         is_new_from_watch: row.get::<_, i64>(14)? != 0,
-        missing_from_sync_count: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        watch_disposition: row.get(15)?,
+        missing_from_sync_count: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 
@@ -59,8 +60,7 @@ pub fn apply_watch_sync(
     watch_id: &str,
     remote_jobs: Result<Vec<AtsJob>, String>,
 ) -> AppResult<serde_json::Value> {
-    let watch = get_watch(conn, watch_id)?
-        .ok_or_else(|| AppError::from("Watch not found"))?;
+    let watch = get_watch(conn, watch_id)?.ok_or_else(|| AppError::from("Watch not found"))?;
     let synced_at = now_iso();
 
     let remote_jobs = match remote_jobs {
@@ -84,7 +84,7 @@ pub fn apply_watch_sync(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, missing_from_sync_count, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
+            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
         )
         .map_err(map_sqlite)?;
     let existing = stmt
@@ -97,8 +97,7 @@ pub fn apply_watch_sync(
     let mut reactivated = 0usize;
 
     for remote in &remote_jobs {
-        let canonical_url =
-            normalize_canonical_url(&remote.url).map_err(AppError::from)?;
+        let canonical_url = normalize_canonical_url(&remote.url).map_err(AppError::from)?;
         let by_external = existing
             .iter()
             .find(|j| j.source_external_id.as_deref() == Some(remote.external_id.as_str()));
@@ -154,7 +153,7 @@ pub fn apply_watch_sync(
 
         if let Some(job_id) = by_url {
             conn.execute(
-                "UPDATE jobs SET source=?1, source_external_id=?2, company_id=?3, title=?4, location=COALESCE(?5, location), missing_from_sync_count=0, updated_at=?6 WHERE id=?7",
+                "UPDATE jobs SET source=?1, source_external_id=?2, company_id=?3, title=?4, location=COALESCE(?5, location), is_new_from_watch=0, watch_disposition='saved', missing_from_sync_count=0, updated_at=?6 WHERE id=?7",
                 params![
                     watch.provider,
                     remote.external_id,
@@ -174,8 +173,8 @@ pub fn apply_watch_sync(
             r#"INSERT INTO jobs (
                 id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
                 posting_state, last_checked_at, last_check_result, source, notes, location,
-                is_new_from_watch, missing_from_sync_count, created_at, updated_at
-            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,?8,1,0,?9,?9)"#,
+                is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,?8,1,'new',0,?9,?9)"#,
             params![
                 job_id,
                 watch.company_id,

@@ -42,20 +42,24 @@ export function NewRolesPanel({
             new {roles.length === 1 ? "role" : "roles"} from your watches
           </h2>
           <p className="mt-0.5 text-sm text-[var(--muted)]">
-            Not on your list yet. Save the ones worth tracking.
+            {roles.length > 0
+              ? "Not on your list yet. Save the ones worth tracking."
+              : "Your watches are up to date. No new matches found."}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-        >
-          {open ? "Hide" : "Show"}
-        </button>
+        {roles.length > 0 ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setOpen((value) => !value)}
+            aria-expanded={open}
+          >
+            {open ? "Hide" : "Show"}
+          </button>
+        ) : null}
       </div>
 
-      {open ? (
+      {open && roles.length > 0 ? (
         <>
           {roles.length > COLLAPSED_COUNT ? (
             <input

@@ -12,6 +12,7 @@ const appBundle = path.join(
   projectRoot,
   "src-tauri/target/release/bundle/macos/Job Tracker.app",
 );
+const systemAppBundle = "/Applications/Job Tracker.app";
 const appName = "Job Tracker";
 
 const flags = new Set(process.argv.slice(2));
@@ -121,9 +122,9 @@ function quitApp(): void {
 }
 
 function openApp(): void {
-  if (!fs.existsSync(appBundle)) return;
+  if (!fs.existsSync(systemAppBundle)) return;
   try {
-    execSync(`open "${appBundle}"`, { stdio: "ignore" });
+    execSync(`open "${systemAppBundle}"`, { stdio: "ignore" });
   } catch {
     // best-effort relaunch
   }
@@ -189,6 +190,13 @@ function main(): void {
     process.exit(buildCode);
   }
 
+  appendLog(`Copying ${appBundle} to ${systemAppBundle}`);
+  const copyCode = runLogged(`rm -rf "${systemAppBundle}" && cp -R "${appBundle}" "${systemAppBundle}"`, "copy_app");
+  if (copyCode !== 0) {
+    notify("Job Tracker rebuild failed", `Failed to copy app to Applications folder — see ${logPath}`);
+    process.exit(copyCode);
+  }
+
   if (!skipJobs) {
     const jobsCode = runLogged("npm run jobs:install", "jobs:install");
     if (jobsCode !== 0) {
@@ -200,12 +208,12 @@ function main(): void {
   }
 
   if (wasRunning) {
-    appendLog(`Relaunching ${appBundle}`);
+    appendLog(`Relaunching ${systemAppBundle}`);
     openApp();
   }
 
-  appendLog(`Rebuild succeeded: ${appBundle}`);
-  notify("Job Tracker rebuild complete", appBundle);
+  appendLog(`Rebuild succeeded: ${systemAppBundle}`);
+  notify("Job Tracker rebuild complete", systemAppBundle);
 }
 
 main();

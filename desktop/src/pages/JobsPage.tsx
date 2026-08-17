@@ -320,33 +320,37 @@ export function JobsPage() {
           </button>
         </form>
 
-        {newFromWatch.length > 0 ? (
-          <section className="card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="font-display text-lg font-medium">
-                  {roleCountLabel(newFromWatch.length)} from your watches
-                </h3>
-                <p className="mt-0.5 text-sm text-[var(--muted)]">
-                  Not on your list yet. Save the ones worth tracking.
-                </p>
-              </div>
-              {/* This is a preview; Companies is where the full set lives. Saying
-                  so beats silently hiding everything past the fifth role. */}
-              {newFromWatch.length > WATCH_PREVIEW_COUNT ? (
-                <Link to="/companies" className="btn btn-secondary btn-sm">
-                  Browse all {newFromWatch.length}
-                </Link>
-              ) : null}
-            </div>
-            {triageError ? (
-              <p
-                role="alert"
-                className="mt-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-sm text-[var(--danger)]"
-              >
-                {triageError}
+        <section className="card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-display text-lg font-medium">
+                {newFromWatch.length > 0
+                  ? `${roleCountLabel(newFromWatch.length)} from your watches`
+                  : "0 new roles from your watches"}
+              </h3>
+              <p className="mt-0.5 text-sm text-[var(--muted)]">
+                {newFromWatch.length > 0
+                  ? "Not on your list yet. Save the ones worth tracking."
+                  : "Your watches are up to date. No new matches found."}
               </p>
+            </div>
+            {/* This is a preview; Companies is where the full set lives. Saying
+                so beats silently hiding everything past the fifth role. */}
+            {newFromWatch.length > WATCH_PREVIEW_COUNT ? (
+              <Link to="/companies" className="btn btn-secondary btn-sm">
+                Browse all {newFromWatch.length}
+              </Link>
             ) : null}
+          </div>
+          {triageError ? (
+            <p
+              role="alert"
+              className="mt-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-sm text-[var(--danger)]"
+            >
+              {triageError}
+            </p>
+          ) : null}
+          {newFromWatch.length > 0 ? (
             <div className="mt-3">
               <NewRolesList
                 roles={newFromWatch.slice(0, WATCH_PREVIEW_COUNT)}
@@ -357,8 +361,8 @@ export function JobsPage() {
                 isPending={(jobId) => triagingId === jobId}
               />
             </div>
-          </section>
-        ) : null}
+          ) : null}
+        </section>
 
         {jobs.length === 0 ? (
           <div className="card flex flex-col items-center gap-3 px-6 py-16 text-center">

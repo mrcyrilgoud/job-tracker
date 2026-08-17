@@ -96,6 +96,24 @@ export function useCompanyActions(onChanged: () => void) {
     [onChanged, run],
   );
 
+  const saveOpenRole = useCallback(
+    (jobId: string) => {
+      void run(`save-open:${jobId}`, () => api.saveOpenWatchJob(jobId), () => null).then(() =>
+        onChanged(),
+      );
+    },
+    [onChanged, run],
+  );
+
+  const resetDismissedRole = useCallback(
+    (jobId: string) => {
+      void run(`reset:${jobId}`, () => api.resetDismissedWatchJob(jobId), () => null).then(() =>
+        onChanged(),
+      );
+    },
+    [onChanged, run],
+  );
+
   return {
     isPending,
     feedback,
@@ -106,5 +124,7 @@ export function useCompanyActions(onChanged: () => void) {
     checkCareers,
     dismissReview,
     triageRole,
+    saveOpenRole,
+    resetDismissedRole,
   };
 }

@@ -21,7 +21,13 @@ export type JobFilters = {
   companyId?: string;
   postingState?: string;
   search?: string;
+  location?: string;
   newFromWatch?: boolean;
+};
+
+export type LocationSettings = {
+  country: string;
+  cities: string;
 };
 
 export type CreateJobInput = {
@@ -81,6 +87,18 @@ export type GmailStatus = {
   }>;
 };
 
+export type CsvConfig = {
+  path: string;
+  defaultPath: string;
+  isCustom: boolean;
+};
+
+export type CsvPathStatus = {
+  path: string;
+  exists: boolean;
+  defaultPath: string;
+};
+
 export type JobsRunnerProgress = {
   phase: string;
   message: string;
@@ -122,6 +140,9 @@ export const api = {
 
   listCompanies: () => call<{ companies: CompanyRow[] }>("list_companies"),
 
+  listOpenWatchPositions: (companyId: string) =>
+    call<{ positions: JobListItem[] }>("list_open_watch_positions_cmd", { companyId }),
+
   createCompany: (name: string, careersUrl?: string | null) =>
     call<{ company: Company }>("create_company", {
       input: { name, careersUrl: careersUrl ?? null },
@@ -149,6 +170,12 @@ export const api = {
   dismissWatchJob: (jobId: string) =>
     call<{ job: Job }>("dismiss_watch_job_cmd", { jobId }),
 
+  saveOpenWatchJob: (jobId: string) =>
+    call<{ job: Job }>("save_open_watch_job_cmd", { jobId }),
+
+  resetDismissedWatchJob: (jobId: string) =>
+    call<{ job: Job }>("reset_dismissed_watch_job_cmd", { jobId }),
+
   listDocuments: () => call<{ documents: DocumentListItem[] }>("list_documents"),
 
   importDocument: (input: ImportDocumentInput) =>
@@ -158,6 +185,15 @@ export const api = {
     call<{ attachment: unknown }>("attach_document", { jobId, documentId, kind }),
 
   openDocument: (documentId: string) => call<{ ok: boolean }>("open_document", { documentId }),
+
+  csvConfig: () => call<CsvConfig>("csv_config"),
+
+  csvPathStatus: (path: string) => call<CsvPathStatus>("csv_path_status", { path }),
+
+  configureCsv: (path: string, mode: "import" | "replace") =>
+    call<CsvConfig>("csv_configure", { input: { path, mode } }),
+
+  resetCsvConfig: () => call<CsvConfig>("csv_reset_config"),
 
   gmailStatus: () => call<GmailStatus>("gmail_status"),
 
@@ -176,4 +212,14 @@ export const api = {
   runJobsCycle: () => call<Record<string, unknown>>("run_jobs_cycle_cmd"),
 
   checkAllPostings: () => call<Record<string, unknown>>("check_all_postings_cmd"),
+
+  getWatchRoleKeywords: () => call<string>("get_watch_role_keywords"),
+
+  setWatchRoleKeywords: (keywords: string) =>
+    call<{ ok: boolean }>("set_watch_role_keywords", { keywords }),
+
+  getLocationSettings: () => call<LocationSettings>("get_location_settings_cmd"),
+
+  setLocationSettings: (settings: LocationSettings) =>
+    call<{ ok: boolean }>("set_location_settings_cmd", { settings }),
 };

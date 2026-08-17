@@ -37,7 +37,6 @@ impl AppState {
         let csv_export = CsvExportCoordinator::new(
             paths.db_path.clone(),
             paths.jobs_csv_path.clone(),
-            paths.jobs_csv_lock_path.clone(),
         );
         Ok(Self {
             paths,

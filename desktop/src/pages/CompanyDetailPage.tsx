@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { CompanyCard } from "@/components/companies/CompanyCard";
+import { OpenPositionsPanel } from "@/components/companies/OpenPositionsPanel";
 import { api } from "@/lib/api";
 import type { CompanyRow, JobListItem } from "@/lib/schema";
 import { useCompanyActions } from "@/lib/use-company-actions";
@@ -15,6 +16,7 @@ export function CompanyDetailPage() {
   const { id } = useParams();
   const [row, setRow] = useState<CompanyRow | null>(null);
   const [newRoles, setNewRoles] = useState<JobListItem[]>([]);
+  const [openPositions, setOpenPositions] = useState<JobListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,12 +24,14 @@ export function CompanyDetailPage() {
     if (!id) return;
     setError(null);
     try {
-      const [companyResult, roleResult] = await Promise.all([
+      const [companyResult, roleResult, positionsResult] = await Promise.all([
         api.listCompanies(),
         api.listJobs({ companyId: id, newFromWatch: true }),
+        api.listOpenWatchPositions(id),
       ]);
       setRow(companyResult.companies.find((candidate) => candidate.company.id === id) ?? null);
       setNewRoles(roleResult.jobs);
+      setOpenPositions(positionsResult.positions);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load company");
     } finally {
@@ -40,15 +44,6 @@ export function CompanyDetailPage() {
   }, [load]);
 
   const actions = useCompanyActions(() => void load());
-
-  // On a single-company page there is nothing competing for the space, so show
-  // what the watch found rather than making the user open it.
-  const { toggleRoles } = actions;
-  const companyId = row?.company.id;
-  const hasRoles = newRoles.length > 0;
-  useEffect(() => {
-    if (companyId && hasRoles) toggleRoles(companyId, true);
-  }, [companyId, hasRoles, toggleRoles]);
 
   if (!loaded) return <p className="text-sm text-[var(--muted)]">Loading company…</p>;
   if (error) {
@@ -82,6 +77,7 @@ export function CompanyDetailPage() {
         row={row}
         roles={newRoles}
         solo
+        showNewRoles={false}
         rolesOpen={actions.openRoles.has(row.company.id)}
         onToggleRoles={() => actions.toggleRoles(row.company.id)}
         onChanged={() => void load()}
@@ -95,6 +91,15 @@ export function CompanyDetailPage() {
         onTriage={actions.triageRole}
         isPending={actions.isPending}
         feedback={actions.feedback}
+      />
+
+      <OpenPositionsPanel
+        positions={openPositions}
+        watches={row.watches}
+        onSave={actions.saveOpenRole}
+        onDismissNew={(jobId) => actions.triageRole(jobId, "skip")}
+        onResetDismissed={actions.resetDismissedRole}
+        isPending={actions.isPending}
       />
 
       <Link

@@ -124,6 +124,15 @@ export function ArrowUpRightIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function SettingsIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.2 2.2-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V20.4h-3.1v-.1A1.7 1.7 0 0 0 10.5 18.7a1.7 1.7 0 0 0-1.87.34l-.06.06-2.2-2.2.06-.06A1.7 1.7 0 0 0 6.77 15a1.7 1.7 0 0 0-1.56-1.04h-.1v-3.1h.1A1.7 1.7 0 0 0 6.77 9.8a1.7 1.7 0 0 0-.34-1.87l-.06-.06 2.2-2.2.06.06a1.7 1.7 0 0 0 1.87.34 1.7 1.7 0 0 0 1.04-1.56v-.1h3.1v.1a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06 2.2 2.2-.06.06a1.7 1.7 0 0 0-.34 1.87 1.7 1.7 0 0 0 1.56 1.04h.1v3.1h-.1A1.7 1.7 0 0 0 19.4 15Z" />
+    </svg>
+  );
+}
+
 type IconComponent = (props: IconProps) => React.JSX.Element;
 
 export const statusIcons: Record<JobStatus, IconComponent> = {

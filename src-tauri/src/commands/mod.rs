@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::path::PathBuf;
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -18,12 +19,19 @@ use crate::gmail;
 use crate::jobs::board_discovery::discover_from_url;
 use crate::jobs::check_active::{apply_posting_check, fetch_posting_state, load_job_check_context};
 use crate::jobs::csv::{export_jobs_csv, get_jobs_csv_status, import_jobs_csv, ImportMode};
+use crate::jobs::csv_config::{
+    active_csv_path, clear_custom_csv_path, csv_lock_path, get_csv_config, set_custom_csv_path,
+    validate_csv_path, CsvConfig,
+};
 use crate::jobs::csv_export::with_csv_file_lock;
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::service::{
     approve_watch_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_detail,
-    get_pipeline_counts, get_weekly_activity, list_jobs, resolve_title_from_url, update_job,
-    JobFilters, UpdateJobInput,
+    get_location_settings, get_pipeline_counts, get_watch_role_keywords as service_get_keywords,
+    get_weekly_activity, list_jobs, list_open_watch_positions, reset_dismissed_watch_job,
+    resolve_title_from_url, save_open_watch_job, set_location_settings,
+    set_watch_role_keywords as service_set_keywords, update_job, JobFilters, LocationSettings,
+    UpdateJobInput,
 };
 use crate::runner::{check_all_postings, run_jobs_cycle, try_lock_runner};
 
@@ -34,6 +42,7 @@ pub struct ListJobsArgs {
     pub company_id: Option<String>,
     pub posting_state: Option<String>,
     pub search: Option<String>,
+    pub location: Option<String>,
     pub new_from_watch: Option<bool>,
 }
 
@@ -47,6 +56,7 @@ pub async fn list_jobs_cmd(
         company_id: None,
         posting_state: None,
         search: None,
+        location: None,
         new_from_watch: None,
     });
     state.with_db(|conn| {
@@ -57,6 +67,7 @@ pub async fn list_jobs_cmd(
                 company_id: filters.company_id,
                 posting_state: filters.posting_state,
                 search: filters.search,
+                location: filters.location,
                 new_from_watch: filters.new_from_watch,
             },
         )?;
@@ -498,6 +509,17 @@ pub async fn list_companies(state: State<'_, AppState>) -> AppResult<serde_json:
     })
 }
 
+#[tauri::command]
+pub async fn list_open_watch_positions_cmd(
+    state: State<'_, AppState>,
+    company_id: String,
+) -> AppResult<serde_json::Value> {
+    state.with_db(|conn| {
+        let positions = list_open_watch_positions(conn, &company_id)?;
+        Ok(serde_json::json!({ "positions": positions }))
+    })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCompanyArgs {
@@ -610,6 +632,32 @@ pub async fn dismiss_watch_job_cmd(
 ) -> AppResult<serde_json::Value> {
     let result = state.with_db_tx(|conn| {
         let job = dismiss_watch_job(conn, &job_id)?;
+        Ok(serde_json::json!({ "job": job }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn save_open_watch_job_cmd(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        let job = save_open_watch_job(conn, &job_id)?;
+        Ok(serde_json::json!({ "job": job }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn reset_dismissed_watch_job_cmd(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        let job = reset_dismissed_watch_job(conn, &job_id)?;
         Ok(serde_json::json!({ "job": job }))
     })?;
     state.csv_export.mark_dirty();
@@ -736,7 +784,10 @@ pub async fn open_document(
 #[tauri::command]
 pub async fn csv_status(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
     state.with_db(|conn| {
-        let status = get_jobs_csv_status(conn, &state.paths.jobs_csv_path)?;
+        let csv_path = active_csv_path(conn, &state.paths.jobs_csv_path)?;
+        let status = with_csv_file_lock(&csv_lock_path(&csv_path), || {
+            get_jobs_csv_status(conn, &csv_path)
+        })?;
         Ok(serde_json::json!(status))
     })
 }
@@ -744,13 +795,14 @@ pub async fn csv_status(state: State<'_, AppState>) -> AppResult<serde_json::Val
 #[tauri::command]
 pub async fn csv_export(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
     let paths = state.paths.clone();
-    let result = with_csv_file_lock(&paths.jobs_csv_lock_path, || {
+    let csv_path = state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
+    let result = with_csv_file_lock(&csv_lock_path(&csv_path), || {
         // Dedicated connection so interactive export does not hold the UI mutex for CSV I/O.
         let conn = Connection::open(&paths.db_path)
             .map_err(|e| crate::error::AppError::from(e.to_string()))?;
         conn.pragma_update(None, "busy_timeout", 5000i32)
             .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        export_jobs_csv(&conn, &paths.jobs_csv_path, None)
+        export_jobs_csv(&conn, &csv_path, None)
     })?;
     Ok(serde_json::json!(result))
 }
@@ -774,14 +826,131 @@ pub async fn csv_import(
     };
     // Open a dedicated connection so async import does not hold the UI mutex across awaits.
     let paths = state.paths.clone();
-    let result = import_jobs_csv(
-        &paths.db_path,
-        &paths.jobs_csv_path,
-        input.content.as_deref(),
-        input.dry_run.unwrap_or(false),
-        mode,
-    )?;
+    let csv_path = state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
+    let result = with_csv_file_lock(&csv_lock_path(&csv_path), || {
+        import_jobs_csv(
+            &paths.db_path,
+            &csv_path,
+            input.content.as_deref(),
+            input.dry_run.unwrap_or(false),
+            mode,
+        )
+    })?;
     Ok(serde_json::json!(result))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CsvConfigureArgs {
+    pub path: String,
+    pub mode: String,
+}
+
+#[tauri::command]
+pub async fn csv_config(state: State<'_, AppState>) -> AppResult<CsvConfig> {
+    state.with_db(|conn| get_csv_config(conn, &state.paths.jobs_csv_path))
+}
+
+#[tauri::command]
+pub async fn csv_path_status(
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<serde_json::Value> {
+    let path = validate_csv_path(&PathBuf::from(path))?;
+    Ok(serde_json::json!({
+        "path": path,
+        "exists": path.exists(),
+        "defaultPath": state.paths.jobs_csv_path,
+    }))
+}
+
+#[tauri::command]
+pub async fn csv_configure(
+    state: State<'_, AppState>,
+    input: CsvConfigureArgs,
+) -> AppResult<CsvConfig> {
+    let mode = match input.mode.as_str() {
+        "import" => ImportMode::Merge,
+        "replace" => ImportMode::OverwriteEditable,
+        _ => return Err(crate::error::AppError::from("CSV mode must be import or replace")),
+    };
+    let csv_path = validate_csv_path(&PathBuf::from(input.path))?;
+    if matches!(&mode, ImportMode::Merge) && !csv_path.exists() {
+        return Err(crate::error::AppError::from("CSV file not found for import"));
+    }
+
+    let _runner_guard = state
+        .runner_lock
+        .try_lock()
+        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
+    let _runner_file = try_lock_runner(&state.paths)?;
+    let paths = state.paths.clone();
+    state
+        .csv_export
+        .with_exclusive(|| {
+            let previous = state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
+            state.with_db(|conn| set_custom_csv_path(conn, &paths.jobs_csv_path, &csv_path))?;
+            let result = with_csv_file_lock(&csv_lock_path(&csv_path), || match mode {
+                ImportMode::Merge => import_jobs_csv(
+                    &paths.db_path,
+                    &csv_path,
+                    None,
+                    false,
+                    ImportMode::Merge,
+                )
+                .map(|_| ()),
+                ImportMode::OverwriteEditable => {
+                    let conn = Connection::open(&paths.db_path)
+                        .map_err(|error| crate::error::AppError::from(error.to_string()))?;
+                    export_jobs_csv(&conn, &csv_path, None).map(|_| ())
+                }
+            });
+            if let Err(error) = result {
+                restore_csv_config(&state, &paths, &previous)?;
+                return Err(error);
+            }
+            state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn csv_reset_config(state: State<'_, AppState>) -> AppResult<CsvConfig> {
+    let _runner_guard = state
+        .runner_lock
+        .try_lock()
+        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
+    let _runner_file = try_lock_runner(&state.paths)?;
+    let paths = state.paths.clone();
+    let default_csv_path = paths.jobs_csv_path.clone();
+    state
+        .csv_export
+        .with_exclusive(|| {
+            let previous = state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
+            state.with_db(|conn| clear_custom_csv_path(conn, &paths.jobs_csv_path))?;
+            let result = with_csv_file_lock(&csv_lock_path(&default_csv_path), || {
+                let conn = Connection::open(&paths.db_path)
+                    .map_err(|error| crate::error::AppError::from(error.to_string()))?;
+                export_jobs_csv(&conn, &default_csv_path, None).map(|_| ())
+            });
+            if let Err(error) = result {
+                restore_csv_config(&state, &paths, &previous)?;
+                return Err(error);
+            }
+            state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))
+        })
+        .await
+}
+
+fn restore_csv_config(state: &AppState, paths: &crate::db::DataPaths, previous: &CsvConfig) -> AppResult<()> {
+    state.with_db(|conn| {
+        if previous.is_custom {
+            set_custom_csv_path(conn, &paths.jobs_csv_path, &PathBuf::from(&previous.path))?;
+        } else {
+            clear_custom_csv_path(conn, &paths.jobs_csv_path)?;
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -889,6 +1058,36 @@ pub async fn check_all_postings_cmd(
 #[tauri::command]
 pub async fn get_data_dir(state: State<'_, AppState>) -> AppResult<String> {
     Ok(state.paths.data_dir.display().to_string())
+}
+
+#[tauri::command]
+pub async fn get_watch_role_keywords(state: State<'_, AppState>) -> AppResult<String> {
+    let conn = state.db.lock();
+    service_get_keywords(&conn)
+}
+
+#[tauri::command]
+pub async fn set_watch_role_keywords(
+    state: State<'_, AppState>,
+    keywords: String,
+) -> AppResult<()> {
+    let conn = state.db.lock();
+    service_set_keywords(&conn, &keywords)
+}
+
+#[tauri::command]
+pub async fn get_location_settings_cmd(state: State<'_, AppState>) -> AppResult<LocationSettings> {
+    let conn = state.db.lock();
+    get_location_settings(&conn)
+}
+
+#[tauri::command]
+pub async fn set_location_settings_cmd(
+    state: State<'_, AppState>,
+    settings: LocationSettings,
+) -> AppResult<()> {
+    let conn = state.db.lock();
+    set_location_settings(&conn, &settings)
 }
 
 #[allow(dead_code)]

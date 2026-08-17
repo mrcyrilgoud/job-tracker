@@ -19,6 +19,7 @@ export function CompanyCard({
   row,
   roles,
   solo = false,
+  showNewRoles = true,
   rolesOpen,
   onToggleRoles,
   onChanged,
@@ -34,6 +35,8 @@ export function CompanyCard({
   roles: JobListItem[];
   /** Rendered as the whole page for one company rather than one card in a list. */
   solo?: boolean;
+  /** The detail page renders new roles within its complete open-positions list. */
+  showNewRoles?: boolean;
   rolesOpen: boolean;
   onToggleRoles: () => void;
   onChanged: () => void;
@@ -85,7 +88,7 @@ export function CompanyCard({
           ) : null}
         </div>
 
-        {roles.length > 0 ? (
+        {showNewRoles && roles.length > 0 ? (
           <button
             type="button"
             onClick={onToggleRoles}
@@ -165,7 +168,7 @@ export function CompanyCard({
         </div>
       ) : null}
 
-      {rolesOpen && roles.length > 0 ? (
+      {showNewRoles && rolesOpen && roles.length > 0 ? (
         <div className="rounded-xl bg-[var(--surface-muted)] p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium">
@@ -209,6 +212,14 @@ export function CompanyCard({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
+        {!solo && row.openPositionCount > 0 ? (
+          <Link
+            to={`/companies/${company.id}`}
+            className="btn btn-ghost btn-sm px-0"
+          >
+            See {row.openPositionCount} open {row.openPositionCount === 1 ? "position" : "positions"}
+          </Link>
+        ) : null}
         {row.watches.length > 0 && !connecting ? (
           <button
             type="button"

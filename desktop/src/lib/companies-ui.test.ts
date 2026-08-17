@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canResetDismissedWatchRole,
   groupRolesByCompany,
   matchesRoleSearch,
   providerLabel,
@@ -43,6 +44,7 @@ function role(overrides: Partial<Job> & Pick<Job, "id">, companyName = "Acme"): 
       notes: null,
       location: null,
       isNewFromWatch: true,
+      watchDisposition: "new",
       missingFromSyncCount: 0,
       createdAt: "2026-07-01T00:00:00.000Z",
       updatedAt: "2026-07-02T00:00:00.000Z",
@@ -181,5 +183,26 @@ describe("matchesRoleSearch", () => {
 
   it("tolerates a missing location", () => {
     expect(matchesRoleSearch(role({ id: "b", location: null }), "engineer")).toBe(true);
+  });
+});
+
+describe("canResetDismissedWatchRole", () => {
+  it("allows only closed roles dismissed by the legacy watch workflow", () => {
+    expect(
+      canResetDismissedWatchRole(
+        role({ id: "closed", status: "closed", watchDisposition: "dismissed" }).job,
+      ),
+    ).toBe(true);
+  });
+
+  it("excludes wishlist and applied jobs", () => {
+    expect(
+      canResetDismissedWatchRole(role({ id: "wish", watchDisposition: "dismissed" }).job),
+    ).toBe(false);
+    expect(
+      canResetDismissedWatchRole(
+        role({ id: "applied", status: "applied", watchDisposition: "dismissed" }).job,
+      ),
+    ).toBe(false);
   });
 });

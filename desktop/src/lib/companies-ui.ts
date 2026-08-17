@@ -1,4 +1,4 @@
-import type { CompanyWatch, JobListItem, WatchProvider } from "@/lib/schema";
+import type { CompanyWatch, Job, JobListItem, WatchProvider } from "@/lib/schema";
 import type { Presentation } from "@/lib/ui";
 
 export function providerLabel(provider: WatchProvider | string): string {
@@ -97,4 +97,12 @@ export function matchesRoleSearch(role: JobListItem, query: string): boolean {
   return [role.job.title, role.job.location ?? "", role.companyName].some((field) =>
     field.toLowerCase().includes(trimmed),
   );
+}
+
+/** Reset only roles closed by the legacy bulk-dismiss action. Jobs already in
+ * the user's wishlist or application pipeline must remain untouched. */
+export function canResetDismissedWatchRole(
+  job: Pick<Job, "status" | "watchDisposition">,
+): boolean {
+  return job.watchDisposition === "dismissed" && job.status === "closed";
 }

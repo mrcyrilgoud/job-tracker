@@ -5,6 +5,7 @@ import {
   BuildingIcon,
   DocumentIcon,
   MailIcon,
+  SettingsIcon,
 } from "@/components/icons";
 import { RunJobsButton } from "@/components/RunJobsButton";
 
@@ -13,6 +14,7 @@ const nav = [
   { href: "/documents", label: "Documents", Icon: DocumentIcon },
   { href: "/companies", label: "Companies", Icon: BuildingIcon },
   { href: "/gmail", label: "Gmail", Icon: MailIcon },
+  { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];
 
 export function Layout() {

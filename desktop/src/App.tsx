@@ -9,6 +9,7 @@ import { GmailPage } from "@/pages/GmailPage";
 import { JobDetailPage } from "@/pages/JobDetailPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { NewJobPage } from "@/pages/NewJobPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 
 function BrowserOnlyNotice() {
   return (
@@ -52,6 +53,7 @@ export function App() {
           <Route path="companies" element={<CompaniesPage />} />
           <Route path="companies/:id" element={<CompanyDetailPage />} />
           <Route path="gmail" element={<GmailPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>
