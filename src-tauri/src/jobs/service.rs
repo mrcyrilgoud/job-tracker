@@ -252,6 +252,12 @@ fn expand_country_keywords(country: &str) -> Vec<String> {
         expanded.push("usa".to_string());
         expanded.push(", us".to_string());
         expanded.push("remote - us".to_string());
+        expanded.push("EXACT:us".to_string());
+        expanded.push("us,%".to_string());
+        expanded.push("% us %".to_string());
+        expanded.push("%(us)%".to_string());
+        expanded.push("%us -%".to_string());
+        expanded.push("%- us%".to_string());
         
         let states = vec![
             "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", 
@@ -391,28 +397,46 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
 
     // Location filtering based on global settings
-    let loc_settings = get_location_settings(conn).unwrap_or_default();
-    let mut location_clauses = Vec::new();
-    
-    if !loc_settings.country.trim().is_empty() {
-        let expanded_country = expand_country_keywords(&loc_settings.country);
-        for c in expanded_country {
-            location_clauses.push("j.location LIKE ?");
-            values.push(Box::new(format!("%{}%", c)));
+    if filters.new_from_watch == Some(true) {
+        let loc_settings = get_location_settings(conn).unwrap_or_default();
+        let mut location_clauses = Vec::new();
+        
+        if !loc_settings.country.trim().is_empty() {
+            let expanded_country = expand_country_keywords(&loc_settings.country);
+            for c in expanded_country {
+                if let Some(exact) = c.strip_prefix("EXACT:") {
+                    location_clauses.push("j.location COLLATE NOCASE = ?");
+                    values.push(Box::new(exact.to_string()));
+                } else if c.contains('%') {
+                    location_clauses.push("j.location LIKE ?");
+                    values.push(Box::new(c));
+                } else {
+                    location_clauses.push("j.location LIKE ?");
+                    values.push(Box::new(format!("%{}%", c)));
+                }
+            }
         }
-    }
-    if !loc_settings.cities.trim().is_empty() {
-        let expanded_cities = expand_location_keywords(&loc_settings.cities);
-        for city in expanded_cities {
-            location_clauses.push("j.location LIKE ?");
-            values.push(Box::new(format!("%{}%", city)));
+        if !loc_settings.cities.trim().is_empty() {
+            let expanded_cities = expand_location_keywords(&loc_settings.cities);
+            for city in expanded_cities {
+                if let Some(exact) = city.strip_prefix("EXACT:") {
+                    location_clauses.push("j.location COLLATE NOCASE = ?");
+                    values.push(Box::new(exact.to_string()));
+                } else if city.contains('%') {
+                    location_clauses.push("j.location LIKE ?");
+                    values.push(Box::new(city));
+                } else {
+                    location_clauses.push("j.location LIKE ?");
+                    values.push(Box::new(format!("%{}%", city)));
+                }
+            }
         }
-    }
-    
-    if !location_clauses.is_empty() {
-        sql.push_str(" AND (");
-        sql.push_str(&location_clauses.join(" OR "));
-        sql.push_str(")");
+        
+        if !location_clauses.is_empty() {
+            sql.push_str(" AND (");
+            sql.push_str(&location_clauses.join(" OR "));
+            sql.push_str(")");
+        }
     }
 
     // Optionally still support the UI location filter if passed
@@ -480,15 +504,31 @@ pub fn list_open_watch_positions(
     if !loc_settings.country.trim().is_empty() {
         let expanded_country = expand_country_keywords(&loc_settings.country);
         for c in expanded_country {
-            location_clauses.push("j.location LIKE ?");
-            values.push(Box::new(format!("%{}%", c)));
+            if let Some(exact) = c.strip_prefix("EXACT:") {
+                location_clauses.push("j.location COLLATE NOCASE = ?");
+                values.push(Box::new(exact.to_string()));
+            } else if c.contains('%') {
+                location_clauses.push("j.location LIKE ?");
+                values.push(Box::new(c));
+            } else {
+                location_clauses.push("j.location LIKE ?");
+                values.push(Box::new(format!("%{}%", c)));
+            }
         }
     }
     if !loc_settings.cities.trim().is_empty() {
         let expanded_cities = expand_location_keywords(&loc_settings.cities);
         for city in expanded_cities {
-            location_clauses.push("j.location LIKE ?");
-            values.push(Box::new(format!("%{}%", city)));
+            if let Some(exact) = city.strip_prefix("EXACT:") {
+                location_clauses.push("j.location COLLATE NOCASE = ?");
+                values.push(Box::new(exact.to_string()));
+            } else if city.contains('%') {
+                location_clauses.push("j.location LIKE ?");
+                values.push(Box::new(city));
+            } else {
+                location_clauses.push("j.location LIKE ?");
+                values.push(Box::new(format!("%{}%", city)));
+            }
         }
     }
     
