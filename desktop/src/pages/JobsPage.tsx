@@ -320,7 +320,7 @@ export function JobsPage() {
           </button>
         </form>
 
-        {!status ? (
+        {!isFiltered ? (
           <section className="card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>

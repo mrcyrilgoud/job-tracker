@@ -254,20 +254,32 @@ fn expand_country_keywords(country: &str) -> Vec<String> {
         expanded.push("remote - us".to_string());
         expanded.push("EXACT:us".to_string());
         expanded.push("us,%".to_string());
+        expanded.push("us %".to_string());
+        expanded.push("% us".to_string());
         expanded.push("% us %".to_string());
         expanded.push("%(us)%".to_string());
         expanded.push("%us -%".to_string());
         expanded.push("%- us%".to_string());
         
         let states = vec![
-            "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", 
-            "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md", 
-            "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", 
-            "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", 
-            "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy"
+            "al", "alabama", "ak", "alaska", "az", "arizona", "ar", "arkansas", 
+            "ca", "california", "co", "colorado", "ct", "connecticut", "de", "delaware", 
+            "fl", "florida", "ga", "georgia", "hi", "hawaii", "id", "idaho", 
+            "il", "illinois", "in", "indiana", "ia", "iowa", "ks", "kansas", 
+            "ky", "kentucky", "la", "louisiana", "me", "maine", "md", "maryland", 
+            "ma", "massachusetts", "mi", "michigan", "mn", "minnesota", "ms", "mississippi", 
+            "mo", "missouri", "mt", "montana", "ne", "nebraska", "nv", "nevada", 
+            "nh", "new hampshire", "nj", "new jersey", "nm", "new mexico", "ny", "new york", 
+            "nc", "north carolina", "nd", "north dakota", "oh", "ohio", "ok", "oklahoma", 
+            "or", "oregon", "pa", "pennsylvania", "ri", "rhode island", "sc", "south carolina", 
+            "sd", "south dakota", "tn", "tennessee", "tx", "texas", "ut", "utah", 
+            "vt", "vermont", "va", "virginia", "wa", "washington", "wv", "west virginia", 
+            "wi", "wisconsin", "wy", "wyoming"
         ];
         for state in states {
             expanded.push(format!(", {}", state));
+            expanded.push(format!(" {}", state));
+            expanded.push(format!("EXACT:{}", state));
         }
 
         let hubs = vec![
@@ -538,12 +550,16 @@ pub fn list_open_watch_positions(
         sql.push_str(")");
     }
 
-    sql.push_str(" ORDER BY CASE j.watch_disposition
-       WHEN 'new' THEN 0
-       WHEN 'saved' THEN 1
-       WHEN 'dismissed' THEN 2
-       ELSE 1
-     END, j.title COLLATE NOCASE");
+    if filters.new_from_watch == Some(true) {
+        sql.push_str(" ORDER BY CASE j.watch_disposition
+           WHEN 'new' THEN 0
+           WHEN 'saved' THEN 1
+           WHEN 'dismissed' THEN 2
+           ELSE 1
+         END, j.title COLLATE NOCASE");
+    } else {
+        sql.push_str(" ORDER BY j.updated_at DESC");
+    }
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
