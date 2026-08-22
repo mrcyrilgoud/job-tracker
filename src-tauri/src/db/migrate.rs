@@ -32,6 +32,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       is_new_from_watch INTEGER NOT NULL DEFAULT 0,
       watch_disposition TEXT,
       missing_from_sync_count INTEGER NOT NULL DEFAULT 0,
+      is_favorite BOOLEAN NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -136,18 +137,27 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     )?;
 
     // `CREATE TABLE IF NOT EXISTS` does not evolve databases created by older
-    // releases, so add this column separately before reading or writing it.
-    let has_disposition = conn
+    // releases, so add columns separately before reading or writing them.
+    let table_columns = conn
         .prepare("PRAGMA table_info(jobs)")?
         .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?
-        .iter()
-        .any(|name| name == "watch_disposition");
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let has_disposition = table_columns.iter().any(|name| name == "watch_disposition");
     if !has_disposition {
         conn.execute("ALTER TABLE jobs ADD COLUMN watch_disposition TEXT", [])?;
     }
     conn.execute(
         "CREATE INDEX IF NOT EXISTS jobs_company_open_watch_idx ON jobs(company_id, posting_state, watch_disposition)",
+        [],
+    )?;
+
+    let has_favorite = table_columns.iter().any(|name| name == "is_favorite");
+    if !has_favorite {
+        conn.execute("ALTER TABLE jobs ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT 0", [])?;
+    }
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS jobs_is_favorite_updated_at_idx ON jobs(is_favorite, updated_at)",
         [],
     )?;
 
@@ -169,4 +179,62 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         "#,
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrates_legacy_database_without_is_favorite() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Simulate a legacy schema before is_favorite was introduced
+        conn.execute_batch(
+            r#"
+            CREATE TABLE companies (
+              id TEXT PRIMARY KEY NOT NULL,
+              name TEXT NOT NULL,
+              careers_url TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE jobs (
+              id TEXT PRIMARY KEY NOT NULL,
+              company_id TEXT NOT NULL REFERENCES companies(id),
+              title TEXT NOT NULL,
+              url TEXT NOT NULL,
+              canonical_url TEXT NOT NULL,
+              source_external_id TEXT,
+              status TEXT NOT NULL DEFAULT 'wishlist',
+              applied_at TEXT,
+              posting_state TEXT NOT NULL DEFAULT 'unknown',
+              last_checked_at TEXT,
+              last_check_result TEXT,
+              source TEXT NOT NULL DEFAULT 'manual',
+              notes TEXT,
+              location TEXT,
+              is_new_from_watch INTEGER NOT NULL DEFAULT 0,
+              missing_from_sync_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+
+        // Run migration on existing legacy database
+        migrate(&conn).unwrap();
+
+        // Verify column and index exist
+        let cols = conn
+            .prepare("PRAGMA table_info(jobs)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(cols.contains(&"is_favorite".to_string()));
+        assert!(cols.contains(&"watch_disposition".to_string()));
+    }
 }

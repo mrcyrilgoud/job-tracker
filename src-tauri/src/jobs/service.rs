@@ -40,12 +40,13 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         is_new_from_watch: row.get::<_, i64>(14)? != 0,
         watch_disposition: row.get(15)?,
         missing_from_sync_count: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        is_favorite: row.get::<_, i64>(17)? != 0,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
     })
 }
 
-const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at";
+const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at";
 
 /// Resolve a page title via network. Callers must not hold a DB mutex across this.
 pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
@@ -131,8 +132,8 @@ pub fn create_job_from_url_with_careers(
         r#"INSERT INTO jobs (
             id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
             posting_state, last_checked_at, last_check_result, source, notes, location,
-            is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,0,NULL,0,?10,?10)"#,
+            is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at
+        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,0,NULL,0,0,?10,?10)"#,
         params![
             job_id,
             company.id,
@@ -229,6 +230,7 @@ pub struct JobFilters {
     pub search: Option<String>,
     pub location: Option<String>,
     pub new_from_watch: Option<bool>,
+    pub is_favorite: Option<bool>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
@@ -377,7 +379,7 @@ fn expand_location_keywords(cities: &str) -> Vec<String> {
 
 pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
     let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE 1=1",
     );
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -393,6 +395,9 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     if let Some(posting_state) = &filters.posting_state {
         sql.push_str(" AND j.posting_state = ?");
         values.push(Box::new(posting_state.clone()));
+    }
+    if filters.is_favorite == Some(true) {
+        sql.push_str(" AND j.is_favorite = 1");
     }
     if filters.new_from_watch == Some(true) {
         sql.push_str(" AND j.is_new_from_watch = 1");
@@ -474,7 +479,16 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         }
     }
 
-    sql.push_str(" ORDER BY j.updated_at DESC");
+    if filters.new_from_watch == Some(true) {
+        sql.push_str(" ORDER BY CASE j.watch_disposition
+           WHEN 'new' THEN 0
+           WHEN 'saved' THEN 1
+           WHEN 'dismissed' THEN 2
+           ELSE 1
+         END, j.title COLLATE NOCASE");
+    } else {
+        sql.push_str(" ORDER BY j.updated_at DESC");
+    }
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
@@ -482,7 +496,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         .query_map(params_ref.as_slice(), |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(19)?,
+                company_name: row.get(20)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -503,7 +517,7 @@ pub fn list_open_watch_positions(
 ) -> AppResult<Vec<JobListItem>> {
     let loc_settings = get_location_settings(conn).unwrap_or_default();
     let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.company_id = ?1
            AND j.posting_state = 'active'
@@ -550,16 +564,7 @@ pub fn list_open_watch_positions(
         sql.push_str(")");
     }
 
-    if filters.new_from_watch == Some(true) {
-        sql.push_str(" ORDER BY CASE j.watch_disposition
-           WHEN 'new' THEN 0
-           WHEN 'saved' THEN 1
-           WHEN 'dismissed' THEN 2
-           ELSE 1
-         END, j.title COLLATE NOCASE");
-    } else {
-        sql.push_str(" ORDER BY j.updated_at DESC");
-    }
+    sql.push_str(" ORDER BY j.updated_at DESC");
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
@@ -567,7 +572,7 @@ pub fn list_open_watch_positions(
         .query_map(params_ref.as_slice(), |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(19)?,
+                company_name: row.get(20)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -578,7 +583,7 @@ pub fn list_open_watch_positions(
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
         .prepare(
-            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at,
+            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at,
                     c.id, c.name, c.careers_url, c.created_at, c.updated_at
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
         )
@@ -589,11 +594,11 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
             Ok((
                 map_job(row)?,
                 Company {
-                    id: row.get(19)?,
-                    name: row.get(20)?,
-                    careers_url: row.get(21)?,
-                    created_at: row.get(22)?,
-                    updated_at: row.get(23)?,
+                    id: row.get(20)?,
+                    name: row.get(21)?,
+                    careers_url: row.get(22)?,
+                    created_at: row.get(23)?,
+                    updated_at: row.get(24)?,
                 },
             ))
         })
@@ -675,6 +680,7 @@ pub struct UpdateJobInput {
     pub location: Option<Option<String>>,
     pub url: Option<String>,
     pub is_new_from_watch: Option<bool>,
+    pub is_favorite: Option<bool>,
 }
 
 use serde::Deserialize;
@@ -741,11 +747,14 @@ pub fn update_job(
     let is_new = updates
         .is_new_from_watch
         .unwrap_or(existing.is_new_from_watch);
+    let is_fav = updates
+        .is_favorite
+        .unwrap_or(existing.is_favorite);
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, location=?8, is_new_from_watch=?9, updated_at=?10
-           WHERE id=?11"#,
+           applied_at=?6, notes=?7, location=?8, is_new_from_watch=?9, is_favorite=?10, updated_at=?11
+           WHERE id=?12"#,
         params![
             title,
             company_id,
@@ -756,6 +765,7 @@ pub fn update_job(
             notes,
             location,
             if is_new { 1 } else { 0 },
+            if is_fav { 1 } else { 0 },
             timestamp,
             job_id
         ],
@@ -770,6 +780,24 @@ pub fn update_job(
                     create_id(),
                     job_id,
                     format!("Status changed from {} to {status}", existing.status),
+                    timestamp
+                ],
+            )
+            .map_err(map_sqlite)?;
+        }
+    }
+
+    if let Some(fav) = updates.is_favorite {
+        if fav != existing.is_favorite {
+            let event_type = if fav { "favorited" } else { "unfavorited" };
+            let note = if fav { "Marked as favorite" } else { "Removed from favorites" };
+            conn.execute(
+                "INSERT INTO job_events (id, job_id, type, note, occurred_at) VALUES (?1,?2,?3,?4,?5)",
+                params![
+                    create_id(),
+                    job_id,
+                    event_type,
+                    note,
                     timestamp
                 ],
             )
@@ -893,6 +921,7 @@ pub fn add_job_event(
 pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>> {
     let mut counts: HashMap<String, i64> = [
         ("all", 0),
+        ("favorites", 0),
         ("wishlist", 0),
         ("applied", 0),
         ("interviewing", 0),
@@ -926,7 +955,81 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
         counts.insert(status, count);
     }
     counts.insert("all".into(), total);
+
+    let favorites_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM jobs j \
+             WHERE j.is_favorite = 1 \
+               AND j.is_new_from_watch = 0 \
+               AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    counts.insert("favorites".into(), favorites_count);
+
     Ok(counts)
+}
+
+pub fn toggle_job_favorite(conn: &Connection, job_id: &str) -> AppResult<JobListItem> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    let new_fav = !existing.is_favorite;
+    set_job_favorite(conn, job_id, new_fav)
+}
+
+pub fn set_job_favorite(
+    conn: &Connection,
+    job_id: &str,
+    is_favorite: bool,
+) -> AppResult<JobListItem> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    if existing.is_favorite == is_favorite {
+        let company_name: String = conn
+            .query_row(
+                "SELECT name FROM companies WHERE id = ?1",
+                params![existing.company_id],
+                |r| r.get(0),
+            )
+            .map_err(map_sqlite)?;
+        return Ok(JobListItem {
+            job: existing,
+            company_name,
+        });
+    }
+
+    let timestamp = now_iso();
+    conn.execute(
+        "UPDATE jobs SET is_favorite = ?1, updated_at = ?2 WHERE id = ?3",
+        params![if is_favorite { 1 } else { 0 }, timestamp, job_id],
+    )
+    .map_err(map_sqlite)?;
+
+    let event_type = if is_favorite {
+        "favorited"
+    } else {
+        "unfavorited"
+    };
+    let note = if is_favorite {
+        "Marked as favorite"
+    } else {
+        "Removed from favorites"
+    };
+    add_job_event(conn, job_id, event_type, Some(note))?;
+
+    let company_name: String = conn
+        .query_row(
+            "SELECT name FROM companies WHERE id = ?1",
+            params![existing.company_id],
+            |r| r.get(0),
+        )
+        .map_err(map_sqlite)?;
+
+    let updated_job =
+        get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after favorite"))?;
+    Ok(JobListItem {
+        job: updated_job,
+        company_name,
+    })
 }
 
 pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
@@ -1379,5 +1482,76 @@ mod tests {
         let pipeline = list_jobs(&conn, JobFilters::default()).unwrap();
         let pipeline_ids: Vec<_> = pipeline.iter().map(|item| item.job.id.as_str()).collect();
         assert!(pipeline_ids.contains(&tracked.id.as_str()));
+    }
+
+    #[test]
+    fn favorite_toggle_and_pipeline_filtering() {
+        let conn = test_connection();
+        let (job1, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/role1",
+            "Role 1",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let (job2, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/role2",
+            "Role 2",
+            Some("Beta"),
+            Some("applied"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(!job1.is_favorite);
+        assert!(!job2.is_favorite);
+
+        // Toggle job1 to favorite
+        let toggled = toggle_job_favorite(&conn, &job1.id).unwrap();
+        assert!(toggled.job.is_favorite);
+
+        // Counts should show 1 favorite
+        let counts = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts.get("favorites"), Some(&1));
+        assert_eq!(counts.get("all"), Some(&2));
+
+        // Filter list_jobs by favorites
+        let fav_jobs = list_jobs(
+            &conn,
+            JobFilters {
+                is_favorite: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(fav_jobs.len(), 1);
+        assert_eq!(fav_jobs[0].job.id, job1.id);
+
+        // Toggle job1 back to not favorite
+        let toggled_back = toggle_job_favorite(&conn, &job1.id).unwrap();
+        assert!(!toggled_back.job.is_favorite);
+        let counts_after = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts_after.get("favorites"), Some(&0));
+
+        // Update via update_job
+        let updated = update_job(
+            &conn,
+            &job2.id,
+            UpdateJobInput {
+                is_favorite: Some(true),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert!(updated.job.is_favorite);
+        assert!(updated.events.iter().any(|e| e.event_type == "favorited"));
     }
 }

@@ -88,6 +88,7 @@ function job(
     isNewFromWatch: opts.isNewFromWatch ?? false,
     watchDisposition: opts.watchDisposition ?? (opts.isNewFromWatch ? "new" : "saved"),
     missingFromSyncCount: 0,
+    isFavorite: false,
     createdAt: ago(5 * days),
     updatedAt: ago(1 * hours),
   };

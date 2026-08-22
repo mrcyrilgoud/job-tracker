@@ -29,9 +29,9 @@ use crate::jobs::service::{
     approve_watch_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_detail,
     get_location_settings, get_pipeline_counts, get_watch_role_keywords as service_get_keywords,
     get_weekly_activity, list_jobs, list_open_watch_positions, reset_dismissed_watch_job,
-    resolve_title_from_url, save_open_watch_job, set_location_settings,
-    set_watch_role_keywords as service_set_keywords, update_job, JobFilters, LocationSettings,
-    UpdateJobInput,
+    resolve_title_from_url, save_open_watch_job, set_job_favorite, set_location_settings,
+    set_watch_role_keywords as service_set_keywords, toggle_job_favorite, update_job, JobFilters,
+    LocationSettings, UpdateJobInput,
 };
 use crate::runner::{check_all_postings, run_jobs_cycle, try_lock_runner};
 
@@ -44,6 +44,7 @@ pub struct ListJobsArgs {
     pub search: Option<String>,
     pub location: Option<String>,
     pub new_from_watch: Option<bool>,
+    pub is_favorite: Option<bool>,
 }
 
 #[tauri::command]
@@ -58,6 +59,7 @@ pub async fn list_jobs_cmd(
         search: None,
         location: None,
         new_from_watch: None,
+        is_favorite: None,
     });
     state.with_db(|conn| {
         let jobs = list_jobs(
@@ -69,6 +71,7 @@ pub async fn list_jobs_cmd(
                 search: filters.search,
                 location: filters.location,
                 new_from_watch: filters.new_from_watch,
+                is_favorite: filters.is_favorite,
             },
         )?;
         let counts = get_pipeline_counts(conn)?;
@@ -483,6 +486,33 @@ pub async fn update_job_cmd(
     let result = state.with_db_tx(|conn| {
         let detail = update_job(conn, &id, updates)?;
         Ok(serde_json::json!({ "detail": detail }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn toggle_job_favorite_cmd(
+    state: State<'_, AppState>,
+    job_id: String,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        let item = toggle_job_favorite(conn, &job_id)?;
+        Ok(serde_json::json!({ "item": item }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn set_job_favorite_cmd(
+    state: State<'_, AppState>,
+    job_id: String,
+    is_favorite: bool,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        let item = set_job_favorite(conn, &job_id, is_favorite)?;
+        Ok(serde_json::json!({ "item": item }))
     })?;
     state.csv_export.mark_dirty();
     Ok(result)

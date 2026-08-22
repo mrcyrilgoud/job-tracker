@@ -3,17 +3,22 @@ import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { FavoriteButton } from "@/components/FavoriteButton";
 import {
   BriefcaseIcon,
   ChatIcon,
+  KanbanIcon,
+  ListIcon,
   SendIcon,
+  StarIcon,
   statusIcons,
   TrophyIcon,
 } from "@/components/icons";
+import { JobsBoardView } from "@/components/JobsBoardView";
 import { NewRolesList } from "@/components/companies/NewRolesList";
 import { api, type JobsRunnerProgress } from "@/lib/api";
 import { roleCountLabel } from "@/lib/companies-ui";
-import { jobStatuses, type JobListItem, type WeeklyActivity } from "@/lib/schema";
+import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { isDesktopShell } from "@/lib/tauri";
 import {
   jobSourceLabel,
@@ -32,10 +37,12 @@ export function JobsPage() {
   const companyId = searchParams.get("companyId") ?? undefined;
   const postingState = searchParams.get("postingState") ?? undefined;
   const search = searchParams.get("search") ?? undefined;
+  const isFavoriteFilter = searchParams.get("favorites") === "true";
+  const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
 
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [newFromWatch, setNewFromWatch] = useState<JobListItem[]>([]);
-  const [counts, setCounts] = useState<Record<string, number>>({ all: 0 });
+  const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
   const [loading, setLoading] = useState(true);
@@ -45,11 +52,12 @@ export function JobsPage() {
   const [checkError, setCheckError] = useState<string | null>(null);
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
+  const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
   const checkingPostingsRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
-    const requestKey = JSON.stringify({ status, companyId, postingState, search });
+    const requestKey = JSON.stringify({ status, companyId, postingState, search, isFavorite: isFavoriteFilter });
     const sequence = ++loadSequenceRef.current;
     if (!opts?.quiet) {
       setLoading(true);
@@ -57,13 +65,13 @@ export function JobsPage() {
     setError(null);
     try {
       const [listResult, companiesResult, watchResult] = await Promise.all([
-        api.listJobs({ status, companyId, postingState, search }),
+        api.listJobs({ status, companyId, postingState, search, isFavorite: isFavoriteFilter ? true : undefined }),
         api.listCompanies(),
         api.listJobs({ newFromWatch: true }),
       ]);
       if (sequence !== loadSequenceRef.current) return;
       if (
-        JSON.stringify({ status, companyId, postingState, search }) !== requestKey
+        JSON.stringify({ status, companyId, postingState, search, isFavorite: isFavoriteFilter }) !== requestKey
       ) {
         return;
       }
@@ -80,7 +88,7 @@ export function JobsPage() {
         setLoading(false);
       }
     }
-  }, [status, companyId, postingState, search]);
+  }, [status, companyId, postingState, search, isFavoriteFilter]);
 
   useEffect(() => {
     void load();
@@ -149,9 +157,69 @@ export function JobsPage() {
     }
   }
 
+  async function handleToggleFavorite(jobId: string) {
+    setTogglingFavId(jobId);
+    // Optimistic UI update
+    setJobs((prev) =>
+      prev.map((item) =>
+        item.job.id === jobId
+          ? { ...item, job: { ...item.job, isFavorite: !item.job.isFavorite } }
+          : item,
+      ),
+    );
+    try {
+      const res = await api.toggleFavorite(jobId);
+      setJobs((prev) =>
+        prev.map((item) => (item.job.id === jobId ? { ...item, job: res.item.job } : item)),
+      );
+      setCounts((prev) => ({
+        ...prev,
+        favorites: Math.max(0, (prev.favorites ?? 0) + (res.item.job.isFavorite ? 1 : -1)),
+      }));
+    } catch (err) {
+      // Revert on error
+      await load({ quiet: true });
+    } finally {
+      setTogglingFavId(null);
+    }
+  }
+
+  async function handleUpdateStatus(jobId: string, nextStatus: JobStatus) {
+    // Optimistic update
+    setJobs((prev) =>
+      prev.map((item) =>
+        item.job.id === jobId ? { ...item, job: { ...item.job, status: nextStatus } } : item,
+      ),
+    );
+    try {
+      await api.updateJob(jobId, { status: nextStatus });
+      await load({ quiet: true });
+    } catch {
+      await load({ quiet: true });
+    }
+  }
+
+  function setView(nextView: "list" | "board") {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", nextView);
+    setSearchParams(next);
+  }
+
   const activeStatus = jobStatuses.find((value) => value === status);
-  const heading = activeStatus ? jobStatusPresentation(activeStatus).label : "All jobs";
-  const isFiltered = Boolean(status || companyId || postingState || search);
+  const heading = isFavoriteFilter
+    ? "Favorites Board"
+    : activeStatus
+      ? jobStatusPresentation(activeStatus).label
+      : "All jobs";
+  const subtitle = isFavoriteFilter
+    ? jobs.length === 0
+      ? "No starred roles yet."
+      : `${jobs.length} ${jobs.length === 1 ? "priority role" : "priority roles"} on your favorite board.`
+    : jobs.length === 0
+      ? "Nothing here yet."
+      : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
+
+  const isFiltered = Boolean(status || companyId || postingState || search || isFavoriteFilter);
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -159,10 +227,12 @@ export function JobsPage() {
     const next = new URLSearchParams();
     const nextSearch = String(form.get("search") ?? "").trim();
     const nextPosting = String(form.get("postingState") ?? "");
+    if (isFavoriteFilter) next.set("favorites", "true");
     if (status) next.set("status", status);
     if (companyId) next.set("companyId", companyId);
     if (nextSearch) next.set("search", nextSearch);
     if (nextPosting) next.set("postingState", nextPosting);
+    if (viewMode) next.set("view", viewMode);
     setSearchParams(next);
   }
 
@@ -184,12 +254,19 @@ export function JobsPage() {
         <section className="card p-5">
           <h2 className="mb-4 text-sm font-semibold text-[var(--muted)]">Pipeline</h2>
           <div className="space-y-1">
-            <SidebarLink to="/" active={!status} label="All jobs" count={counts.all} />
+            <SidebarLink to="/" active={!status && !isFavoriteFilter} label="All jobs" count={counts.all} />
+            <SidebarLink
+              to="/?favorites=true"
+              active={isFavoriteFilter}
+              label="Favorites"
+              Icon={StarIcon}
+              count={counts.favorites ?? 0}
+            />
             {(["wishlist", "applied", "interviewing", "offer"] as const).map((key) => (
               <SidebarLink
                 key={key}
                 to={`/?status=${key}`}
-                active={status === key}
+                active={status === key && !isFavoriteFilter}
                 label={jobStatusPresentation(key).label}
                 count={counts[key] ?? 0}
               />
@@ -223,14 +300,49 @@ export function JobsPage() {
       <section className="space-y-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="font-display text-3xl font-semibold tracking-tight">{heading}</h1>
+            <div className="flex items-center gap-2.5">
+              {isFavoriteFilter ? (
+                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+                  <StarIcon size={18} filled />
+                </span>
+              ) : null}
+              <h1 className="font-display text-3xl font-semibold tracking-tight">{heading}</h1>
+            </div>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              {jobs.length === 0
-                ? "Nothing here yet."
-                : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`}
+              {subtitle}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            {/* View Switcher: List vs Board */}
+            <div className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-sm)]">
+              <button
+                type="button"
+                onClick={() => setView("list")}
+                aria-label="List view"
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === "list"
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                    : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                <ListIcon size={14} />
+                <span>List</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("board")}
+                aria-label="Board view"
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === "board"
+                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                    : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                <KanbanIcon size={14} />
+                <span>Board</span>
+              </button>
+            </div>
+
             <div className="relative">
               <button
                 type="button"
@@ -368,14 +480,38 @@ export function JobsPage() {
 
         {jobs.length === 0 ? (
           <div className="card flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <p className="font-display text-lg text-[var(--foreground)]">Your board is empty</p>
-            <p className="max-w-sm text-sm text-[var(--muted)]">
-              Paste a posting URL and Job Tracker will keep an eye on it for you.
-            </p>
-            <Link to="/jobs/new" className="btn btn-primary mt-1">
-              Add your first job
-            </Link>
+            {isFavoriteFilter ? (
+              <>
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+                  <StarIcon size={24} />
+                </span>
+                <p className="font-display text-lg text-[var(--foreground)]">No favorite jobs yet</p>
+                <p className="max-w-sm text-sm text-[var(--muted)]">
+                  Click the star on any job to pin it here and track your highest-priority applications across a dedicated Kanban board.
+                </p>
+                <Link to="/" className="btn btn-secondary mt-1">
+                  Browse all jobs
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="font-display text-lg text-[var(--foreground)]">Your board is empty</p>
+                <p className="max-w-sm text-sm text-[var(--muted)]">
+                  Paste a posting URL and Job Tracker will keep an eye on it for you.
+                </p>
+                <Link to="/jobs/new" className="btn btn-primary mt-1">
+                  Add your first job
+                </Link>
+              </>
+            )}
           </div>
+        ) : viewMode === "board" ? (
+          <JobsBoardView
+            jobs={jobs}
+            onToggleFavorite={handleToggleFavorite}
+            onUpdateStatus={handleUpdateStatus}
+            isPendingFavorite={(id) => togglingFavId === id}
+          />
         ) : (
           <ul className="space-y-3">
             {jobs.map(({ job, companyName }) => {
@@ -421,10 +557,17 @@ export function JobsPage() {
                         </p>
                         {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
                       </div>
-                      <p className="shrink-0 text-xs text-[var(--faint)]">
-                        Updated{" "}
-                        {formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}
-                      </p>
+                      <div className="flex items-center gap-3 shrink-0 self-start md:self-auto">
+                        <FavoriteButton
+                          isFavorite={job.isFavorite}
+                          onToggle={() => handleToggleFavorite(job.id)}
+                          disabled={togglingFavId === job.id}
+                        />
+                        <p className="text-xs text-[var(--faint)]">
+                          Updated{" "}
+                          {formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}
+                        </p>
+                      </div>
                     </div>
                   </Link>
                 </li>
@@ -512,11 +655,13 @@ function SidebarLink({
   label,
   count,
   active,
+  Icon,
 }: {
   to: string;
   label: string;
   count?: number;
   active?: boolean;
+  Icon?: (props: { size?: number; className?: string; filled?: boolean }) => React.JSX.Element;
 }) {
   return (
     <Link
@@ -527,7 +672,10 @@ function SidebarLink({
           : "text-[var(--foreground)] hover:bg-[var(--surface-muted)]"
       }`}
     >
-      <span>{label}</span>
+      <span className="flex items-center gap-2">
+        {Icon ? <Icon size={14} className={active ? "text-[var(--accent-ink)]" : "text-[var(--faint)]"} filled={active} /> : null}
+        <span>{label}</span>
+      </span>
       {typeof count === "number" ? (
         <span
           className={`font-display text-sm ${

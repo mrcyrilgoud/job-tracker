@@ -140,6 +140,7 @@ export function JobDetailPage() {
           lastCheckResult: detail.job.lastCheckResult,
           url: detail.job.url,
           isNewFromWatch: detail.job.isNewFromWatch,
+          isFavorite: detail.job.isFavorite,
         }}
         onUpdated={onUpdated}
       />

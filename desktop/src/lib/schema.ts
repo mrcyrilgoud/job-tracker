@@ -68,6 +68,7 @@ export type Job = {
   isNewFromWatch: boolean;
   watchDisposition: WatchDisposition | null;
   missingFromSyncCount: number;
+  isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
 };

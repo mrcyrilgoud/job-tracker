@@ -5,9 +5,12 @@ import {
   BuildingIcon,
   DocumentIcon,
   MailIcon,
+  MoonIcon,
   SettingsIcon,
+  SunIcon,
 } from "@/components/icons";
 import { RunJobsButton } from "@/components/RunJobsButton";
+import { useTheme } from "@/lib/ThemeContext";
 
 const nav = [
   { href: "/", label: "Jobs", Icon: BriefcaseIcon },
@@ -18,6 +21,8 @@ const nav = [
 ];
 
 export function Layout() {
+  const { theme, toggleTheme } = useTheme();
+
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 md:px-8">
       <header className="mb-8 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
@@ -54,6 +59,13 @@ export function Layout() {
               </NavLink>
             ))}
           </nav>
+          <button
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? <SunIcon size={18} /> : <MoonIcon size={18} />}
+          </button>
           <RunJobsButton />
         </div>
       </header>

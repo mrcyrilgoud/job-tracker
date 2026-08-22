@@ -1,6 +1,7 @@
 import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useState } from "react";
 
+import { FavoriteButton } from "@/components/FavoriteButton";
 import { AlertIcon, ArrowUpRightIcon, CheckIcon } from "@/components/icons";
 import { api } from "@/lib/api";
 import { jobStatuses, type JobDetail, type JobStatus, type PostingState } from "@/lib/schema";
@@ -23,6 +24,7 @@ type Initial = {
   lastCheckResult: string | null;
   url: string;
   isNewFromWatch: boolean;
+  isFavorite: boolean;
 };
 
 /** The editable subset of a job. Compared against the last persisted copy to
@@ -33,6 +35,7 @@ type Draft = {
   status: JobStatus;
   appliedAt: string;
   notes: string;
+  isFavorite: boolean;
 };
 
 export type JobDetailUpdateMode = "save" | "check" | "attachment" | "full";
@@ -46,6 +49,7 @@ function toDraft(initial: Initial): Draft {
     status: initial.status,
     appliedAt: initial.appliedAt ? initial.appliedAt.slice(0, 10) : "",
     notes: initial.notes ?? "",
+    isFavorite: initial.isFavorite,
   };
 }
 
@@ -55,7 +59,8 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.companyName === b.companyName &&
     a.status === b.status &&
     a.appliedAt === b.appliedAt &&
-    a.notes === b.notes
+    a.notes === b.notes &&
+    a.isFavorite === b.isFavorite
   );
 }
 
@@ -147,6 +152,7 @@ export function JobDetailClient({
         appliedAt: attempted.appliedAt ? new Date(attempted.appliedAt).toISOString() : null,
         notes: attempted.notes,
         isNewFromWatch: false,
+        isFavorite: attempted.isFavorite,
       });
       const detail = result.detail;
       const baseline: Draft = {
@@ -155,6 +161,7 @@ export function JobDetailClient({
         status: detail.job.status,
         appliedAt: detail.job.appliedAt ? detail.job.appliedAt.slice(0, 10) : "",
         notes: detail.job.notes ?? "",
+        isFavorite: detail.job.isFavorite,
       };
       setSaved(baseline);
       // If the user typed more while save was in flight, keep the newer draft.
@@ -177,6 +184,20 @@ export function JobDetailClient({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isDirty, saving, save]);
+
+  async function toggleFavoriteDirectly() {
+    const nextFav = !draft.isFavorite;
+    update("isFavorite", nextFav);
+    try {
+      const res = await api.setFavorite(jobId, nextFav);
+      setSaved((prev) => ({ ...prev, isFavorite: res.item.job.isFavorite }));
+      setDraft((prev) => ({ ...prev, isFavorite: res.item.job.isFavorite }));
+      onUpdated({ mode: "save" });
+    } catch {
+      // Revert if direct call fails
+      update("isFavorite", !nextFav);
+    }
+  }
 
   async function checkPosting() {
     setChecking(true);
@@ -208,12 +229,19 @@ export function JobDetailClient({
           instead of squeezing it into a clipped column. */}
       <div className="flex flex-col-reverse gap-3 p-6 pb-5 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1 space-y-1">
-          <input
-            value={draft.title}
-            onChange={(event) => update("title", event.target.value)}
-            aria-label="Job title"
-            className="field-quiet w-full max-w-xl font-display text-2xl font-semibold tracking-tight"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              value={draft.title}
+              onChange={(event) => update("title", event.target.value)}
+              aria-label="Job title"
+              className="field-quiet w-full max-w-xl font-display text-2xl font-semibold tracking-tight"
+            />
+            <FavoriteButton
+              isFavorite={draft.isFavorite}
+              onToggle={() => void toggleFavoriteDirectly()}
+              size={20}
+            />
+          </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-[var(--muted)]">
             <input
               value={draft.companyName}

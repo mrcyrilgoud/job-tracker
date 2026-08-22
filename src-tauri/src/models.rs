@@ -30,6 +30,7 @@ pub struct Job {
     pub is_new_from_watch: bool,
     pub watch_disposition: Option<String>,
     pub missing_from_sync_count: i64,
+    pub is_favorite: bool,
     pub created_at: String,
     pub updated_at: String,
 }

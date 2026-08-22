@@ -59,6 +59,8 @@ pub fn run() {
             commands::create_job,
             commands::get_job,
             commands::update_job_cmd,
+            commands::toggle_job_favorite_cmd,
+            commands::set_job_favorite_cmd,
             commands::check_job_posting,
             commands::list_companies,
             commands::list_open_watch_positions_cmd,

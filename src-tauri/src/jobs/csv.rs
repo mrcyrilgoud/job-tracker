@@ -257,7 +257,7 @@ fn load_job_rows(conn: &Connection) -> AppResult<Vec<(Job, String)>> {
     // Pending watch discoveries and dismissed watch roles stay out of jobs.csv —
     // only pipeline jobs the user is tracking are exported.
     let mut stmt = conn.prepare(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.is_new_from_watch = 0
            AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed')",
@@ -283,10 +283,11 @@ fn load_job_rows(conn: &Connection) -> AppResult<Vec<(Job, String)>> {
                     is_new_from_watch: row.get::<_, i64>(14)? != 0,
                     watch_disposition: row.get(15)?,
                     missing_from_sync_count: row.get(16)?,
-                    created_at: row.get(17)?,
-                    updated_at: row.get(18)?,
+                    is_favorite: row.get::<_, i64>(17)? != 0,
+                    created_at: row.get(18)?,
+                    updated_at: row.get(19)?,
                 },
-                row.get::<_, String>(19)?,
+                row.get::<_, String>(20)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -454,7 +455,7 @@ fn find_job_by_id_or_canonical(
     let canonical = normalize_canonical_url(url).map_err(AppError::from)?;
     let job = conn
         .query_row(
-            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at FROM jobs WHERE canonical_url = ?1",
+            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at FROM jobs WHERE canonical_url = ?1",
             params![canonical],
             |row| {
                 Ok(Job {
@@ -475,8 +476,9 @@ fn find_job_by_id_or_canonical(
                     is_new_from_watch: row.get::<_, i64>(14)? != 0,
                     watch_disposition: row.get(15)?,
                     missing_from_sync_count: row.get(16)?,
-                    created_at: row.get(17)?,
-                    updated_at: row.get(18)?,
+                    is_favorite: row.get::<_, i64>(17)? != 0,
+                    created_at: row.get(18)?,
+                    updated_at: row.get(19)?,
                 })
             },
         )

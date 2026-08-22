@@ -45,8 +45,9 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         is_new_from_watch: row.get::<_, i64>(14)? != 0,
         watch_disposition: row.get(15)?,
         missing_from_sync_count: row.get(16)?,
-        created_at: row.get(17)?,
-        updated_at: row.get(18)?,
+        is_favorite: row.get::<_, i64>(17)? != 0,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
     })
 }
 
@@ -84,7 +85,7 @@ pub fn apply_watch_sync(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
+            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
         )
         .map_err(map_sqlite)?;
     let existing = stmt

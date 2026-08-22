@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import { Layout } from "@/components/Layout";
 import { isDesktopShell } from "@/lib/tauri";
+import { ThemeProvider } from "@/lib/ThemeContext";
 import { CompaniesPage } from "@/pages/CompaniesPage";
 import { CompanyDetailPage } from "@/pages/CompanyDetailPage";
 import { DocumentsPage } from "@/pages/DocumentsPage";
@@ -43,19 +44,21 @@ export function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<JobsPage />} />
-          <Route path="jobs/new" element={<NewJobPage />} />
-          <Route path="jobs/:id" element={<JobDetailPage />} />
-          <Route path="documents" element={<DocumentsPage />} />
-          <Route path="companies" element={<CompaniesPage />} />
-          <Route path="companies/:id" element={<CompanyDetailPage />} />
-          <Route path="gmail" element={<GmailPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route index element={<JobsPage />} />
+            <Route path="jobs/new" element={<NewJobPage />} />
+            <Route path="jobs/:id" element={<JobDetailPage />} />
+            <Route path="documents" element={<DocumentsPage />} />
+            <Route path="companies" element={<CompaniesPage />} />
+            <Route path="companies/:id" element={<CompanyDetailPage />} />
+            <Route path="gmail" element={<GmailPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }

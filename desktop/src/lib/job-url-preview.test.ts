@@ -34,6 +34,7 @@ function jobItem(overrides: Partial<Job> & Pick<Job, "id" | "url">): JobListItem
       isNewFromWatch: false,
       watchDisposition: null,
       missingFromSyncCount: 0,
+      isFavorite: false,
       createdAt: "2026-07-01T00:00:00.000Z",
       updatedAt: "2026-07-02T00:00:00.000Z",
       ...overrides,

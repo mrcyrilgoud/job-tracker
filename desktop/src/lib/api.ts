@@ -23,6 +23,7 @@ export type JobFilters = {
   search?: string;
   location?: string;
   newFromWatch?: boolean;
+  isFavorite?: boolean;
 };
 
 export type LocationSettings = {
@@ -63,6 +64,7 @@ export type UpdateJobInput = {
   location?: string | null;
   url?: string;
   isNewFromWatch?: boolean;
+  isFavorite?: boolean;
 };
 
 export type ImportDocumentInput = {
@@ -131,6 +133,12 @@ export const api = {
 
   updateJob: (id: string, updates: UpdateJobInput) =>
     call<{ detail: JobDetail }>("update_job_cmd", { id, updates }),
+
+  toggleFavorite: (jobId: string) =>
+    call<{ item: JobListItem }>("toggle_job_favorite_cmd", { jobId }),
+
+  setFavorite: (jobId: string, isFavorite: boolean) =>
+    call<{ item: JobListItem }>("set_job_favorite_cmd", { jobId, isFavorite }),
 
   checkJobPosting: (id: string) =>
     call<{ postingState: string; lastCheckedAt: string; lastCheckResult: string | null }>(
