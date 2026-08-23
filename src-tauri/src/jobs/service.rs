@@ -6,8 +6,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
-    AttachedDocument, Company, Document, Job, JobDetail, JobDocument, JobEvent, JobListItem,
-    WeeklyActivity, WeeklyDay,
+    is_job_status, AttachedDocument, Company, Document, Job, JobDetail, JobDocument, JobEvent,
+    JobListItem, WeeklyActivity, WeeklyDay,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -231,6 +231,7 @@ pub struct JobFilters {
     pub location: Option<String>,
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
+    pub is_archived: Option<bool>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
@@ -398,6 +399,11 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
     if filters.is_favorite == Some(true) {
         sql.push_str(" AND j.is_favorite = 1");
+    }
+    if filters.is_archived == Some(true) {
+        sql.push_str(" AND j.status IN ('archived', 'rejected', 'withdrawn', 'closed')");
+    } else if filters.is_archived == Some(false) {
+        sql.push_str(" AND j.status NOT IN ('archived', 'rejected', 'withdrawn', 'closed')");
     }
     if filters.new_from_watch == Some(true) {
         sql.push_str(" AND j.is_new_from_watch = 1");
@@ -808,6 +814,79 @@ pub fn update_job(
     get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
 }
 
+/// Permanently delete a job and its associated events and attachments from SQLite.
+pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
+    let _existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+
+    conn.execute(
+        "DELETE FROM job_events WHERE job_id = ?1",
+        params![job_id],
+    )
+    .map_err(map_sqlite)?;
+
+    conn.execute(
+        "DELETE FROM job_documents WHERE job_id = ?1",
+        params![job_id],
+    )
+    .map_err(map_sqlite)?;
+
+    conn.execute(
+        "UPDATE email_matches SET job_id = NULL WHERE job_id = ?1",
+        params![job_id],
+    )
+    .map_err(map_sqlite)?;
+
+    conn.execute(
+        "DELETE FROM jobs WHERE id = ?1",
+        params![job_id],
+    )
+    .map_err(map_sqlite)?;
+
+    Ok(())
+}
+
+/// Move a job out of the active pipeline into the archived status.
+pub fn archive_job(conn: &Connection, job_id: &str) -> AppResult<JobDetail> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    if existing.status == "archived" {
+        return get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"));
+    }
+    update_job(
+        conn,
+        job_id,
+        UpdateJobInput {
+            status: Some("archived".to_string()),
+            ..Default::default()
+        },
+    )
+}
+
+/// Restore an archived job back into the active pipeline.
+pub fn unarchive_job(
+    conn: &Connection,
+    job_id: &str,
+    target_status: Option<&str>,
+) -> AppResult<JobDetail> {
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    let next_status = target_status
+        .filter(|s| is_job_status(s) && *s != "archived")
+        .unwrap_or_else(|| {
+            if existing.applied_at.is_some() {
+                "applied"
+            } else {
+                "wishlist"
+            }
+        });
+    update_job(
+        conn,
+        job_id,
+        UpdateJobInput {
+            status: Some(next_status.to_string()),
+            ..Default::default()
+        },
+    )
+}
+
 /// Move a pending watch discovery onto the wishlist pipeline.
 pub fn approve_watch_job(conn: &Connection, job_id: &str) -> AppResult<Job> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
@@ -929,6 +1008,8 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
         ("rejected", 0),
         ("withdrawn", 0),
         ("closed", 0),
+        ("archived", 0),
+        ("archivedTotal", 0),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -967,6 +1048,12 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
         )
         .unwrap_or(0);
     counts.insert("favorites".into(), favorites_count);
+
+    let archived_total = counts.get("archived").copied().unwrap_or(0)
+        + counts.get("rejected").copied().unwrap_or(0)
+        + counts.get("withdrawn").copied().unwrap_or(0)
+        + counts.get("closed").copied().unwrap_or(0);
+    counts.insert("archivedTotal".into(), archived_total);
 
     Ok(counts)
 }
@@ -1553,5 +1640,107 @@ mod tests {
         .unwrap();
         assert!(updated.job.is_favorite);
         assert!(updated.events.iter().any(|e| e.event_type == "favorited"));
+    }
+
+    #[test]
+    fn delete_job_cascades_and_removes_records() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/to-delete",
+            "Role To Delete",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Add an event
+        add_job_event(&conn, &job.id, "test_event", Some("Sample note")).unwrap();
+
+        // Check records exist (1 for 'created' + 1 for 'test_event')
+        let event_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id = ?1",
+                params![job.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count, 2);
+
+        // Delete job
+        delete_job(&conn, &job.id).unwrap();
+
+        // Verify job and child records are gone
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
+        let event_count_after: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id = ?1",
+                params![job.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count_after, 0);
+
+        // Attempting to delete non-existent job errors
+        assert!(delete_job(&conn, &job.id).is_err());
+    }
+
+    #[test]
+    fn archive_and_unarchive_job_workflow() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/to-archive",
+            "Role To Archive",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Archive job
+        let archived = archive_job(&conn, &job.id).unwrap();
+        assert_eq!(archived.job.status, "archived");
+
+        // Check counts
+        let counts = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts.get("archived"), Some(&1));
+        assert_eq!(counts.get("archivedTotal"), Some(&1));
+
+        // Filter list_jobs by is_archived = true
+        let archived_list = list_jobs(
+            &conn,
+            JobFilters {
+                is_archived: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(archived_list.len(), 1);
+        assert_eq!(archived_list[0].job.id, job.id);
+
+        // Filter list_jobs by is_archived = false
+        let active_list = list_jobs(
+            &conn,
+            JobFilters {
+                is_archived: Some(false),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(active_list.len(), 0);
+
+        // Unarchive job
+        let restored = unarchive_job(&conn, &job.id, None).unwrap();
+        assert_eq!(restored.job.status, "wishlist");
+
+        let counts_after = get_pipeline_counts(&conn).unwrap();
+        assert_eq!(counts_after.get("archived"), Some(&0));
+        assert_eq!(counts_after.get("wishlist"), Some(&1));
     }
 }

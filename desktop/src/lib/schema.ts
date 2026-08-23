@@ -6,6 +6,7 @@ export const jobStatuses = [
   "rejected",
   "withdrawn",
   "closed",
+  "archived",
 ] as const;
 
 export type JobStatus = (typeof jobStatuses)[number];

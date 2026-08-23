@@ -166,6 +166,7 @@ pub const JOB_STATUSES: &[&str] = &[
     "rejected",
     "withdrawn",
     "closed",
+    "archived",
 ];
 
 pub fn is_job_status(value: &str) -> bool {

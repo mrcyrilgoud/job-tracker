@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { AttachDocumentForm } from "@/components/AttachDocumentForm";
 import {
@@ -13,6 +13,7 @@ import { formatLabel } from "@/lib/utils";
 
 export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [library, setLibrary] = useState<DocumentListItem[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -143,6 +144,7 @@ export function JobDetailPage() {
           isFavorite: detail.job.isFavorite,
         }}
         onUpdated={onUpdated}
+        onDeleted={() => navigate("/")}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

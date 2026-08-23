@@ -400,7 +400,21 @@ mod tests {
         assert_eq!(json["id"], attached_id);
         assert_eq!(json["originalFilename"], "resume.pdf");
         assert!(json.get("document").is_none());
-        assert_eq!(json["kinds"][0], "resume");
-        assert_eq!(json["usedBy"][0], "Acme — Engineer");
+        let json_kinds: Vec<String> = json["kinds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert!(json_kinds.contains(&"resume".to_string()));
+        assert!(json_kinds.contains(&"cover_letter".to_string()));
+        let json_used_by: Vec<String> = json["usedBy"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert!(json_used_by.contains(&"Acme — Engineer".to_string()));
+        assert!(json_used_by.contains(&"Beta — Designer".to_string()));
     }
 }

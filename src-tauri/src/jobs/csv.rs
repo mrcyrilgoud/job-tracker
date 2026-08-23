@@ -916,10 +916,111 @@ pub fn sync_jobs_csv_with_disk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::migrate::migrate;
+    use crate::jobs::service::{archive_job, create_job_from_url, delete_job, unarchive_job};
+    use tempfile::tempdir;
+
+    fn test_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate(&connection).unwrap();
+        connection
+    }
 
     #[test]
     fn parse_csv_quotes() {
         let rows = parse_csv("a,b\n\"x,\"\"y\"\",z\",1\n");
         assert_eq!(rows[1][0], "x,\"y\",z");
+    }
+
+    #[test]
+    fn delete_job_and_export_removes_from_csv_and_sync_state() {
+        let conn = test_connection();
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("jobs.csv");
+
+        let (job1, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/1",
+            "wishlist",
+            Some("Acme"),
+            Some("Job 1"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let (job2, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/2",
+            "applied",
+            Some("Acme"),
+            Some("Job 2"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // First export: should contain both jobs
+        let exp1 = export_jobs_csv(&conn, &csv_path, None).unwrap();
+        assert_eq!(exp1.row_count, 2);
+
+        let parsed = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        assert_eq!(parsed.len(), 3); // header + 2 rows
+
+        let sync1 = read_sync_state(&csv_path);
+        assert_eq!(sync1.rows.len(), 2);
+        assert!(sync1.rows.contains_key(&job1.id));
+        assert!(sync1.rows.contains_key(&job2.id));
+
+        // Delete job1
+        delete_job(&conn, &job1.id).unwrap();
+
+        // Second export: should only contain job2
+        let exp2 = export_jobs_csv(&conn, &csv_path, None).unwrap();
+        assert_eq!(exp2.row_count, 1);
+
+        let parsed2 = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        assert_eq!(parsed2.len(), 2); // header + 1 row
+        assert_eq!(parsed2[1][0], job2.id);
+
+        let sync2 = read_sync_state(&csv_path);
+        assert_eq!(sync2.rows.len(), 1);
+        assert!(!sync2.rows.contains_key(&job1.id));
+        assert!(sync2.rows.contains_key(&job2.id));
+    }
+
+    #[test]
+    fn archive_and_unarchive_job_updates_csv_export() {
+        let conn = test_connection();
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("jobs.csv");
+
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/archivable",
+            "wishlist",
+            Some("Startup"),
+            Some("DevOps Engineer"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // Archive job
+        archive_job(&conn, &job.id).unwrap();
+        export_jobs_csv(&conn, &csv_path, None).unwrap();
+
+        let parsed = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        assert_eq!(parsed[1][6], "archived");
+
+        // Unarchive job
+        unarchive_job(&conn, &job.id, Some("applied")).unwrap();
+        export_jobs_csv(&conn, &csv_path, None).unwrap();
+
+        let parsed_restored = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        assert_eq!(parsed_restored[1][6], "applied");
     }
 }

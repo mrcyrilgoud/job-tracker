@@ -26,12 +26,13 @@ use crate::jobs::csv_config::{
 use crate::jobs::csv_export::with_csv_file_lock;
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::service::{
-    approve_watch_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_detail,
-    get_location_settings, get_pipeline_counts, get_watch_role_keywords as service_get_keywords,
-    get_weekly_activity, list_jobs, list_open_watch_positions, reset_dismissed_watch_job,
-    resolve_title_from_url, save_open_watch_job, set_job_favorite, set_location_settings,
-    set_watch_role_keywords as service_set_keywords, toggle_job_favorite, update_job, JobFilters,
-    LocationSettings, UpdateJobInput,
+    approve_watch_job, archive_job, create_job_from_url_with_careers,
+    delete_job as delete_job_service, dismiss_watch_job, get_job_detail, get_location_settings,
+    get_pipeline_counts, get_watch_role_keywords as service_get_keywords, get_weekly_activity,
+    list_jobs, list_open_watch_positions, reset_dismissed_watch_job, resolve_title_from_url,
+    save_open_watch_job, set_job_favorite, set_location_settings,
+    set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
+    update_job, JobFilters, LocationSettings, UpdateJobInput,
 };
 use crate::runner::{check_all_postings, run_jobs_cycle, try_lock_runner};
 
@@ -45,6 +46,7 @@ pub struct ListJobsArgs {
     pub location: Option<String>,
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
+    pub is_archived: Option<bool>,
 }
 
 #[tauri::command]
@@ -60,6 +62,7 @@ pub async fn list_jobs_cmd(
         location: None,
         new_from_watch: None,
         is_favorite: None,
+        is_archived: None,
     });
     state.with_db(|conn| {
         let jobs = list_jobs(
@@ -72,6 +75,7 @@ pub async fn list_jobs_cmd(
                 location: filters.location,
                 new_from_watch: filters.new_from_watch,
                 is_favorite: filters.is_favorite,
+                is_archived: filters.is_archived,
             },
         )?;
         let counts = get_pipeline_counts(conn)?;
@@ -485,6 +489,46 @@ pub async fn update_job_cmd(
 ) -> AppResult<serde_json::Value> {
     let result = state.with_db_tx(|conn| {
         let detail = update_job(conn, &id, updates)?;
+        Ok(serde_json::json!({ "detail": detail }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn delete_job(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        delete_job_service(conn, &id)?;
+        Ok(serde_json::json!({ "success": true, "id": id }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn archive_job_cmd(
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        let detail = archive_job(conn, &id)?;
+        Ok(serde_json::json!({ "detail": detail }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn unarchive_job_cmd(
+    state: State<'_, AppState>,
+    id: String,
+    target_status: Option<String>,
+) -> AppResult<serde_json::Value> {
+    let result = state.with_db_tx(|conn| {
+        let detail = unarchive_job(conn, &id, target_status.as_deref())?;
         Ok(serde_json::json!({ "detail": detail }))
     })?;
     state.csv_export.mark_dirty();

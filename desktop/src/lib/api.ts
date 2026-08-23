@@ -24,6 +24,7 @@ export type JobFilters = {
   location?: string;
   newFromWatch?: boolean;
   isFavorite?: boolean;
+  isArchived?: boolean;
 };
 
 export type LocationSettings = {
@@ -133,6 +134,13 @@ export const api = {
 
   updateJob: (id: string, updates: UpdateJobInput) =>
     call<{ detail: JobDetail }>("update_job_cmd", { id, updates }),
+
+  deleteJob: (id: string) => call<{ success: boolean; id: string }>("delete_job", { id }),
+
+  archiveJob: (id: string) => call<{ detail: JobDetail }>("archive_job_cmd", { id }),
+
+  unarchiveJob: (id: string, targetStatus?: JobStatus) =>
+    call<{ detail: JobDetail }>("unarchive_job_cmd", { id, targetStatus: targetStatus ?? null }),
 
   toggleFavorite: (jobId: string) =>
     call<{ item: JobListItem }>("toggle_job_favorite_cmd", { jobId }),

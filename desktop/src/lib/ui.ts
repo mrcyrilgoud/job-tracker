@@ -32,6 +32,8 @@ export function jobStatusPresentation(status: JobStatus): Presentation {
       return { label: "Withdrawn", tone: "stone" };
     case "closed":
       return { label: "Closed", tone: "stone" };
+    case "archived":
+      return { label: "Archived", tone: "stone" };
     default: {
       const _exhaustive: never = status;
       return _exhaustive;
@@ -53,6 +55,7 @@ export function postingStateMatters(status: JobStatus): boolean {
     case "rejected":
     case "withdrawn":
     case "closed":
+    case "archived":
       return false;
     default: {
       const _exhaustive: never = status;

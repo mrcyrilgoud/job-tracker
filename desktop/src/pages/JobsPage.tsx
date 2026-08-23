@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
+  ArchiveIcon,
   BriefcaseIcon,
   ChatIcon,
   KanbanIcon,
@@ -12,6 +13,7 @@ import {
   SendIcon,
   StarIcon,
   statusIcons,
+  TrashIcon,
   TrophyIcon,
 } from "@/components/icons";
 import { JobsBoardView } from "@/components/JobsBoardView";
@@ -38,6 +40,7 @@ export function JobsPage() {
   const postingState = searchParams.get("postingState") ?? undefined;
   const search = searchParams.get("search") ?? undefined;
   const isFavoriteFilter = searchParams.get("favorites") === "true";
+  const isArchivedFilter = searchParams.get("archived") === "true";
   const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
 
   const [jobs, setJobs] = useState<JobListItem[]>([]);
@@ -53,11 +56,20 @@ export function JobsPage() {
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
+  const [jobToDelete, setJobToDelete] = useState<{ id: string; title: string; companyName: string } | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const checkingPostingsRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
-    const requestKey = JSON.stringify({ status, companyId, postingState, search, isFavorite: isFavoriteFilter });
+    const requestKey = JSON.stringify({
+      status,
+      companyId,
+      postingState,
+      search,
+      isFavorite: isFavoriteFilter,
+      isArchived: isArchivedFilter,
+    });
     const sequence = ++loadSequenceRef.current;
     if (!opts?.quiet) {
       setLoading(true);
@@ -65,13 +77,31 @@ export function JobsPage() {
     setError(null);
     try {
       const [listResult, companiesResult, watchResult] = await Promise.all([
-        api.listJobs({ status, companyId, postingState, search, isFavorite: isFavoriteFilter ? true : undefined }),
+        api.listJobs({
+          status,
+          companyId,
+          postingState,
+          search,
+          isFavorite: isFavoriteFilter ? true : undefined,
+          isArchived: isArchivedFilter
+            ? true
+            : !status && !isFavoriteFilter
+              ? false
+              : undefined,
+        }),
         api.listCompanies(),
         api.listJobs({ newFromWatch: true }),
       ]);
       if (sequence !== loadSequenceRef.current) return;
       if (
-        JSON.stringify({ status, companyId, postingState, search, isFavorite: isFavoriteFilter }) !== requestKey
+        JSON.stringify({
+          status,
+          companyId,
+          postingState,
+          search,
+          isFavorite: isFavoriteFilter,
+          isArchived: isArchivedFilter,
+        }) !== requestKey
       ) {
         return;
       }
@@ -88,7 +118,7 @@ export function JobsPage() {
         setLoading(false);
       }
     }
-  }, [status, companyId, postingState, search, isFavoriteFilter]);
+  }, [status, companyId, postingState, search, isFavoriteFilter, isArchivedFilter]);
 
   useEffect(() => {
     void load();
@@ -199,6 +229,45 @@ export function JobsPage() {
     }
   }
 
+  async function handleToggleArchive(jobId: string, currentStatus: JobStatus) {
+    try {
+      if (currentStatus === "archived") {
+        await api.unarchiveJob(jobId);
+      } else {
+        await api.archiveJob(jobId);
+      }
+      await load({ quiet: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update archive status");
+    }
+  }
+
+  async function confirmDeleteJob() {
+    if (!jobToDelete) return;
+    setDeletingId(jobToDelete.id);
+    try {
+      await api.deleteJob(jobToDelete.id);
+      setJobs((prev) => prev.filter((item) => item.job.id !== jobToDelete.id));
+      setJobToDelete(null);
+      await load({ quiet: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete job");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!jobToDelete) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !deletingId) {
+        setJobToDelete(null);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [jobToDelete, deletingId]);
+
   function setView(nextView: "list" | "board") {
     const next = new URLSearchParams(searchParams);
     next.set("view", nextView);
@@ -208,18 +277,24 @@ export function JobsPage() {
   const activeStatus = jobStatuses.find((value) => value === status);
   const heading = isFavoriteFilter
     ? "Favorites Board"
-    : activeStatus
-      ? jobStatusPresentation(activeStatus).label
-      : "All jobs";
+    : isArchivedFilter
+      ? "Archived Postings"
+      : activeStatus
+        ? jobStatusPresentation(activeStatus).label
+        : "All active jobs";
   const subtitle = isFavoriteFilter
     ? jobs.length === 0
       ? "No starred roles yet."
       : `${jobs.length} ${jobs.length === 1 ? "priority role" : "priority roles"} on your favorite board.`
-    : jobs.length === 0
-      ? "Nothing here yet."
-      : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
+    : isArchivedFilter
+      ? jobs.length === 0
+        ? "No archived roles."
+        : `${jobs.length} ${jobs.length === 1 ? "archived role" : "archived roles"} saved for reference.`
+      : jobs.length === 0
+        ? "Nothing here yet."
+        : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
 
-  const isFiltered = Boolean(status || companyId || postingState || search || isFavoriteFilter);
+  const isFiltered = Boolean(status || companyId || postingState || search || isFavoriteFilter || isArchivedFilter);
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -228,6 +303,7 @@ export function JobsPage() {
     const nextSearch = String(form.get("search") ?? "").trim();
     const nextPosting = String(form.get("postingState") ?? "");
     if (isFavoriteFilter) next.set("favorites", "true");
+    if (isArchivedFilter) next.set("archived", "true");
     if (status) next.set("status", status);
     if (companyId) next.set("companyId", companyId);
     if (nextSearch) next.set("search", nextSearch);
@@ -248,222 +324,248 @@ export function JobsPage() {
     );
   }
 
+  const activeJobsCount = Math.max(0, (counts.all ?? 0) - (counts.archivedTotal ?? 0));
+
   return (
-    <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
-      <aside className="space-y-6">
-        <section className="card p-5">
-          <h2 className="mb-4 text-sm font-semibold text-[var(--muted)]">Pipeline</h2>
-          <div className="space-y-1">
-            <SidebarLink to="/" active={!status && !isFavoriteFilter} label="All jobs" count={counts.all} />
-            <SidebarLink
-              to="/?favorites=true"
-              active={isFavoriteFilter}
-              label="Favorites"
-              Icon={StarIcon}
-              count={counts.favorites ?? 0}
-            />
-            {(["wishlist", "applied", "interviewing", "offer"] as const).map((key) => (
-              <SidebarLink
-                key={key}
-                to={`/?status=${key}`}
-                active={status === key && !isFavoriteFilter}
-                label={jobStatusPresentation(key).label}
-                count={counts[key] ?? 0}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="card p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-[var(--muted)]">Companies</h2>
-            <Link to="/companies" className="text-xs font-medium text-[var(--accent)]">
-              Manage
-            </Link>
-          </div>
-          <div className="space-y-1">
-            {companies.map((company) => (
-              <SidebarLink
-                key={company.id}
-                to={`/?companyId=${company.id}`}
-                active={companyId === company.id}
-                label={company.name}
-              />
-            ))}
-            {companies.length === 0 ? (
-              <p className="text-sm text-[var(--faint)]">No companies yet.</p>
-            ) : null}
-          </div>
-        </section>
-      </aside>
-
-      <section className="space-y-5">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <div className="flex items-center gap-2.5">
-              {isFavoriteFilter ? (
-                <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
-                  <StarIcon size={18} filled />
-                </span>
-              ) : null}
-              <h1 className="font-display text-3xl font-semibold tracking-tight">{heading}</h1>
-            </div>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              {subtitle}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-            {/* View Switcher: List vs Board */}
-            <div className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-sm)]">
-              <button
-                type="button"
-                onClick={() => setView("list")}
-                aria-label="List view"
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  viewMode === "list"
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                    : "text-[var(--muted)] hover:text-[var(--foreground)]"
-                }`}
-              >
-                <ListIcon size={14} />
-                <span>List</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setView("board")}
-                aria-label="Board view"
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                  viewMode === "board"
-                    ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-                    : "text-[var(--muted)] hover:text-[var(--foreground)]"
-                }`}
-              >
-                <KanbanIcon size={14} />
-                <span>Board</span>
-              </button>
-            </div>
-
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => void checkAllPostings()}
-                disabled={checkingPostings}
-                aria-busy={checkingPostings}
-                className="btn btn-secondary"
-                title="Check whether each job posting is still open"
-              >
-                {checkingPostings ? <span className="spinner" aria-hidden="true" /> : null}
-                {checkingPostings ? "Checking…" : "Check all postings"}
-              </button>
-              {checkProgress && !checkError ? (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className="absolute right-0 top-full z-10 mt-1 w-56 rounded-lg bg-[var(--surface)] px-2 py-1 text-xs text-[var(--muted)] shadow-[var(--shadow-md)]"
-                >
-                  {checkProgress.message}
-                </p>
-              ) : null}
-              {checkError ? (
-                <p
-                  role="alert"
-                  className="absolute right-0 top-full z-10 mt-1 w-56 rounded-lg bg-[var(--danger-soft)] px-2 py-1 text-xs text-[var(--danger)]"
-                >
-                  {checkError}
-                </p>
-              ) : null}
-            </div>
-            <Link to="/jobs/new" className="btn btn-primary">
-              Add a job
-            </Link>
-          </div>
-        </div>
-
-        {!isFiltered ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard
-              label="Tracking"
-              value={counts.all}
-              Icon={BriefcaseIcon}
-              tint="bg-[var(--accent-soft)] text-[var(--accent-ink)]"
-            />
-            <StatCard
-              label="Applied"
-              value={counts.applied ?? 0}
-              Icon={SendIcon}
-              tint="bg-[var(--blue-soft)] text-[var(--blue-ink)]"
-            />
-            <StatCard
-              label="Interviewing"
-              value={counts.interviewing ?? 0}
-              Icon={ChatIcon}
-              tint="bg-[var(--amber-soft)] text-[var(--amber-ink)]"
-            />
-            <StatCard
-              label="Offers"
-              value={counts.offer ?? 0}
-              Icon={TrophyIcon}
-              tint="bg-[var(--green-soft)] text-[var(--green-ink)]"
-            />
-          </div>
-        ) : null}
-
-        {!isFiltered && activity ? <ActivityLine activity={activity} /> : null}
-
-        <form className="card flex flex-wrap items-center gap-2 p-3" onSubmit={handleFilterSubmit}>
-          <input
-            name="search"
-            defaultValue={search}
-            placeholder="Search roles or companies…"
-            className="field min-w-[200px] flex-1 border-transparent bg-[var(--surface-muted)]"
-          />
-          <select
-            name="postingState"
-            defaultValue={postingState ?? ""}
-            className="field w-auto border-transparent bg-[var(--surface-muted)]"
-          >
-            <option value="">Any posting</option>
-            <option value="active">Open</option>
-            <option value="inactive">Closed</option>
-            <option value="unknown">Not checked</option>
-          </select>
-          <button type="submit" className="btn btn-secondary">
-            Filter
-          </button>
-        </form>
-
-        {!isFiltered ? (
+    <>
+      <div className="grid gap-8 lg:grid-cols-[240px_1fr]">
+        <aside className="space-y-6">
           <section className="card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="font-display text-lg font-medium">
-                  {newFromWatch.length > 0
-                    ? `${roleCountLabel(newFromWatch.length)} from your watches`
-                    : "0 new roles from your watches"}
-                </h3>
-                <p className="mt-0.5 text-sm text-[var(--muted)]">
-                  {newFromWatch.length > 0
-                    ? "Not on your list yet. Save the ones worth tracking."
-                    : "Your watches are up to date. No new matches found."}
-                </p>
+            <h2 className="mb-4 text-sm font-semibold text-[var(--muted)]">Pipeline</h2>
+            <div className="space-y-1">
+              <SidebarLink
+                to="/"
+                active={!status && !isFavoriteFilter && !isArchivedFilter}
+                label="All active"
+                count={activeJobsCount}
+              />
+              <SidebarLink
+                to="/?favorites=true"
+                active={isFavoriteFilter}
+                label="Favorites"
+                Icon={StarIcon}
+                count={counts.favorites ?? 0}
+              />
+              {(["wishlist", "applied", "interviewing", "offer"] as const).map((key) => (
+                <SidebarLink
+                  key={key}
+                  to={`/?status=${key}`}
+                  active={status === key && !isFavoriteFilter && !isArchivedFilter}
+                  label={jobStatusPresentation(key).label}
+                  count={counts[key] ?? 0}
+                />
+              ))}
+              <SidebarLink
+                to="/?archived=true"
+                active={isArchivedFilter}
+                label="Archived"
+                Icon={ArchiveIcon}
+                count={counts.archivedTotal ?? (counts.archived ?? 0)}
+              />
+            </div>
+          </section>
+
+          <section className="card p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-[var(--muted)]">Companies</h2>
+              <Link to="/companies" className="text-xs font-medium text-[var(--accent)]">
+                Manage
+              </Link>
+            </div>
+            <div className="space-y-1">
+              {companies.map((company) => (
+                <SidebarLink
+                  key={company.id}
+                  to={`/?companyId=${company.id}`}
+                  active={companyId === company.id}
+                  label={company.name}
+                />
+              ))}
+              {companies.length === 0 ? (
+                <p className="text-sm text-[var(--faint)]">No companies yet.</p>
+              ) : null}
+            </div>
+          </section>
+        </aside>
+
+        <section className="space-y-5">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="flex items-center gap-2.5">
+                {isFavoriteFilter ? (
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+                    <StarIcon size={18} filled />
+                  </span>
+                ) : isArchivedFilter ? (
+                  <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--surface-muted)] text-[var(--muted)]">
+                    <ArchiveIcon size={18} />
+                  </span>
+                ) : null}
+                <h1 className="font-display text-3xl font-semibold tracking-tight">{heading}</h1>
               </div>
-              {/* This is a preview; Companies is where the full set lives. Saying
-                  so beats silently hiding everything past the fifth role. */}
-              {newFromWatch.length > WATCH_PREVIEW_COUNT ? (
-                <Link to="/companies" className="btn btn-secondary btn-sm">
-                  Browse all {newFromWatch.length}
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                {subtitle}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              {/* View Switcher: List vs Board */}
+              <div className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-sm)]">
+                <button
+                  type="button"
+                  onClick={() => setView("list")}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                    viewMode === "list"
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                      : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                  }`}
+                  title="List view"
+                >
+                  <ListIcon size={14} />
+                  List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setView("board")}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                    viewMode === "board"
+                      ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+                      : "text-[var(--muted)] hover:text-[var(--foreground)]"
+                  }`}
+                  title="Board view"
+                >
+                  <KanbanIcon size={14} />
+                  Board
+                </button>
+              </div>
+
+              <Link to="/jobs/new" className="btn btn-primary">
+                + Add job
+              </Link>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <form onSubmit={handleFilterSubmit} className="flex flex-1 flex-wrap gap-2">
+              <input
+                type="search"
+                name="search"
+                defaultValue={search ?? ""}
+                placeholder="Search jobs…"
+                aria-label="Search jobs"
+                className="field max-w-xs"
+              />
+              <select
+                name="postingState"
+                defaultValue={postingState ?? ""}
+                aria-label="Posting status"
+                className="field max-w-[160px]"
+              >
+                <option value="">All postings</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              <button type="submit" className="btn btn-secondary">
+                Filter
+              </button>
+              {isFiltered ? (
+                <Link to="/" className="btn btn-ghost">
+                  Clear
                 </Link>
               ) : null}
+            </form>
+
+            <button
+              type="button"
+              onClick={() => void checkAllPostings()}
+              disabled={checkingPostings}
+              className="btn btn-secondary"
+            >
+              {checkingPostings ? <span className="spinner" /> : null}
+              {checkingPostings ? "Checking…" : "Check postings"}
+            </button>
+          </div>
+
+          {checkProgress && (checkingPostings || checkProgress.phase === "done") ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--muted)] shadow-[var(--shadow-sm)]"
+            >
+              <span>{checkProgress.message}</span>
+              {checkProgress.total && checkProgress.total > 0 ? (
+                <span className="font-display font-medium text-[var(--foreground)]">
+                  {checkProgress.current ?? 0} / {checkProgress.total}
+                </span>
+              ) : null}
             </div>
-            {triageError ? (
-              <p
-                role="alert"
-                className="mt-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-sm text-[var(--danger)]"
-              >
-                {triageError}
-              </p>
-            ) : null}
-            {newFromWatch.length > 0 ? (
+          ) : null}
+
+          {checkError ? (
+            <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+              {checkError}
+            </p>
+          ) : null}
+
+          {!isFiltered ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatCard
+                label="Tracking"
+                value={activeJobsCount}
+                Icon={BriefcaseIcon}
+                tint="bg-[var(--accent-soft)] text-[var(--accent-ink)]"
+              />
+              <StatCard
+                label="Applied"
+                value={counts.applied ?? 0}
+                Icon={SendIcon}
+                tint="bg-[var(--blue-soft)] text-[var(--blue-ink)]"
+              />
+              <StatCard
+                label="Interviewing"
+                value={counts.interviewing ?? 0}
+                Icon={ChatIcon}
+                tint="bg-[var(--amber-soft)] text-[var(--amber-ink)]"
+              />
+              <StatCard
+                label="Offers"
+                value={counts.offer ?? 0}
+                Icon={TrophyIcon}
+                tint="bg-[var(--green-soft)] text-[var(--green-ink)]"
+              />
+            </div>
+          ) : null}
+
+          {!isFiltered && activity ? <ActivityLine activity={activity} /> : null}
+
+          {!isFiltered && newFromWatch.length > 0 ? (
+            <section className="card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-display text-lg font-medium">
+                    {newFromWatch.length > 0
+                      ? `${roleCountLabel(newFromWatch.length)} from your watches`
+                      : "0 new roles from your watches"}
+                  </h3>
+                  <p className="mt-0.5 text-sm text-[var(--muted)]">
+                    {newFromWatch.length > 0
+                      ? "Not on your list yet. Save the ones worth tracking."
+                      : "Your watches are up to date. No new matches found."}
+                  </p>
+                </div>
+                {newFromWatch.length > WATCH_PREVIEW_COUNT ? (
+                  <Link to="/companies" className="btn btn-secondary btn-sm">
+                    Browse all {newFromWatch.length}
+                  </Link>
+                ) : null}
+              </div>
+              {triageError ? (
+                <p
+                  role="alert"
+                  className="mt-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-sm text-[var(--danger)]"
+                >
+                  {triageError}
+                </p>
+              ) : null}
               <div className="mt-3">
                 <NewRolesList
                   roles={newFromWatch.slice(0, WATCH_PREVIEW_COUNT)}
@@ -474,109 +576,218 @@ export function JobsPage() {
                   isPending={(jobId) => triagingId === jobId}
                 />
               </div>
-            ) : null}
-          </section>
-        ) : null}
+            </section>
+          ) : null}
 
-        {jobs.length === 0 ? (
-          <div className="card flex flex-col items-center gap-3 px-6 py-16 text-center">
-            {isFavoriteFilter ? (
-              <>
-                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
-                  <StarIcon size={24} />
-                </span>
-                <p className="font-display text-lg text-[var(--foreground)]">No favorite jobs yet</p>
-                <p className="max-w-sm text-sm text-[var(--muted)]">
-                  Click the star on any job to pin it here and track your highest-priority applications across a dedicated Kanban board.
-                </p>
-                <Link to="/" className="btn btn-secondary mt-1">
-                  Browse all jobs
-                </Link>
-              </>
-            ) : (
-              <>
-                <p className="font-display text-lg text-[var(--foreground)]">Your board is empty</p>
-                <p className="max-w-sm text-sm text-[var(--muted)]">
-                  Paste a posting URL and Job Tracker will keep an eye on it for you.
-                </p>
-                <Link to="/jobs/new" className="btn btn-primary mt-1">
-                  Add your first job
-                </Link>
-              </>
-            )}
-          </div>
-        ) : viewMode === "board" ? (
-          <JobsBoardView
-            jobs={jobs}
-            onToggleFavorite={handleToggleFavorite}
-            onUpdateStatus={handleUpdateStatus}
-            isPendingFavorite={(id) => togglingFavId === id}
-          />
-        ) : (
-          <ul className="space-y-3">
-            {jobs.map(({ job, companyName }) => {
-              const statusInfo = jobStatusPresentation(job.status);
-              const postingInfo = postingStateMatters(job.status)
-                ? postingStatePresentation(job.postingState)
-                : null;
-              const source = jobSourceLabel(job.source);
-              const StageIcon = statusIcons[job.status];
-              return (
-                <li key={job.id}>
-                  <Link
-                    to={`/jobs/${job.id}`}
-                    className="card block p-5 transition-shadow hover:shadow-[var(--shadow-md)]"
-                  >
-                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`pill ${toneClasses[statusInfo.tone]}`}>
-                            <StageIcon size={12} />
-                            {statusInfo.label}
-                          </span>
-                          {postingInfo ? (
-                            <span className={`pill ${toneClasses[postingInfo.tone]}`}>
-                              <span className="pill-dot" />
-                              {postingInfo.label}
-                            </span>
-                          ) : null}
-                          {job.isNewFromWatch ? (
-                            <span className="pill bg-[var(--accent-soft)] text-[var(--accent-ink)]">
-                              New
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="font-display text-lg font-medium leading-snug">{job.title}</p>
-                        <p className="text-sm text-[var(--muted)]">
-                          {companyName}
-                          {job.appliedAt
-                            ? ` · Applied ${formatDistanceToNow(new Date(job.appliedAt), {
-                                addSuffix: true,
-                              })}`
-                            : ""}
-                        </p>
-                        {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0 self-start md:self-auto">
-                        <FavoriteButton
-                          isFavorite={job.isFavorite}
-                          onToggle={() => handleToggleFavorite(job.id)}
-                          disabled={togglingFavId === job.id}
-                        />
-                        <p className="text-xs text-[var(--faint)]">
-                          Updated{" "}
-                          {formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}
-                        </p>
-                      </div>
-                    </div>
+          {jobs.length === 0 ? (
+            <div className="card flex flex-col items-center justify-center gap-3 p-12 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface-muted)] text-[var(--muted)]">
+                {isFavoriteFilter ? (
+                  <StarIcon size={24} filled />
+                ) : isArchivedFilter ? (
+                  <ArchiveIcon size={24} />
+                ) : (
+                  <BriefcaseIcon size={24} />
+                )}
+              </span>
+              {isFiltered ? (
+                <>
+                  <p className="font-display text-lg text-[var(--foreground)]">No matching jobs</p>
+                  <p className="text-sm text-[var(--muted)]">
+                    Try adjusting your search or clearing active filters.
+                  </p>
+                  <Link to="/" className="btn btn-secondary mt-1">
+                    Clear filters
                   </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-    </div>
+                </>
+              ) : isFavoriteFilter ? (
+                <>
+                  <p className="font-display text-lg text-[var(--foreground)]">No favorites yet</p>
+                  <p className="max-w-sm text-sm text-[var(--muted)]">
+                    Click the star on any job to pin it here and track your highest-priority applications across a dedicated Kanban board.
+                  </p>
+                  <Link to="/" className="btn btn-secondary mt-1">
+                    Browse all jobs
+                  </Link>
+                </>
+              ) : isArchivedFilter ? (
+                <>
+                  <p className="font-display text-lg text-[var(--foreground)]">No archived jobs</p>
+                  <p className="max-w-sm text-sm text-[var(--muted)]">
+                    Jobs that you archive or close will be saved here for reference.
+                  </p>
+                  <Link to="/" className="btn btn-secondary mt-1">
+                    Browse active jobs
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <p className="font-display text-lg text-[var(--foreground)]">Your board is empty</p>
+                  <p className="max-w-sm text-sm text-[var(--muted)]">
+                    Paste a posting URL and Job Tracker will keep an eye on it for you.
+                  </p>
+                  <Link to="/jobs/new" className="btn btn-primary mt-1">
+                    Add your first job
+                  </Link>
+                </>
+              )}
+            </div>
+          ) : viewMode === "board" ? (
+            <JobsBoardView
+              jobs={jobs}
+              onToggleFavorite={handleToggleFavorite}
+              onUpdateStatus={handleUpdateStatus}
+              onToggleArchive={handleToggleArchive}
+              onDeleteJob={setJobToDelete}
+              isPendingFavorite={(id) => togglingFavId === id}
+            />
+          ) : (
+            <ul className="space-y-3">
+              {jobs.map(({ job, companyName }) => {
+                const statusInfo = jobStatusPresentation(job.status);
+                const postingInfo = postingStateMatters(job.status)
+                  ? postingStatePresentation(job.postingState)
+                  : null;
+                const source = jobSourceLabel(job.source);
+                const StageIcon = statusIcons[job.status];
+                return (
+                  <li key={job.id}>
+                    <Link
+                      to={`/jobs/${job.id}`}
+                      className="card group block p-5 transition-shadow hover:shadow-[var(--shadow-md)]"
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`pill ${toneClasses[statusInfo.tone]}`}>
+                              <StageIcon size={12} />
+                              {statusInfo.label}
+                            </span>
+                            {postingInfo ? (
+                              <span className={`pill ${toneClasses[postingInfo.tone]}`}>
+                                <span className="pill-dot" />
+                                {postingInfo.label}
+                              </span>
+                            ) : null}
+                            {job.isNewFromWatch ? (
+                              <span className="pill bg-[var(--accent-soft)] text-[var(--accent-ink)]">
+                                New
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="font-display text-lg font-medium leading-snug">{job.title}</p>
+                          <p className="text-sm text-[var(--muted)]">
+                            {companyName}
+                            {job.appliedAt
+                              ? ` · Applied ${formatDistanceToNow(new Date(job.appliedAt), {
+                                  addSuffix: true,
+                                })}`
+                              : ""}
+                          </p>
+                          {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void handleToggleArchive(job.id, job.status);
+                            }}
+                            className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--accent)] transition-colors"
+                            title={job.status === "archived" ? "Restore to active" : "Archive role"}
+                          >
+                            <ArchiveIcon size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setJobToDelete({ id: job.id, title: job.title, companyName });
+                            }}
+                            className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] transition-colors"
+                            title="Delete role"
+                          >
+                            <TrashIcon size={16} />
+                          </button>
+                          <FavoriteButton
+                            isFavorite={job.isFavorite}
+                            onToggle={() => handleToggleFavorite(job.id)}
+                            disabled={togglingFavId === job.id}
+                          />
+                          <p className="text-xs text-[var(--faint)] ml-1">
+                            Updated{" "}
+                            {formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}
+                          </p>
+                        </div>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      </div>
+
+      {jobToDelete ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+          role="presentation"
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-job-dialog-title"
+            className="card w-full max-w-md p-6 shadow-[var(--shadow-lg)] space-y-4"
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--danger-soft)] text-[var(--danger)]">
+                <TrashIcon size={20} />
+              </span>
+              <div>
+                <h3
+                  id="delete-job-dialog-title"
+                  className="font-display text-lg font-semibold text-[var(--foreground)]"
+                >
+                  Delete job posting?
+                </h3>
+                <p className="text-xs text-[var(--muted)]">Permanent removal from database and CSV</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-[var(--muted)] leading-relaxed">
+              Are you sure you want to delete <strong className="text-[var(--foreground)]">{jobToDelete.title}</strong> at{" "}
+              <strong className="text-[var(--foreground)]">{jobToDelete.companyName}</strong>?
+            </p>
+            <p className="text-xs text-[var(--faint)]">
+              This will permanently delete this job, its timeline history, and document attachment links from your local database and the synchronized CSV file. This cannot be undone.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setJobToDelete(null)}
+                disabled={deletingId !== null}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteJob()}
+                disabled={deletingId !== null}
+                className="btn bg-[var(--danger)] text-white hover:opacity-90 flex items-center gap-1.5"
+              >
+                {deletingId !== null ? <span className="spinner" /> : <TrashIcon size={14} />}
+                <span>{deletingId !== null ? "Deleting…" : "Delete permanently"}</span>
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
   );
 }
 

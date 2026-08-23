@@ -2,7 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Link } from "react-router-dom";
 
 import { FavoriteButton } from "@/components/FavoriteButton";
-import { statusIcons } from "@/components/icons";
+import { ArchiveIcon, statusIcons, TrashIcon } from "@/components/icons";
 import { jobStatuses, type JobListItem, type JobStatus } from "@/lib/schema";
 import {
   jobStatusPresentation,
@@ -23,11 +23,15 @@ export function JobsBoardView({
   jobs,
   onToggleFavorite,
   onUpdateStatus,
+  onToggleArchive,
+  onDeleteJob,
   isPendingFavorite,
 }: {
   jobs: JobListItem[];
   onToggleFavorite: (jobId: string) => void;
   onUpdateStatus?: (jobId: string, nextStatus: JobStatus) => void;
+  onToggleArchive?: (jobId: string, currentStatus: JobStatus) => void;
+  onDeleteJob?: (job: { id: string; title: string; companyName: string }) => void;
   isPendingFavorite?: (jobId: string) => boolean;
 }) {
   const jobsByStage = BOARD_COLUMNS.reduce<Record<JobStatus, JobListItem[]>>(
@@ -35,12 +39,16 @@ export function JobsBoardView({
       acc[stage] = jobs.filter((item) => item.job.status === stage);
       return acc;
     },
-    { wishlist: [], applied: [], interviewing: [], offer: [], rejected: [], withdrawn: [], closed: [] },
+    { wishlist: [], applied: [], interviewing: [], offer: [], rejected: [], withdrawn: [], closed: [], archived: [] },
   );
 
   // Check if there are closed / archived jobs in the current set
   const archivedJobs = jobs.filter(
-    (item) => item.job.status === "rejected" || item.job.status === "withdrawn" || item.job.status === "closed",
+    (item) =>
+      item.job.status === "rejected" ||
+      item.job.status === "withdrawn" ||
+      item.job.status === "closed" ||
+      item.job.status === "archived",
   );
 
   return (
@@ -93,13 +101,42 @@ export function JobsBoardView({
                             <span className="text-xs font-semibold text-[var(--muted)]">
                               {companyName}
                             </span>
-                            <FavoriteButton
-                              isFavorite={job.isFavorite}
-                              onToggle={() => onToggleFavorite(job.id)}
-                              disabled={isPending}
-                              size={16}
-                              className="-mr-1.5 -mt-1.5"
-                            />
+                            <div className="flex items-center gap-1 -mr-1.5 -mt-1.5">
+                              {onToggleArchive ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onToggleArchive(job.id, job.status);
+                                  }}
+                                  className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--accent)] transition-colors opacity-0 group-hover:opacity-100"
+                                  title={job.status === "archived" ? "Restore to active" : "Archive role"}
+                                >
+                                  <ArchiveIcon size={14} />
+                                </button>
+                              ) : null}
+                              {onDeleteJob ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onDeleteJob({ id: job.id, title: job.title, companyName });
+                                  }}
+                                  className="rounded p-1 text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] transition-colors opacity-0 group-hover:opacity-100"
+                                  title="Delete role"
+                                >
+                                  <TrashIcon size={14} />
+                                </button>
+                              ) : null}
+                              <FavoriteButton
+                                isFavorite={job.isFavorite}
+                                onToggle={() => onToggleFavorite(job.id)}
+                                disabled={isPending}
+                                size={16}
+                              />
+                            </div>
                           </div>
 
                           <Link
@@ -186,7 +223,7 @@ export function JobsBoardView({
             {archivedJobs.map(({ job, companyName }) => (
               <div
                 key={job.id}
-                className="flex items-center justify-between rounded-xl bg-[var(--surface-muted)] p-3 text-sm"
+                className="group flex items-center justify-between rounded-xl bg-[var(--surface-muted)] p-3 text-sm"
               >
                 <div className="min-w-0 flex-1 pr-2">
                   <Link
@@ -199,11 +236,41 @@ export function JobsBoardView({
                     {companyName} · {jobStatusPresentation(job.status).label}
                   </p>
                 </div>
-                <FavoriteButton
-                  isFavorite={job.isFavorite}
-                  onToggle={() => onToggleFavorite(job.id)}
-                  size={16}
-                />
+                <div className="flex items-center gap-1">
+                  {onToggleArchive ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onToggleArchive(job.id, job.status);
+                      }}
+                      className="rounded p-1 text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--accent)] transition-colors opacity-0 group-hover:opacity-100"
+                      title={job.status === "archived" ? "Restore to active" : "Archive role"}
+                    >
+                      <ArchiveIcon size={14} />
+                    </button>
+                  ) : null}
+                  {onDeleteJob ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onDeleteJob({ id: job.id, title: job.title, companyName });
+                      }}
+                      className="rounded p-1 text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] transition-colors opacity-0 group-hover:opacity-100"
+                      title="Delete role"
+                    >
+                      <TrashIcon size={14} />
+                    </button>
+                  ) : null}
+                  <FavoriteButton
+                    isFavorite={job.isFavorite}
+                    onToggle={() => onToggleFavorite(job.id)}
+                    size={16}
+                  />
+                </div>
               </div>
             ))}
           </div>
