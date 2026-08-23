@@ -21,7 +21,7 @@ fn map_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
     })
 }
 
-fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
+pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
         id: row.get(0)?,
         company_id: row.get(1)?,
@@ -415,8 +415,11 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         );
     }
     if let Some(search) = &filters.search {
-        sql.push_str(" AND j.title LIKE ?");
-        values.push(Box::new(format!("%{search}%")));
+        sql.push_str(" AND (j.title LIKE ? OR c.name LIKE ? OR j.notes LIKE ?)");
+        let pattern = format!("%{search}%");
+        values.push(Box::new(pattern.clone()));
+        values.push(Box::new(pattern.clone()));
+        values.push(Box::new(pattern));
     }
 
     // Location filtering based on global settings

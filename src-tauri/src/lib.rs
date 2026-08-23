@@ -1,4 +1,5 @@
 mod ats;
+pub mod cli;
 mod commands;
 mod companies;
 mod db;
@@ -107,4 +108,5 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+pub use cli::run_cli;
 pub use runner::run_jobs_cli;

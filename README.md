@@ -147,10 +147,43 @@ npm run desktop:build    # Vite UI typecheck + build
 | `npm run tauri:build` | Produce `Job Tracker.app` |
 | `npm run app:rebuild` | Build packaged app, retarget LaunchAgent, notify; quit/relaunch if running |
 | `npm run hooks:install` | Install local post-commit hook (background rebuild on app-code commits) |
+| `npm run cli -- <cmd>` | Run Job Tracker CLI subcommands (e.g. `npm run cli -- list`, `stats`) |
+| `npm run cli:install` | Symlink `jt` and `job-tracker` into `~/.local/bin/` for global terminal access |
 | `npm run jobs` | One-shot posting / ATS / careers / Gmail / CSV cycle |
 | `npm run jobs:install` | Write/retarget the LaunchAgent plist |
 | `npm test` | Rust unit tests |
 | `npm run test:desktop` | Desktop UI unit tests |
+
+## CLI / Terminal Usage
+
+Job Tracker includes a full-featured CLI for terminal workflows and AI agent automation (Cursor, Claude Code, terminal scripts):
+
+```bash
+# Install global 'jt' alias
+npm run cli:install
+
+# List & search jobs
+jt list --status interviewing
+jt list --search "Staff" --favorites --json
+
+# Pipeline overview
+jt stats
+
+# View job details and event history
+jt get <job_id_or_url>
+
+# Add job by URL (auto-scrapes title, company, location)
+jt add "https://boards.greenhouse.io/stripe/jobs/12345" --notes "Referred by Alex"
+
+# Update status or log notes
+jt update <job_id> --status applied --applied-at today
+jt note <job_id> "Recruiter phone screen scheduled for Friday"
+
+# ATS Watch triage
+jt watches list --new-only
+jt watches save <job_id>
+jt watches dismiss <job_id>
+```
 
 `app:rebuild` flags: `--skip-jobs` (build only), `--background` (used by the post-commit hook). Concurrent rebuilds use `data/rebuild.lock` and fail clearly if one is already running. Log: `data/rebuild.log`.
 
