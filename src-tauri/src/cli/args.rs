@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -31,10 +31,7 @@ pub struct Cli {
     )]
     pub quiet: bool,
 
-    #[arg(
-        long,
-        help = "Run the background jobs cycle (LaunchAgent worker mode)"
-    )]
+    #[arg(long, help = "Run the background jobs cycle (LaunchAgent worker mode)")]
     pub run_jobs: bool,
 
     #[command(subcommand)]
@@ -52,19 +49,36 @@ pub enum Commands {
     #[command(name = "add", about = "Add a job posting by URL (with auto-scraping)")]
     Add(AddArgs),
 
-    #[command(name = "update", about = "Update a job's status, notes, applied date, or favorite")]
+    #[command(
+        name = "update",
+        about = "Update a job's status, notes, description, applied date, or favorite"
+    )]
     Update(UpdateArgs),
 
     #[command(name = "note", about = "Quickly append a note and event to a job")]
     Note(NoteArgs),
 
-    #[command(name = "stats", alias = "summary", about = "Show pipeline metrics & summary")]
+    #[command(
+        name = "description",
+        alias = "desc",
+        about = "View or edit the job description"
+    )]
+    Description(DescriptionArgs),
+
+    #[command(
+        name = "stats",
+        alias = "summary",
+        about = "Show pipeline metrics & summary"
+    )]
     Stats(StatsArgs),
 
     #[command(name = "watches", about = "Manage and triage ATS board watches")]
     Watches(WatchesArgs),
 
-    #[command(name = "sync", about = "Run a full sync cycle (postings check, watches, careers, CSV)")]
+    #[command(
+        name = "sync",
+        about = "Run a full sync cycle (postings check, watches, careers, CSV)"
+    )]
     Sync(SyncArgs),
 }
 
@@ -79,7 +93,11 @@ pub struct ListArgs {
     #[arg(short = 'c', long, help = "Filter by company name or ID")]
     pub company: Option<String>,
 
-    #[arg(short = 's', long, help = "Search text across title, company, notes, URL")]
+    #[arg(
+        short = 's',
+        long,
+        help = "Search text across title, company, notes, description, URL"
+    )]
     pub search: Option<String>,
 
     #[arg(short = 'l', long, help = "Filter by location")]
@@ -128,6 +146,9 @@ pub struct AddArgs {
     #[arg(long, help = "Initial notes or referral info")]
     pub notes: Option<String>,
 
+    #[arg(long, help = "Initial job description")]
+    pub description: Option<String>,
+
     #[arg(short = 'l', long, help = "Location (e.g. Remote, San Francisco, CA)")]
     pub location: Option<String>,
 
@@ -158,6 +179,16 @@ pub struct UpdateArgs {
     #[arg(long, help = "Append a dated note without replacing existing notes")]
     pub append_note: Option<String>,
 
+    #[arg(
+        long,
+        conflicts_with = "clear_description",
+        help = "Replace job description"
+    )]
+    pub description: Option<String>,
+
+    #[arg(long, conflicts_with = "description", help = "Clear job description")]
+    pub clear_description: bool,
+
     #[arg(short = 't', long, help = "Update job title")]
     pub title: Option<String>,
 
@@ -167,7 +198,12 @@ pub struct UpdateArgs {
     #[arg(short = 'l', long, help = "Update location")]
     pub location: Option<String>,
 
-    #[arg(short = 'f', long, conflicts_with = "unfavorite", help = "Mark as favorite")]
+    #[arg(
+        short = 'f',
+        long,
+        conflicts_with = "unfavorite",
+        help = "Mark as favorite"
+    )]
     pub favorite: bool,
 
     #[arg(long, conflicts_with = "favorite", help = "Unmark favorite")]
@@ -190,6 +226,37 @@ pub struct NoteArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct DescriptionArgs {
+    #[arg(help = "Job ID (full or prefix) or Job URL")]
+    pub target: String,
+
+    #[arg(
+        help = "New description text (if omitted and no flags provided, opens interactive $EDITOR)"
+    )]
+    pub description: Option<String>,
+
+    #[arg(short = 'F', long = "file", help = "Read description text from a file")]
+    pub file: Option<PathBuf>,
+
+    #[arg(long = "stdin", help = "Read description text from standard input")]
+    pub stdin: bool,
+
+    #[arg(
+        short = 's',
+        long = "show",
+        help = "Print the current description without editing"
+    )]
+    pub show: bool,
+
+    #[arg(
+        long = "clear",
+        conflicts_with = "show",
+        help = "Clear the job description"
+    )]
+    pub clear: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct StatsArgs {}
 
 #[derive(Debug, Args)]
@@ -203,13 +270,19 @@ pub enum WatchCommands {
     #[command(name = "list", alias = "ls", about = "List discovered watch postings")]
     List(WatchListArgs),
 
-    #[command(name = "save", about = "Save a discovered watch posting to your tracked wishlist")]
+    #[command(
+        name = "save",
+        about = "Save a discovered watch posting to your tracked wishlist"
+    )]
     Save(WatchTargetArgs),
 
     #[command(name = "dismiss", about = "Dismiss a discovered watch posting")]
     Dismiss(WatchTargetArgs),
 
-    #[command(name = "reset", about = "Reset a dismissed watch posting back to open review")]
+    #[command(
+        name = "reset",
+        about = "Reset a dismissed watch posting back to open review"
+    )]
     Reset(WatchTargetArgs),
 
     #[command(name = "sync", about = "Trigger an on-demand sync of all ATS watches")]

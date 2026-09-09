@@ -1,8 +1,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
+use std::io::{Read, Seek, SeekFrom, Write};
 
 use crate::cli::args::{
-    AddArgs, GetArgs, ListArgs, NoteArgs, UpdateArgs, WatchCommands, WatchListArgs,
+    AddArgs, DescriptionArgs, GetArgs, ListArgs, NoteArgs, UpdateArgs, WatchCommands, WatchListArgs,
 };
 use crate::cli::output::{
     format_job_detail, format_jobs_table, format_stats, format_watch_positions, print_json,
@@ -14,8 +15,8 @@ use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::active_csv_path;
 use crate::jobs::metadata::resolve_job_metadata;
 use crate::jobs::service::{
-    add_job_event, archive_job, create_job_from_url_with_careers, dismiss_watch_job,
-    get_job_by_id, get_job_detail, get_pipeline_counts, get_weekly_activity, list_jobs, map_job,
+    add_job_event, archive_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_by_id,
+    get_job_detail, get_pipeline_counts, get_weekly_activity, list_jobs, map_job,
     reset_dismissed_watch_job, resolve_title_from_url, save_open_watch_job, set_job_favorite,
     unarchive_job, update_job, JobFilters, UpdateJobInput,
 };
@@ -32,11 +33,9 @@ pub fn resolve_target_job_id(conn: &Connection, target: &str) -> AppResult<Strin
 
     // 1. Exact ID match
     if let Some(id) = conn
-        .query_row(
-            "SELECT id FROM jobs WHERE id = ?1",
-            params![trimmed],
-            |r| r.get::<_, String>(0),
-        )
+        .query_row("SELECT id FROM jobs WHERE id = ?1", params![trimmed], |r| {
+            r.get::<_, String>(0)
+        })
         .optional()
         .map_err(map_sqlite)?
     {
@@ -79,9 +78,7 @@ pub fn resolve_target_job_id(conn: &Connection, target: &str) -> AppResult<Strin
     let url_matches: Vec<(String, String, String)> = {
         let mut stmt = conn.prepare("SELECT j.id, c.name, j.title FROM jobs j JOIN companies c ON j.company_id = c.id WHERE j.url LIKE ?1 LIMIT 5")?;
         let pattern = format!("%{trimmed}%");
-        let rows = stmt.query_map(params![pattern], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-        })?;
+        let rows = stmt.query_map(params![pattern], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
 
@@ -123,7 +120,11 @@ pub fn handle_list(
         location: args.location,
         new_from_watch: None,
         is_favorite: if args.favorites { Some(true) } else { None },
-        is_archived: if args.archived { Some(true) } else { Some(false) },
+        is_archived: if args.archived {
+            Some(true)
+        } else {
+            Some(false)
+        },
     };
 
     let mut jobs = list_jobs(conn, filters)?;
@@ -165,7 +166,7 @@ pub async fn handle_add(
     }
 
     // Resolve metadata via scraper
-    let (resolved_title, resolved_company, resolved_location) = {
+    let (resolved_title, resolved_company, resolved_description, resolved_location) = {
         let meta = resolve_job_metadata(url).await.ok();
         let title = if let Some(t) = args.title.filter(|s| !s.trim().is_empty()) {
             t
@@ -177,8 +178,13 @@ pub async fn handle_add(
         } else {
             meta.as_ref().and_then(|m| m.company_name.clone())
         };
+        let description = if let Some(d) = args.description.filter(|s| !s.trim().is_empty()) {
+            Some(d)
+        } else {
+            meta.as_ref().and_then(|m| m.description.clone())
+        };
         let location = args.location.filter(|s| !s.trim().is_empty());
-        (title, company, location)
+        (title, company, description, location)
     };
 
     let applied_date = match args.applied_at.as_deref() {
@@ -207,7 +213,7 @@ pub async fn handle_add(
         Some(status),
         applied_date.as_deref(),
         args.notes.as_deref(),
-        None,
+        resolved_description.as_deref(),
         resolved_location.as_deref(),
         None,
     )?;
@@ -266,7 +272,9 @@ pub fn handle_update(
     }
 
     let applied_date = match args.applied_at.as_deref() {
-        Some("today") | Some("now") => Some(Some(chrono::Local::now().format("%Y-%m-%d").to_string())),
+        Some("today") | Some("now") => {
+            Some(Some(chrono::Local::now().format("%Y-%m-%d").to_string()))
+        }
         Some(d) if !d.trim().is_empty() => Some(Some(d.trim().to_string())),
         _ => None,
     };
@@ -295,6 +303,14 @@ pub fn handle_update(
         None
     };
 
+    let description = if args.clear_description {
+        Some(None)
+    } else if let Some(d) = args.description {
+        Some(Some(d))
+    } else {
+        None
+    };
+
     let location = args.location.map(Some);
 
     let input = UpdateJobInput {
@@ -303,7 +319,7 @@ pub fn handle_update(
         status: args.status,
         applied_at: applied_date,
         notes,
-        description: None,
+        description,
         location,
         url: None,
         is_new_from_watch: None,
@@ -324,7 +340,14 @@ pub fn handle_update(
     } else if !quiet {
         println!("✓ Updated job: {}", updated.job.title);
         println!("  Status:   {}", updated.job.status);
-        println!("  Favorite: {}", if updated.job.is_favorite { "Yes ★" } else { "No" });
+        println!(
+            "  Favorite: {}",
+            if updated.job.is_favorite {
+                "Yes ★"
+            } else {
+                "No"
+            }
+        );
     }
     Ok(())
 }
@@ -375,7 +398,165 @@ pub fn handle_note(
     if json {
         print_json(&event);
     } else if !quiet {
-        println!("✓ Added note to job {}: \"{}\"", &job_id[..8.min(job_id.len())], note_text);
+        println!(
+            "✓ Added note to job {}: \"{}\"",
+            &job_id[..8.min(job_id.len())],
+            note_text
+        );
+    }
+    Ok(())
+}
+
+fn open_interactive_editor(initial_text: &str) -> AppResult<String> {
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| {
+            if cfg!(windows) {
+                "notepad".to_string()
+            } else {
+                "nano".to_string()
+            }
+        });
+
+    let mut temp_file = tempfile::Builder::new()
+        .prefix("job-tracker-desc-")
+        .suffix(".txt")
+        .tempfile()
+        .map_err(|e| AppError::from(format!("Failed to create temporary file: {e}")))?;
+
+    if !initial_text.is_empty() {
+        temp_file.write_all(initial_text.as_bytes()).map_err(|e| {
+            AppError::from(format!("Failed to write initial text to temp file: {e}"))
+        })?;
+        temp_file
+            .flush()
+            .map_err(|e| AppError::from(format!("Failed to flush temp file: {e}")))?;
+    }
+
+    let status = std::process::Command::new(&editor)
+        .arg(temp_file.path())
+        .status()
+        .map_err(|e| AppError::from(format!("Failed to launch editor '{editor}': {e}")))?;
+
+    if !status.success() {
+        return Err(AppError::from(format!(
+            "Editor '{editor}' exited with non-zero status"
+        )));
+    }
+
+    temp_file
+        .seek(SeekFrom::Start(0))
+        .map_err(|e| AppError::from(format!("Failed to seek temp file: {e}")))?;
+    let mut updated = String::new();
+    temp_file
+        .read_to_string(&mut updated)
+        .map_err(|e| AppError::from(format!("Failed to read edited temp file: {e}")))?;
+
+    Ok(updated)
+}
+
+pub fn handle_description(
+    conn: &Connection,
+    paths: &DataPaths,
+    args: DescriptionArgs,
+    json: bool,
+    quiet: bool,
+) -> AppResult<()> {
+    let job_id = resolve_target_job_id(conn, &args.target)?;
+    let existing = get_job_by_id(conn, &job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+
+    // 1. Show mode
+    if args.show {
+        if json {
+            let out = json!({
+                "id": job_id,
+                "title": existing.title,
+                "description": existing.description
+            });
+            print_raw_json(&out);
+        } else if let Some(desc) = &existing.description {
+            if !desc.trim().is_empty() {
+                println!("{desc}");
+            } else if !quiet {
+                println!("(Description is empty)");
+            }
+        } else if !quiet {
+            println!(
+                "No description set for job {} ({})",
+                existing.title,
+                &job_id[..8.min(job_id.len())]
+            );
+        }
+        return Ok(());
+    }
+
+    // 2. Clear mode
+    if args.clear {
+        let updated = update_job(
+            conn,
+            &job_id,
+            UpdateJobInput {
+                description: Some(None),
+                ..Default::default()
+            },
+        )?;
+        sync_csv_after_mutation(conn, paths);
+
+        if json {
+            print_json(&updated);
+        } else if !quiet {
+            println!("✓ Cleared description for job: {}", updated.job.title);
+        }
+        return Ok(());
+    }
+
+    // 3. Determine new description text from arguments, file, stdin, or interactive editor
+    let new_description = if let Some(text) = args.description {
+        text
+    } else if let Some(file_path) = args.file {
+        std::fs::read_to_string(&file_path).map_err(|e| {
+            AppError::from(format!("Failed to read file {}: {e}", file_path.display()))
+        })?
+    } else if args.stdin {
+        let mut buffer = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buffer)
+            .map_err(|e| AppError::from(format!("Failed to read from stdin: {e}")))?;
+        buffer
+    } else {
+        // Open interactive editor
+        let initial_text = existing.description.as_deref().unwrap_or("");
+        let edited = open_interactive_editor(initial_text)?;
+        if edited == initial_text {
+            if !quiet && !json {
+                println!("No changes made to description.");
+            }
+            return Ok(());
+        }
+        edited
+    };
+
+    let desc_to_save = if new_description.trim().is_empty() {
+        None
+    } else {
+        Some(new_description)
+    };
+
+    let updated = update_job(
+        conn,
+        &job_id,
+        UpdateJobInput {
+            description: Some(desc_to_save),
+            ..Default::default()
+        },
+    )?;
+
+    sync_csv_after_mutation(conn, paths);
+
+    if json {
+        print_json(&updated);
+    } else if !quiet {
+        println!("✓ Updated description for job: {}", updated.job.title);
     }
     Ok(())
 }

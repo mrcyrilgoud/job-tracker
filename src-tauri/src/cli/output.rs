@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::{Attribute, Cell, Color, ContentArrangement, Table};
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::models::{JobDetail, JobListItem, WeeklyActivity};
 
@@ -66,7 +66,9 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             Cell::new(id_short).fg(Color::DarkGrey),
             Cell::new(&item.company_name).add_attribute(Attribute::Bold),
             Cell::new(&job.title),
-            Cell::new(&job.status).fg(status_c).add_attribute(Attribute::Bold),
+            Cell::new(&job.status)
+                .fg(status_c)
+                .add_attribute(Attribute::Bold),
             Cell::new(applied),
             Cell::new(location),
             Cell::new(fav).fg(Color::Yellow),
@@ -86,7 +88,11 @@ pub fn format_job_detail(detail: &JobDetail) {
     println!("  {} — {}", job.title, company.name);
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("  ID:          {}", job.id);
-    println!("  Status:      {} (Favorite: {})", job.status.to_uppercase(), if job.is_favorite { "Yes ★" } else { "No" });
+    println!(
+        "  Status:      {} (Favorite: {})",
+        job.status.to_uppercase(),
+        if job.is_favorite { "Yes ★" } else { "No" }
+    );
     if let Some(applied) = &job.applied_at {
         println!("  Applied:     {}", applied);
     }
@@ -98,6 +104,12 @@ pub fn format_job_detail(detail: &JobDetail) {
         println!("  Careers:     {}", careers);
     }
     println!("  Freshness:   {}", job.posting_state);
+
+    if let Some(desc) = &job.description {
+        if !desc.trim().is_empty() {
+            println!("\n  Description:\n  {}", desc.replace('\n', "\n  "));
+        }
+    }
 
     if let Some(notes) = &job.notes {
         if !notes.trim().is_empty() {
@@ -160,7 +172,9 @@ pub fn format_stats(counts: &HashMap<String, i64>, weekly: &WeeklyActivity) {
     for st in statuses {
         let count = counts.get(st).copied().unwrap_or(0);
         table.add_row(vec![
-            Cell::new(st).fg(status_color(st)).add_attribute(Attribute::Bold),
+            Cell::new(st)
+                .fg(status_color(st))
+                .add_attribute(Attribute::Bold),
             Cell::new(count.to_string()),
         ]);
     }
