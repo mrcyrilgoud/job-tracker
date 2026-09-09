@@ -144,16 +144,22 @@ pub fn apply_watch_sync(
             continue;
         }
 
-        let by_url: Option<String> = conn
+        let by_url: Option<(String, String)> = conn
             .query_row(
-                "SELECT id FROM jobs WHERE canonical_url = ?1",
+                "SELECT id, company_id FROM jobs WHERE canonical_url = ?1",
                 params![canonical_url],
-                |r| r.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(map_sqlite)?;
 
-        if let Some(job_id) = by_url {
+        if let Some((job_id, company_id)) = by_url {
+            // A user may have deliberately reassigned a posting away from this
+            // watch's company. The canonical URL still prevents a duplicate,
+            // but this watch must not take the posting back on its next sync.
+            if company_id != watch.company_id {
+                continue;
+            }
             conn.execute(
                 "UPDATE jobs SET source=?1, source_external_id=?2, company_id=?3, title=?4, location=COALESCE(?5, location), is_new_from_watch=0, watch_disposition='saved', missing_from_sync_count=0, updated_at=?6 WHERE id=?7",
                 params![
@@ -256,10 +262,71 @@ pub fn apply_watch_sync(
 
 #[cfg(test)]
 mod tests {
+    use rusqlite::{params, Connection};
+
+    use super::*;
+    use crate::companies::{create_company, insert_watch};
+    use crate::db::migrate::migrate;
+    use crate::jobs::service::{create_job_from_url, get_job_detail, update_job, UpdateJobInput};
+
+    fn test_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate(&connection).unwrap();
+        connection
+    }
+
     #[test]
     fn two_miss_rule() {
         let missing = 1;
         let next = missing + 1;
         assert!(next >= 2);
+    }
+
+    #[test]
+    fn sync_does_not_reclaim_a_posting_reassigned_to_another_company() {
+        let connection = test_connection();
+        let source = create_company(&connection, "Source Co", None).unwrap();
+        let destination = create_company(&connection, "Destination Co", None).unwrap();
+        let watch = insert_watch(&connection, &source.id, "greenhouse", "source-co").unwrap();
+        let remote = AtsJob {
+            external_id: "role-123".into(),
+            title: "Platform Engineer".into(),
+            url: "https://boards.greenhouse.io/source-co/jobs/123".into(),
+            location: Some("Remote".into()),
+        };
+        let (job, _) = create_job_from_url(
+            &connection,
+            &remote.url,
+            &remote.title,
+            Some("Source Co"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        update_job(
+            &connection,
+            &job.id,
+            UpdateJobInput {
+                company_name: Some(destination.name.clone()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+
+        let result = apply_watch_sync(&connection, &watch.id, Ok(vec![remote])).unwrap();
+
+        assert_eq!(result["created"], 0);
+        let detail = get_job_detail(&connection, &job.id).unwrap().unwrap();
+        assert_eq!(detail.company.id, destination.id);
+        let matching_jobs: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM jobs WHERE canonical_url = ?1",
+                params![job.canonical_url],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(matching_jobs, 1);
     }
 }

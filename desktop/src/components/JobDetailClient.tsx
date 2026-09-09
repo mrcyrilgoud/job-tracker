@@ -88,11 +88,13 @@ function saveStateCopy(state: SaveState): { label: string; className: string } {
 export function JobDetailClient({
   jobId,
   initial,
+  companyNames,
   onUpdated,
   onDeleted,
 }: {
   jobId: string;
   initial: Initial;
+  companyNames: string[];
   onUpdated: (payload: { detail?: JobDetail; mode: JobDetailUpdateMode }) => void;
   onDeleted?: () => void;
 }) {
@@ -327,9 +329,17 @@ export function JobDetailClient({
                 value={draft.companyName}
                 onChange={(event) => update("companyName", event.target.value)}
                 aria-label="Company"
+                autoComplete="organization"
+                list="job-company-options"
+                required
                 size={Math.min(Math.max(draft.companyName.length, 6), 36)}
                 className="field-quiet"
               />
+              <datalist id="job-company-options">
+                {companyNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
               <span aria-hidden="true" className="text-[var(--faint)]">
                 ·
               </span>

@@ -16,6 +16,7 @@ export function JobDetailPage() {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [library, setLibrary] = useState<DocumentListItem[]>([]);
+  const [companyNames, setCompanyNames] = useState<string[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,10 +62,24 @@ export function JobDetailPage() {
     }
   }, [id]);
 
+  const loadCompanyNames = useCallback(async () => {
+    try {
+      const result = await api.listCompanies();
+      setCompanyNames(
+        [...new Set(result.companies.map((row) => row.company.name))].sort((a, b) =>
+          a.localeCompare(b),
+        ),
+      );
+    } catch {
+      // Suggestions are optional; company editing remains available as free text.
+    }
+  }, []);
+
   useEffect(() => {
     void loadDetail();
     void loadLibrary();
-  }, [loadDetail, loadLibrary]);
+    void loadCompanyNames();
+  }, [loadDetail, loadLibrary, loadCompanyNames]);
 
   const onUpdated = useCallback(
     (payload: { detail?: JobDetail; mode: JobDetailUpdateMode }) => {
@@ -79,6 +94,7 @@ export function JobDetailPage() {
               : current.events,
           };
         });
+        void loadCompanyNames();
         return;
       }
       if (payload.mode === "check") {
@@ -93,7 +109,7 @@ export function JobDetailPage() {
       void loadDetail({ quiet: true });
       void loadLibrary();
     },
-    [loadDetail, loadLibrary],
+    [loadCompanyNames, loadDetail, loadLibrary],
   );
 
   if (initialLoading && !detail) {
@@ -130,6 +146,7 @@ export function JobDetailPage() {
 
       <JobDetailClient
         jobId={detail.job.id}
+        companyNames={companyNames}
         initial={{
           title: detail.job.title,
           companyName: detail.company.name,

@@ -173,10 +173,14 @@ pub fn find_or_create_company(
     name: &str,
     careers_url: Option<&str>,
 ) -> AppResult<Company> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::from("Company name cannot be empty"));
+    }
     let timestamp = now_iso();
     if let Some(mut existing) = conn
         .query_row(
-            "SELECT id, name, careers_url, created_at, updated_at FROM companies WHERE name = ?1",
+            "SELECT id, name, careers_url, created_at, updated_at FROM companies WHERE name = ?1 COLLATE NOCASE",
             params![name],
             map_company,
         )
@@ -214,6 +218,22 @@ pub fn find_or_create_company(
     )
     .map_err(map_sqlite)?;
     Ok(company)
+}
+
+/// Delete a company that became an untracked orphan after a posting was moved or deleted.
+/// Companies with a board watch or careers-monitoring history are intentionally retained.
+fn delete_untracked_empty_company(conn: &Connection, company_id: &str) -> AppResult<()> {
+    conn.execute(
+        r#"DELETE FROM companies
+           WHERE id = ?1
+             AND NOT EXISTS (SELECT 1 FROM jobs WHERE company_id = ?1)
+             AND NOT EXISTS (SELECT 1 FROM company_watches WHERE company_id = ?1)
+             AND NOT EXISTS (SELECT 1 FROM careers_page_snapshots WHERE company_id = ?1)
+             AND NOT EXISTS (SELECT 1 FROM careers_page_reviews WHERE company_id = ?1)"#,
+        params![company_id],
+    )
+    .map_err(map_sqlite)?;
+    Ok(())
 }
 
 pub fn get_job_by_id(conn: &Connection, job_id: &str) -> AppResult<Option<Job>> {
@@ -710,6 +730,7 @@ pub fn update_job(
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
     let timestamp = now_iso();
     let mut company_id = existing.company_id.clone();
+    let mut company_change: Option<(String, String)> = None;
     let mut next_url = existing.url.clone();
     let mut next_canonical = existing.canonical_url.clone();
 
@@ -737,6 +758,16 @@ pub fn update_job(
 
     if let Some(name) = &updates.company_name {
         let company = find_or_create_company(conn, name.trim(), None)?;
+        if company.id != existing.company_id {
+            let old_name: String = conn
+                .query_row(
+                    "SELECT name FROM companies WHERE id = ?1",
+                    params![existing.company_id],
+                    |row| row.get(0),
+                )
+                .map_err(map_sqlite)?;
+            company_change = Some((old_name, company.name.clone()));
+        }
         company_id = company.id;
     }
 
@@ -827,12 +858,26 @@ pub fn update_job(
         }
     }
 
+    if let Some((old_name, new_name)) = company_change {
+        conn.execute(
+            "INSERT INTO job_events (id, job_id, type, note, occurred_at) VALUES (?1,?2,'company_changed',?3,?4)",
+            params![
+                create_id(),
+                job_id,
+                format!("Company changed from {old_name} to {new_name}"),
+                timestamp
+            ],
+        )
+        .map_err(map_sqlite)?;
+        delete_untracked_empty_company(conn, &existing.company_id)?;
+    }
+
     get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
 }
 
 /// Permanently delete a job and its associated events and attachments from SQLite.
 pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
-    let _existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
 
     conn.execute(
         "DELETE FROM job_events WHERE job_id = ?1",
@@ -852,11 +897,10 @@ pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
     )
     .map_err(map_sqlite)?;
 
-    conn.execute(
-        "DELETE FROM jobs WHERE id = ?1",
-        params![job_id],
-    )
-    .map_err(map_sqlite)?;
+    conn.execute("DELETE FROM jobs WHERE id = ?1", params![job_id])
+        .map_err(map_sqlite)?;
+
+    delete_untracked_empty_company(conn, &existing.company_id)?;
 
     Ok(())
 }
@@ -1699,9 +1743,163 @@ mod tests {
             )
             .unwrap();
         assert_eq!(event_count_after, 0);
+        let company_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM companies WHERE id = ?1",
+                params![job.company_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(company_count, 0);
 
         // Attempting to delete non-existent job errors
         assert!(delete_job(&conn, &job.id).is_err());
+    }
+
+    #[test]
+    fn reassigning_jobs_reuses_destination_and_cleans_untracked_former_company() {
+        let conn = test_connection();
+        let (first, source) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/first",
+            "First role",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (second, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/second",
+            "Second role",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let moved_first = update_job(
+            &conn,
+            &first.id,
+            UpdateJobInput {
+                company_name: Some("Target Co".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(moved_first.company.name, "Target Co");
+        assert!(moved_first
+            .events
+            .iter()
+            .any(|event| event.event_type == "company_changed"));
+
+        let moved_second = update_job(
+            &conn,
+            &second.id,
+            UpdateJobInput {
+                company_name: Some("  target co  ".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(moved_second.company.id, moved_first.company.id);
+
+        let source_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM companies WHERE id = ?1",
+                params![source.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source_exists, 0);
+        let destination_jobs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM jobs WHERE company_id = ?1",
+                params![moved_first.company.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(destination_jobs, 2);
+    }
+
+    #[test]
+    fn reassigning_last_job_keeps_former_company_with_watch() {
+        let conn = test_connection();
+        let (job, source) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/watched",
+            "Watched role",
+            Some("Watched Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        crate::companies::insert_watch(&conn, &source.id, "greenhouse", "watched-acme").unwrap();
+
+        update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_name: Some("Elsewhere".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+
+        let source_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM companies WHERE id = ?1",
+                params![source.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source_exists, 1);
+    }
+
+    #[test]
+    fn reassigning_last_job_keeps_former_company_with_careers_history() {
+        let conn = test_connection();
+        let (job, source) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/monitored",
+            "Monitored role",
+            Some("Monitored Co"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO careers_page_snapshots (id, company_id, content_hash, normalized_text, captured_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![create_id(), source.id, "hash", "careers copy", now_iso()],
+        )
+        .unwrap();
+
+        update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_name: Some("Elsewhere".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+
+        let source_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM companies WHERE id = ?1",
+                params![source.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(source_exists, 1);
     }
 
     #[test]
