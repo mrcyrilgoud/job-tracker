@@ -67,10 +67,7 @@ pub fn guess_title_from_url(raw_url: &str) -> String {
             let decoded = urlencoding::decode(last)
                 .unwrap_or_else(|_| last.into())
                 .into_owned();
-            let cleaned = decoded
-                .replace(['-', '_'], " ")
-                .trim()
-                .to_string();
+            let cleaned = decoded.replace(['-', '_'], " ").trim().to_string();
             let without_ext = if let Some(idx) = cleaned.rfind('.') {
                 let ext = &cleaned[idx + 1..];
                 if ext.chars().all(|c| c.is_ascii_alphanumeric()) && ext.len() <= 5 {

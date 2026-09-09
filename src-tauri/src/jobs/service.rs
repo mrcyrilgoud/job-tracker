@@ -267,7 +267,7 @@ pub struct LocationSettings {
 fn expand_country_keywords(country: &str) -> Vec<String> {
     let mut expanded = Vec::new();
     let lower_country = country.trim().to_lowercase();
-    
+
     if lower_country.is_empty() {
         return expanded;
     }
@@ -287,21 +287,108 @@ fn expand_country_keywords(country: &str) -> Vec<String> {
         expanded.push("%(us)%".to_string());
         expanded.push("%us -%".to_string());
         expanded.push("%- us%".to_string());
-        
+
         let states = vec![
-            "al", "alabama", "ak", "alaska", "az", "arizona", "ar", "arkansas", 
-            "ca", "california", "co", "colorado", "ct", "connecticut", "de", "delaware", 
-            "fl", "florida", "ga", "georgia", "hi", "hawaii", "id", "idaho", 
-            "il", "illinois", "in", "indiana", "ia", "iowa", "ks", "kansas", 
-            "ky", "kentucky", "la", "louisiana", "me", "maine", "md", "maryland", 
-            "ma", "massachusetts", "mi", "michigan", "mn", "minnesota", "ms", "mississippi", 
-            "mo", "missouri", "mt", "montana", "ne", "nebraska", "nv", "nevada", 
-            "nh", "new hampshire", "nj", "new jersey", "nm", "new mexico", "ny", "new york", 
-            "nc", "north carolina", "nd", "north dakota", "oh", "ohio", "ok", "oklahoma", 
-            "or", "oregon", "pa", "pennsylvania", "ri", "rhode island", "sc", "south carolina", 
-            "sd", "south dakota", "tn", "tennessee", "tx", "texas", "ut", "utah", 
-            "vt", "vermont", "va", "virginia", "wa", "washington", "wv", "west virginia", 
-            "wi", "wisconsin", "wy", "wyoming"
+            "al",
+            "alabama",
+            "ak",
+            "alaska",
+            "az",
+            "arizona",
+            "ar",
+            "arkansas",
+            "ca",
+            "california",
+            "co",
+            "colorado",
+            "ct",
+            "connecticut",
+            "de",
+            "delaware",
+            "fl",
+            "florida",
+            "ga",
+            "georgia",
+            "hi",
+            "hawaii",
+            "id",
+            "idaho",
+            "il",
+            "illinois",
+            "in",
+            "indiana",
+            "ia",
+            "iowa",
+            "ks",
+            "kansas",
+            "ky",
+            "kentucky",
+            "la",
+            "louisiana",
+            "me",
+            "maine",
+            "md",
+            "maryland",
+            "ma",
+            "massachusetts",
+            "mi",
+            "michigan",
+            "mn",
+            "minnesota",
+            "ms",
+            "mississippi",
+            "mo",
+            "missouri",
+            "mt",
+            "montana",
+            "ne",
+            "nebraska",
+            "nv",
+            "nevada",
+            "nh",
+            "new hampshire",
+            "nj",
+            "new jersey",
+            "nm",
+            "new mexico",
+            "ny",
+            "new york",
+            "nc",
+            "north carolina",
+            "nd",
+            "north dakota",
+            "oh",
+            "ohio",
+            "ok",
+            "oklahoma",
+            "or",
+            "oregon",
+            "pa",
+            "pennsylvania",
+            "ri",
+            "rhode island",
+            "sc",
+            "south carolina",
+            "sd",
+            "south dakota",
+            "tn",
+            "tennessee",
+            "tx",
+            "texas",
+            "ut",
+            "utah",
+            "vt",
+            "vermont",
+            "va",
+            "virginia",
+            "wa",
+            "washington",
+            "wv",
+            "west virginia",
+            "wi",
+            "wisconsin",
+            "wy",
+            "wyoming",
         ];
         for state in states {
             expanded.push(format!(", {}", state));
@@ -310,13 +397,46 @@ fn expand_country_keywords(country: &str) -> Vec<String> {
         }
 
         let hubs = vec![
-            "san francisco", "san jose", "new york", "nyc", "seattle", "austin", 
-            "boston", "chicago", "los angeles", "palo alto", "mountain view", 
-            "sunnyvale", "santa clara", "menlo park", "redwood city", "san mateo", 
-            "oakland", "berkeley", "santa monica", "venice", "culver city", "irvine", 
-            "brooklyn", "manhattan", "queens", "jersey city", "bellevue", "redmond", 
-            "kirkland", "cambridge", "atlanta", "denver", "boulder", "salt lake city", 
-            "washington dc", "miami", "dallas", "houston", "raleigh", "bay area"
+            "san francisco",
+            "san jose",
+            "new york",
+            "nyc",
+            "seattle",
+            "austin",
+            "boston",
+            "chicago",
+            "los angeles",
+            "palo alto",
+            "mountain view",
+            "sunnyvale",
+            "santa clara",
+            "menlo park",
+            "redwood city",
+            "san mateo",
+            "oakland",
+            "berkeley",
+            "santa monica",
+            "venice",
+            "culver city",
+            "irvine",
+            "brooklyn",
+            "manhattan",
+            "queens",
+            "jersey city",
+            "bellevue",
+            "redmond",
+            "kirkland",
+            "cambridge",
+            "atlanta",
+            "denver",
+            "boulder",
+            "salt lake city",
+            "washington dc",
+            "miami",
+            "dallas",
+            "houston",
+            "raleigh",
+            "bay area",
         ];
         for hub in hubs {
             expanded.push(hub.to_string());
@@ -347,9 +467,13 @@ fn expand_country_keywords(country: &str) -> Vec<String> {
 fn expand_location_keywords(cities: &str) -> Vec<String> {
     let mut expanded = Vec::new();
     let lower_cities = cities.to_lowercase();
-    
+
     // Simple predefined regions mapping for smarter "dynamic" filtering
-    if lower_cities.contains("san jose") || lower_cities.contains("san francisco") || lower_cities.contains("oakland") || lower_cities.contains("bay area") {
+    if lower_cities.contains("san jose")
+        || lower_cities.contains("san francisco")
+        || lower_cities.contains("oakland")
+        || lower_cities.contains("bay area")
+    {
         expanded.push("san jose".to_string());
         expanded.push("san francisco".to_string());
         expanded.push("oakland".to_string());
@@ -363,8 +487,11 @@ fn expand_location_keywords(cities: &str) -> Vec<String> {
         expanded.push("redwood city".to_string());
         expanded.push("bay area".to_string());
     }
-    
-    if lower_cities.contains("new york") || lower_cities.contains("nyc") || lower_cities.contains("brooklyn") {
+
+    if lower_cities.contains("new york")
+        || lower_cities.contains("nyc")
+        || lower_cities.contains("brooklyn")
+    {
         expanded.push("new york".to_string());
         expanded.push("nyc".to_string());
         expanded.push("brooklyn".to_string());
@@ -373,14 +500,21 @@ fn expand_location_keywords(cities: &str) -> Vec<String> {
         expanded.push("jersey city".to_string());
     }
 
-    if lower_cities.contains("seattle") || lower_cities.contains("bellevue") || lower_cities.contains("redmond") {
+    if lower_cities.contains("seattle")
+        || lower_cities.contains("bellevue")
+        || lower_cities.contains("redmond")
+    {
         expanded.push("seattle".to_string());
         expanded.push("bellevue".to_string());
         expanded.push("redmond".to_string());
         expanded.push("kirkland".to_string());
     }
 
-    if lower_cities.contains("los angeles") || lower_cities.contains("santa monica") || lower_cities.contains("la") || lower_cities.contains("socal") {
+    if lower_cities.contains("los angeles")
+        || lower_cities.contains("santa monica")
+        || lower_cities.contains("la")
+        || lower_cities.contains("socal")
+    {
         expanded.push("los angeles".to_string());
         expanded.push("santa monica".to_string());
         expanded.push("venice".to_string());
@@ -389,7 +523,11 @@ fn expand_location_keywords(cities: &str) -> Vec<String> {
     }
 
     // Include user typed cities
-    for city in cities.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    for city in cities
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         expanded.push(city.to_lowercase());
     }
 
@@ -453,7 +591,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     if filters.new_from_watch == Some(true) {
         let loc_settings = get_location_settings(conn).unwrap_or_default();
         let mut location_clauses = Vec::new();
-        
+
         if !loc_settings.country.trim().is_empty() {
             let expanded_country = expand_country_keywords(&loc_settings.country);
             for c in expanded_country {
@@ -554,7 +692,7 @@ pub fn list_open_watch_positions(
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(company_id.to_string())];
 
     let mut location_clauses = Vec::new();
-    
+
     if !loc_settings.country.trim().is_empty() {
         let expanded_country = expand_country_keywords(&loc_settings.country);
         for c in expanded_country {
@@ -585,7 +723,7 @@ pub fn list_open_watch_positions(
             }
         }
     }
-    
+
     if !location_clauses.is_empty() {
         sql.push_str(" AND (");
         sql.push_str(&location_clauses.join(" OR "));
@@ -791,9 +929,7 @@ pub fn update_job(
     let is_new = updates
         .is_new_from_watch
         .unwrap_or(existing.is_new_from_watch);
-    let is_fav = updates
-        .is_favorite
-        .unwrap_or(existing.is_favorite);
+    let is_fav = updates.is_favorite.unwrap_or(existing.is_favorite);
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
@@ -835,7 +971,11 @@ pub fn update_job(
     if let Some(fav) = updates.is_favorite {
         if fav != existing.is_favorite {
             let event_type = if fav { "favorited" } else { "unfavorited" };
-            let note = if fav { "Marked as favorite" } else { "Removed from favorites" };
+            let note = if fav {
+                "Marked as favorite"
+            } else {
+                "Removed from favorites"
+            };
             conn.execute(
                 "INSERT INTO job_events (id, job_id, type, note, occurred_at) VALUES (?1,?2,?3,?4,?5)",
                 params![
@@ -871,11 +1011,8 @@ pub fn update_job(
 pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
 
-    conn.execute(
-        "DELETE FROM job_events WHERE job_id = ?1",
-        params![job_id],
-    )
-    .map_err(map_sqlite)?;
+    conn.execute("DELETE FROM job_events WHERE job_id = ?1", params![job_id])
+        .map_err(map_sqlite)?;
 
     conn.execute(
         "DELETE FROM job_documents WHERE job_id = ?1",
@@ -1163,8 +1300,8 @@ pub fn set_job_favorite(
         )
         .map_err(map_sqlite)?;
 
-    let updated_job =
-        get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after favorite"))?;
+    let updated_job = get_job_by_id(conn, job_id)?
+        .ok_or_else(|| AppError::from("Job not found after favorite"))?;
     Ok(JobListItem {
         job: updated_job,
         company_name,
@@ -1235,11 +1372,14 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
 }
 
 pub fn get_watch_role_keywords(conn: &Connection) -> AppResult<String> {
-    let value: Option<String> = conn.query_row(
-        "SELECT value FROM app_settings WHERE key = 'watch_role_keywords'",
-        [],
-        |row| row.get(0),
-    ).optional().map_err(map_sqlite)?;
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'watch_role_keywords'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite)?;
     Ok(value.unwrap_or_default())
 }
 
@@ -1249,21 +1389,28 @@ pub fn set_watch_role_keywords(conn: &Connection, keywords: &str) -> AppResult<(
         "INSERT INTO app_settings (key, value, updated_at) VALUES ('watch_role_keywords', ?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         params![keywords, timestamp],
-    ).map_err(map_sqlite)?;
+    )
+    .map_err(map_sqlite)?;
     Ok(())
 }
 
 pub fn get_location_settings(conn: &Connection) -> AppResult<LocationSettings> {
-    let country: Option<String> = conn.query_row(
-        "SELECT value FROM app_settings WHERE key = 'location_country'",
-        [],
-        |row| row.get(0),
-    ).optional().map_err(map_sqlite)?;
-    let cities: Option<String> = conn.query_row(
-        "SELECT value FROM app_settings WHERE key = 'location_cities'",
-        [],
-        |row| row.get(0),
-    ).optional().map_err(map_sqlite)?;
+    let country: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'location_country'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite)?;
+    let cities: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'location_cities'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite)?;
     Ok(LocationSettings {
         country: country.unwrap_or_default(),
         cities: cities.unwrap_or_default(),
@@ -1276,12 +1423,14 @@ pub fn set_location_settings(conn: &Connection, settings: &LocationSettings) -> 
         "INSERT INTO app_settings (key, value, updated_at) VALUES ('location_country', ?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         params![settings.country, timestamp],
-    ).map_err(map_sqlite)?;
+    )
+    .map_err(map_sqlite)?;
     conn.execute(
         "INSERT INTO app_settings (key, value, updated_at) VALUES ('location_cities', ?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         params![settings.cities, timestamp],
-    ).map_err(map_sqlite)?;
+    )
+    .map_err(map_sqlite)?;
     Ok(())
 }
 
@@ -1553,7 +1702,7 @@ mod tests {
     fn watch_role_keywords_filter_new_roles_only() {
         let conn = test_connection();
         let company = find_or_create_company(&conn, "Thinking Machine Labs", None).unwrap();
-        
+
         let id1 = insert_watch_pending_job(
             &conn,
             &company.id,
@@ -1610,7 +1759,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(filtered_inbox.len(), 2);
-        let ids: Vec<_> = filtered_inbox.iter().map(|item| item.job.id.as_str()).collect();
+        let ids: Vec<_> = filtered_inbox
+            .iter()
+            .map(|item| item.job.id.as_str())
+            .collect();
         assert!(ids.contains(&id1.as_str()));
         assert!(ids.contains(&id3.as_str()));
         assert!(!ids.contains(&id2.as_str()));

@@ -155,7 +155,10 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
     let has_favorite = table_columns.iter().any(|name| name == "is_favorite");
     if !has_favorite {
-        conn.execute("ALTER TABLE jobs ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT 0", [])?;
+        conn.execute(
+            "ALTER TABLE jobs ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT 0",
+            [],
+        )?;
     }
     conn.execute(
         "CREATE INDEX IF NOT EXISTS jobs_is_favorite_updated_at_idx ON jobs(is_favorite, updated_at)",

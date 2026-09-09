@@ -67,10 +67,9 @@ pub fn get_gmail_config(conn: &Connection) -> AppResult<serde_json::Value> {
     let client_secret = std::env::var("GMAIL_CLIENT_SECRET")
         .ok()
         .or(get_setting(conn, CLIENT_SECRET_KEY)?);
-    let redirect_uri = std::env::var("GMAIL_REDIRECT_URI").ok().or(get_setting(
-        conn,
-        REDIRECT_URI_KEY,
-    )?);
+    let redirect_uri = std::env::var("GMAIL_REDIRECT_URI")
+        .ok()
+        .or(get_setting(conn, REDIRECT_URI_KEY)?);
     Ok(serde_json::json!({
         "clientId": client_id,
         "clientSecret": client_secret,
@@ -171,8 +170,7 @@ pub fn begin_gmail_oauth(conn: &Connection) -> AppResult<serde_json::Value> {
                     let full = format!("http://127.0.0.1{path}");
                     if let Ok(url) = Url::parse(&full) {
                         let pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
-                        if pairs.get("state").map(String::as_str) == Some(expected_state.as_str())
-                        {
+                        if pairs.get("state").map(String::as_str) == Some(expected_state.as_str()) {
                             if let Some(code) = pairs.get("code") {
                                 *PENDING_REDIRECT.lock().unwrap() = Some(code.clone());
                             }

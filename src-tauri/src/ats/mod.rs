@@ -48,11 +48,9 @@ pub async fn list_jobs(provider: &str, board_slug: &str) -> AppResult<Vec<AtsJob
 
     let result = safe_fetch(&url, Some("GET"), Some("application/json")).await;
     if !result.ok {
-        return Err(AppError::from(
-            result
-                .error
-                .unwrap_or_else(|| format!("{accept_err} board unavailable (HTTP {})", result.status)),
-        ));
+        return Err(AppError::from(result.error.unwrap_or_else(|| {
+            format!("{accept_err} board unavailable (HTTP {})", result.status)
+        })));
     }
     parse_ats_jobs_from_json(provider, &result.body_text)
 }
@@ -95,10 +93,8 @@ pub fn parse_ats_jobs_from_json(provider: &str, body_text: &str) -> AppResult<Ve
                 .collect())
         }
         "lever" => {
-            let parsed: Vec<serde_json::Value> =
-                serde_json::from_str(body_text).map_err(|_| {
-                    AppError::from("Unexpected Lever response shape")
-                })?;
+            let parsed: Vec<serde_json::Value> = serde_json::from_str(body_text)
+                .map_err(|_| AppError::from("Unexpected Lever response shape"))?;
             Ok(parsed
                 .into_iter()
                 .map(|job| AtsJob {

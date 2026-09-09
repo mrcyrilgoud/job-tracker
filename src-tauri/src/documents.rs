@@ -382,15 +382,15 @@ mod tests {
         assert_eq!(listed[0].document.original_filename, "resume.pdf");
         let mut kinds = listed[0].kinds.clone();
         kinds.sort();
-        assert_eq!(kinds, vec!["cover_letter".to_string(), "resume".to_string()]);
+        assert_eq!(
+            kinds,
+            vec!["cover_letter".to_string(), "resume".to_string()]
+        );
         let mut used_by = listed[0].used_by.clone();
         used_by.sort();
         assert_eq!(
             used_by,
-            vec![
-                "Acme — Engineer".to_string(),
-                "Beta — Designer".to_string()
-            ]
+            vec!["Acme — Engineer".to_string(), "Beta — Designer".to_string()]
         );
         assert_eq!(listed[1].document.id, unattached_id);
         assert!(listed[1].kinds.is_empty());

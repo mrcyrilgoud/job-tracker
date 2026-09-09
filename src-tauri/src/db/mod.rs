@@ -34,10 +34,8 @@ impl AppState {
         conn.pragma_update(None, "busy_timeout", 5000i32)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         migrate::migrate(&conn)?;
-        let csv_export = CsvExportCoordinator::new(
-            paths.db_path.clone(),
-            paths.jobs_csv_path.clone(),
-        );
+        let csv_export =
+            CsvExportCoordinator::new(paths.db_path.clone(), paths.jobs_csv_path.clone());
         Ok(Self {
             paths,
             db: Arc::new(Mutex::new(conn)),

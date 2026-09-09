@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::pin::Pin;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use rusqlite::Connection;
 use serde::Deserialize;
@@ -499,10 +499,7 @@ pub async fn update_job_cmd(
 }
 
 #[tauri::command]
-pub async fn delete_job(
-    state: State<'_, AppState>,
-    id: String,
-) -> AppResult<serde_json::Value> {
+pub async fn delete_job(state: State<'_, AppState>, id: String) -> AppResult<serde_json::Value> {
     let result = state.with_db_tx(|conn| {
         delete_job_service(conn, &id)?;
         Ok(serde_json::json!({ "success": true, "id": id }))
@@ -949,11 +946,17 @@ pub async fn csv_configure(
     let mode = match input.mode.as_str() {
         "import" => ImportMode::Merge,
         "replace" => ImportMode::OverwriteEditable,
-        _ => return Err(crate::error::AppError::from("CSV mode must be import or replace")),
+        _ => {
+            return Err(crate::error::AppError::from(
+                "CSV mode must be import or replace",
+            ))
+        }
     };
     let csv_path = validate_csv_path(&PathBuf::from(input.path))?;
     if matches!(&mode, ImportMode::Merge) && !csv_path.exists() {
-        return Err(crate::error::AppError::from("CSV file not found for import"));
+        return Err(crate::error::AppError::from(
+            "CSV file not found for import",
+        ));
     }
 
     let _runner_guard = state
@@ -968,14 +971,10 @@ pub async fn csv_configure(
             let previous = state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
             state.with_db(|conn| set_custom_csv_path(conn, &paths.jobs_csv_path, &csv_path))?;
             let result = with_csv_file_lock(&csv_lock_path(&csv_path), || match mode {
-                ImportMode::Merge => import_jobs_csv(
-                    &paths.db_path,
-                    &csv_path,
-                    None,
-                    false,
-                    ImportMode::Merge,
-                )
-                .map(|_| ()),
+                ImportMode::Merge => {
+                    import_jobs_csv(&paths.db_path, &csv_path, None, false, ImportMode::Merge)
+                        .map(|_| ())
+                }
                 ImportMode::OverwriteEditable => {
                     let conn = Connection::open(&paths.db_path)
                         .map_err(|error| crate::error::AppError::from(error.to_string()))?;
@@ -1019,7 +1018,11 @@ pub async fn csv_reset_config(state: State<'_, AppState>) -> AppResult<CsvConfig
         .await
 }
 
-fn restore_csv_config(state: &AppState, paths: &crate::db::DataPaths, previous: &CsvConfig) -> AppResult<()> {
+fn restore_csv_config(
+    state: &AppState,
+    paths: &crate::db::DataPaths,
+    previous: &CsvConfig,
+) -> AppResult<()> {
     state.with_db(|conn| {
         if previous.is_custom {
             set_custom_csv_path(conn, &paths.jobs_csv_path, &PathBuf::from(&previous.path))?;

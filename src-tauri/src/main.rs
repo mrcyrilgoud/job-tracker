@@ -8,8 +8,8 @@ fn main() {
     let raw_args: Vec<String> = std::env::args().collect();
 
     // Check if macOS launched the GUI app (no args or single -psn argument)
-    let is_gui_launch = raw_args.len() <= 1
-        || (raw_args.len() == 2 && raw_args[1].starts_with("-psn_"));
+    let is_gui_launch =
+        raw_args.len() <= 1 || (raw_args.len() == 2 && raw_args[1].starts_with("-psn_"));
 
     if is_gui_launch {
         job_tracker_lib::run();

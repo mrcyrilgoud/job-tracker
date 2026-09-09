@@ -81,9 +81,10 @@ pub fn validate_csv_path(path: &Path) -> AppResult<PathBuf> {
     let path = parent.join(path.file_name().expect("validated filename"));
 
     if path.exists() {
-        OpenOptions::new().write(true).open(&path).map_err(|error| {
-            AppError::from(format!("CSV location is not writable: {error}"))
-        })?;
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .map_err(|error| AppError::from(format!("CSV location is not writable: {error}")))?;
     } else {
         let probe = parent.join(format!(
             ".job-tracker-csv-write-check-{}",

@@ -200,10 +200,8 @@ mod tests {
         drop(conn);
 
         let export_count = Arc::new(AtomicUsize::new(0));
-        let coordinator = CsvExportCoordinator::new(
-            paths.db_path.clone(),
-            paths.jobs_csv_path.clone(),
-        );
+        let coordinator =
+            CsvExportCoordinator::new(paths.db_path.clone(), paths.jobs_csv_path.clone());
 
         for _ in 0..10 {
             coordinator.mark_dirty();
