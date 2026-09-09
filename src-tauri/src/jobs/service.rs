@@ -484,16 +484,13 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
                 }
             }
         }
-        
+
         if !location_clauses.is_empty() {
             sql.push_str(" AND (");
             sql.push_str(&location_clauses.join(" OR "));
             sql.push_str(")");
         }
-    }
-
-    // Optionally still support the UI location filter if passed
-    if let Some(location) = &filters.location {
+    } else if let Some(location) = &filters.location {
         sql.push_str(" AND j.location LIKE ?");
         values.push(Box::new(format!("%{location}%")));
     }
@@ -501,7 +498,11 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     if filters.new_from_watch == Some(true) {
         let keywords = get_watch_role_keywords(conn).unwrap_or_default();
         if !keywords.trim().is_empty() {
-            let terms: Vec<&str> = keywords.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            let terms: Vec<&str> = keywords
+                .split(|c| c == ',' || c == '\n')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
             if !terms.is_empty() {
                 let mut keyword_clauses = Vec::new();
                 for term in terms {
@@ -515,16 +516,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         }
     }
 
-    if filters.new_from_watch == Some(true) {
-        sql.push_str(" ORDER BY CASE j.watch_disposition
-           WHEN 'new' THEN 0
-           WHEN 'saved' THEN 1
-           WHEN 'dismissed' THEN 2
-           ELSE 1
-         END, j.title COLLATE NOCASE");
-    } else {
-        sql.push_str(" ORDER BY j.updated_at DESC");
-    }
+    sql.push_str(" ORDER BY j.updated_at DESC");
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
