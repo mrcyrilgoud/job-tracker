@@ -28,6 +28,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       last_check_result TEXT,
       source TEXT NOT NULL DEFAULT 'manual',
       notes TEXT,
+      description TEXT,
       location TEXT,
       is_new_from_watch INTEGER NOT NULL DEFAULT 0,
       watch_disposition TEXT,
@@ -161,6 +162,11 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    let has_description = table_columns.iter().any(|name| name == "description");
+    if !has_description {
+        conn.execute("ALTER TABLE jobs ADD COLUMN description TEXT", [])?;
+    }
+
     // Existing watch jobs used an event plus `is_new_from_watch` to represent
     // triage. Preserve that history in the explicit state introduced above.
     conn.execute_batch(
@@ -186,9 +192,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrates_legacy_database_without_is_favorite() {
+    fn migrates_legacy_database_without_is_favorite_and_description() {
         let conn = Connection::open_in_memory().unwrap();
-        // Simulate a legacy schema before is_favorite was introduced
+        // Simulate a legacy schema before is_favorite and description were introduced
         conn.execute_batch(
             r#"
             CREATE TABLE companies (
@@ -236,5 +242,6 @@ mod tests {
             .unwrap();
         assert!(cols.contains(&"is_favorite".to_string()));
         assert!(cols.contains(&"watch_disposition".to_string()));
+        assert!(cols.contains(&"description".to_string()));
     }
 }

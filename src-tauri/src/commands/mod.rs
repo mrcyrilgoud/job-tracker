@@ -98,6 +98,7 @@ pub struct CreateJobArgs {
     pub status: Option<String>,
     pub applied_at: Option<String>,
     pub notes: Option<String>,
+    pub description: Option<String>,
     pub location: Option<String>,
     pub confirmed_discovery: Option<ConfirmedJobDiscovery>,
 }
@@ -183,6 +184,7 @@ where
             input.status.as_deref(),
             input.applied_at.as_deref(),
             input.notes.as_deref(),
+            input.description.as_deref(),
             input.location.as_deref(),
             confirmed_careers_url.as_deref(),
         )?;
@@ -225,6 +227,7 @@ mod tests {
             status: Some("wishlist".to_string()),
             applied_at: None,
             notes: None,
+            description: None,
             location: None,
             confirmed_discovery,
         }

@@ -41,13 +41,14 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         last_check_result: row.get(10)?,
         source: row.get(11)?,
         notes: row.get(12)?,
-        location: row.get(13)?,
-        is_new_from_watch: row.get::<_, i64>(14)? != 0,
-        watch_disposition: row.get(15)?,
-        missing_from_sync_count: row.get(16)?,
-        is_favorite: row.get::<_, i64>(17)? != 0,
-        created_at: row.get(18)?,
-        updated_at: row.get(19)?,
+        description: row.get(13)?,
+        location: row.get(14)?,
+        is_new_from_watch: row.get::<_, i64>(15)? != 0,
+        watch_disposition: row.get(16)?,
+        missing_from_sync_count: row.get(17)?,
+        is_favorite: row.get::<_, i64>(18)? != 0,
+        created_at: row.get(19)?,
+        updated_at: row.get(20)?,
     })
 }
 
@@ -85,7 +86,7 @@ pub fn apply_watch_sync(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
+            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, description, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
         )
         .map_err(map_sqlite)?;
     let existing = stmt
@@ -173,9 +174,9 @@ pub fn apply_watch_sync(
         conn.execute(
             r#"INSERT INTO jobs (
                 id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
-                posting_state, last_checked_at, last_check_result, source, notes, location,
+                posting_state, last_checked_at, last_check_result, source, notes, description, location,
                 is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at
-            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,?8,1,'new',0,?9,?9)"#,
+            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,NULL,?8,1,'new',0,?9,?9)"#,
             params![
                 job_id,
                 watch.company_id,

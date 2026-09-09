@@ -207,6 +207,7 @@ pub async fn handle_add(
         Some(status),
         applied_date.as_deref(),
         args.notes.as_deref(),
+        None,
         resolved_location.as_deref(),
         None,
     )?;
@@ -302,6 +303,7 @@ pub fn handle_update(
         status: args.status,
         applied_at: applied_date,
         notes,
+        description: None,
         location,
         url: None,
         is_new_from_watch: None,
@@ -360,6 +362,7 @@ pub fn handle_note(
             status: None,
             applied_at: None,
             notes: Some(Some(combined)),
+            description: None,
             location: None,
             url: None,
             is_new_from_watch: None,
@@ -393,9 +396,9 @@ pub fn handle_stats(conn: &Connection, json: bool) -> AppResult<()> {
     Ok(())
 }
 
-fn handle_watch_list(conn: &Connection, args: WatchListArgs, json: bool) -> AppResult<()> {
+fn load_watch_positions(conn: &Connection, args: WatchListArgs) -> AppResult<Vec<JobListItem>> {
     let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.posting_state = 'active'
            AND j.source IN ('greenhouse', 'lever', 'ashby')"
@@ -429,7 +432,7 @@ fn handle_watch_list(conn: &Connection, args: WatchListArgs, json: bool) -> AppR
     let rows = stmt.query_map(params_ref.as_slice(), |row| {
         Ok(JobListItem {
             job: map_job(row)?,
-            company_name: row.get(20)?,
+            company_name: row.get(21)?,
         })
     })?;
 
@@ -438,6 +441,12 @@ fn handle_watch_list(conn: &Connection, args: WatchListArgs, json: bool) -> AppR
     if let Some(limit) = args.limit {
         positions.truncate(limit);
     }
+
+    Ok(positions)
+}
+
+fn handle_watch_list(conn: &Connection, args: WatchListArgs, json: bool) -> AppResult<()> {
+    let positions = load_watch_positions(conn, args)?;
 
     if json {
         print_json(&positions);
@@ -525,4 +534,60 @@ pub async fn handle_sync(paths: &DataPaths, json: bool, quiet: bool) -> AppResul
         println!("✓ Jobs sync cycle completed successfully.");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::migrate::migrate;
+    use crate::util::{create_id, now_iso};
+
+    #[test]
+    fn watch_list_uses_current_job_column_layout() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let company_id = create_id();
+        let job_id = create_id();
+        let timestamp = now_iso();
+
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES (?1, 'Acme', ?2, ?2)",
+            params![company_id, timestamp],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO jobs (
+                id, company_id, title, url, canonical_url, source_external_id, status,
+                posting_state, source, description, location, is_new_from_watch,
+                watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, 'Platform Engineer', 'https://example.com/jobs/1',
+                'https://example.com/jobs/1', 'remote-1', 'wishlist', 'active',
+                'greenhouse', 'Build distributed systems', 'Remote', 1, 'new', 0, 0, ?3, ?3
+            )"#,
+            params![job_id, company_id, timestamp],
+        )
+        .unwrap();
+
+        let positions = load_watch_positions(
+            &conn,
+            WatchListArgs {
+                new_only: false,
+                dismissed: false,
+                all: true,
+                provider: None,
+                company: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].company_name, "Acme");
+        assert_eq!(
+            positions[0].job.description.as_deref(),
+            Some("Build distributed systems")
+        );
+        assert_eq!(positions[0].job.location.as_deref(), Some("Remote"));
+    }
 }

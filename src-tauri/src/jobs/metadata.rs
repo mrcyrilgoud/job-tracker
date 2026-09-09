@@ -11,6 +11,7 @@ use crate::jobs::safe_fetch::safe_fetch;
 pub struct JobMetadata {
     pub title: Option<String>,
     pub company_name: Option<String>,
+    pub description: Option<String>,
     #[serde(flatten)]
     pub url_discovery: UrlDiscovery,
 }
@@ -50,6 +51,12 @@ pub fn extract_job_metadata(html: &str) -> JobMetadata {
             meta_content(&document, "property", "og:site_name").filter(|name| !is_ats_name(name));
     }
 
+    if metadata.description.is_none() {
+        metadata.description = meta_content(&document, "property", "og:description")
+            .or_else(|| meta_content(&document, "name", "description"))
+            .or_else(|| meta_content(&document, "name", "twitter:description"));
+    }
+
     metadata
 }
 
@@ -72,6 +79,7 @@ fn extract_json_ld(document: &Html) -> Option<JobMetadata> {
             return Some(JobMetadata {
                 title: string_field(posting, "title"),
                 company_name: company_name(posting),
+                description: string_field(posting, "description"),
                 url_discovery: UrlDiscovery::default(),
             });
         }
@@ -181,7 +189,7 @@ mod tests {
     fn extracts_job_posting_fields() {
         let html = r#"
             <script type="application/ld+json">
-              {"@type":"JobPosting","title":" Senior  Engineer ","hiringOrganization":{"name":"Acme &amp; Co"}}
+              {"@type":"JobPosting","title":" Senior  Engineer ","hiringOrganization":{"name":"Acme &amp; Co"},"description":"Design distributed systems"}
             </script>
         "#;
 
@@ -190,9 +198,25 @@ mod tests {
             JobMetadata {
                 title: Some("Senior Engineer".into()),
                 company_name: Some("Acme & Co".into()),
+                description: Some("Design distributed systems".into()),
                 ..JobMetadata::default()
             }
         );
+    }
+
+    #[test]
+    fn extracts_description_from_meta_tags() {
+        let html = r#"
+            <html>
+              <head>
+                <title>Staff Engineer at Stripe</title>
+                <meta property="og:description" content="Build payments infra." />
+              </head>
+            </html>
+        "#;
+
+        let meta = extract_job_metadata(html);
+        assert_eq!(meta.description.as_deref(), Some("Build payments infra."));
     }
 
     #[test]
@@ -323,6 +347,7 @@ mod tests {
             serde_json::json!({
                 "title": "Role",
                 "companyName": null,
+                "description": null,
                 "board": null,
                 "careersUrl": null
             })
@@ -334,6 +359,7 @@ mod tests {
         let board = serde_json::to_value(JobMetadata {
             title: Some("Role".into()),
             company_name: Some("Acme".into()),
+            description: None,
             url_discovery: UrlDiscovery {
                 board: Some(DetectedBoard {
                     provider: "greenhouse".into(),
@@ -350,6 +376,7 @@ mod tests {
             serde_json::json!({
                 "title": "Role",
                 "companyName": "Acme",
+                "description": null,
                 "board": {
                     "provider": "greenhouse",
                     "boardSlug": "acme",
@@ -363,6 +390,7 @@ mod tests {
         let careers = serde_json::to_value(JobMetadata {
             title: None,
             company_name: None,
+            description: None,
             url_discovery: UrlDiscovery {
                 board: None,
                 careers_url: Some("https://acme.example/careers".into()),
@@ -374,6 +402,7 @@ mod tests {
             serde_json::json!({
                 "title": null,
                 "companyName": null,
+                "description": null,
                 "board": null,
                 "careersUrl": "https://acme.example/careers"
             })

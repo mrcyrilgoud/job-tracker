@@ -328,9 +328,9 @@ mod tests {
         conn.execute(
             r#"INSERT INTO jobs (
                 id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
-                posting_state, last_checked_at, last_check_result, source, notes, location,
+                posting_state, last_checked_at, last_check_result, source, notes, description, location,
                 is_new_from_watch, missing_from_sync_count, created_at, updated_at
-            ) VALUES (?1,?2,?3,?4,?4,NULL,'wishlist',NULL,'unknown',NULL,NULL,'manual',NULL,NULL,0,0,?5,?5)"#,
+            ) VALUES (?1,?2,?3,?4,?4,NULL,'wishlist',NULL,'unknown',NULL,NULL,'manual',NULL,NULL,NULL,0,0,?5,?5)"#,
             params![job_id, company_id, title, url, now],
         )
         .unwrap();

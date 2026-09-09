@@ -26,6 +26,7 @@ pub struct Job {
     pub last_check_result: Option<String>,
     pub source: String,
     pub notes: Option<String>,
+    pub description: Option<String>,
     pub location: Option<String>,
     pub is_new_from_watch: bool,
     pub watch_disposition: Option<String>,

@@ -36,17 +36,18 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         last_check_result: row.get(10)?,
         source: row.get(11)?,
         notes: row.get(12)?,
-        location: row.get(13)?,
-        is_new_from_watch: row.get::<_, i64>(14)? != 0,
-        watch_disposition: row.get(15)?,
-        missing_from_sync_count: row.get(16)?,
-        is_favorite: row.get::<_, i64>(17)? != 0,
-        created_at: row.get(18)?,
-        updated_at: row.get(19)?,
+        description: row.get(13)?,
+        location: row.get(14)?,
+        is_new_from_watch: row.get::<_, i64>(15)? != 0,
+        watch_disposition: row.get(16)?,
+        missing_from_sync_count: row.get(17)?,
+        is_favorite: row.get::<_, i64>(18)? != 0,
+        created_at: row.get(19)?,
+        updated_at: row.get(20)?,
     })
 }
 
-const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at";
+const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, description, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at";
 
 /// Resolve a page title via network. Callers must not hold a DB mutex across this.
 pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
@@ -82,6 +83,7 @@ pub fn create_job_from_url(
         status,
         applied_at,
         notes,
+        None,
         location,
         None,
     )
@@ -95,6 +97,7 @@ pub fn create_job_from_url_with_careers(
     status: Option<&str>,
     applied_at: Option<&str>,
     notes: Option<&str>,
+    description: Option<&str>,
     location: Option<&str>,
     careers_url: Option<&str>,
 ) -> AppResult<(Job, Company)> {
@@ -131,9 +134,9 @@ pub fn create_job_from_url_with_careers(
     conn.execute(
         r#"INSERT INTO jobs (
             id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
-            posting_state, last_checked_at, last_check_result, source, notes, location,
+            posting_state, last_checked_at, last_check_result, source, notes, description, location,
             is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,0,NULL,0,0,?10,?10)"#,
+        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,?10,0,NULL,0,0,?11,?11)"#,
         params![
             job_id,
             company.id,
@@ -143,6 +146,7 @@ pub fn create_job_from_url_with_careers(
             status,
             applied,
             notes,
+            description,
             location,
             timestamp
         ],
@@ -380,7 +384,7 @@ fn expand_location_keywords(cities: &str) -> Vec<String> {
 
 pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
     let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE 1=1",
     );
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -415,8 +419,11 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         );
     }
     if let Some(search) = &filters.search {
-        sql.push_str(" AND (j.title LIKE ? OR c.name LIKE ? OR j.notes LIKE ?)");
+        sql.push_str(
+            " AND (j.title LIKE ? OR c.name LIKE ? OR j.notes LIKE ? OR j.description LIKE ?)",
+        );
         let pattern = format!("%{search}%");
+        values.push(Box::new(pattern.clone()));
         values.push(Box::new(pattern.clone()));
         values.push(Box::new(pattern.clone()));
         values.push(Box::new(pattern));
@@ -505,7 +512,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         .query_map(params_ref.as_slice(), |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(20)?,
+                company_name: row.get(21)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -526,7 +533,7 @@ pub fn list_open_watch_positions(
 ) -> AppResult<Vec<JobListItem>> {
     let loc_settings = get_location_settings(conn).unwrap_or_default();
     let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.company_id = ?1
            AND j.posting_state = 'active'
@@ -581,7 +588,7 @@ pub fn list_open_watch_positions(
         .query_map(params_ref.as_slice(), |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(20)?,
+                company_name: row.get(21)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -592,7 +599,7 @@ pub fn list_open_watch_positions(
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
         .prepare(
-            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at,
+            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at,
                     c.id, c.name, c.careers_url, c.created_at, c.updated_at
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
         )
@@ -603,11 +610,11 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
             Ok((
                 map_job(row)?,
                 Company {
-                    id: row.get(20)?,
-                    name: row.get(21)?,
-                    careers_url: row.get(22)?,
-                    created_at: row.get(23)?,
-                    updated_at: row.get(24)?,
+                    id: row.get(21)?,
+                    name: row.get(22)?,
+                    careers_url: row.get(23)?,
+                    created_at: row.get(24)?,
+                    updated_at: row.get(25)?,
                 },
             ))
         })
@@ -686,6 +693,7 @@ pub struct UpdateJobInput {
     pub status: Option<String>,
     pub applied_at: Option<Option<String>>,
     pub notes: Option<Option<String>>,
+    pub description: Option<Option<String>>,
     pub location: Option<Option<String>>,
     pub url: Option<String>,
     pub is_new_from_watch: Option<bool>,
@@ -749,6 +757,10 @@ pub fn update_job(
         .notes
         .clone()
         .unwrap_or_else(|| existing.notes.clone());
+    let description = updates
+        .description
+        .clone()
+        .unwrap_or_else(|| existing.description.clone());
     let location = updates
         .location
         .clone()
@@ -762,8 +774,8 @@ pub fn update_job(
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, location=?8, is_new_from_watch=?9, is_favorite=?10, updated_at=?11
-           WHERE id=?12"#,
+           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, updated_at=?12
+           WHERE id=?13"#,
         params![
             title,
             company_id,
@@ -772,6 +784,7 @@ pub fn update_job(
             next_status,
             next_applied,
             notes,
+            description,
             location,
             if is_new { 1 } else { 0 },
             if is_fav { 1 } else { 0 },
