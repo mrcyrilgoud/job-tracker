@@ -39,6 +39,7 @@ export type CreateJobInput = {
   status?: JobStatus;
   appliedAt?: string | null;
   notes?: string | null;
+  description?: string | null;
   location?: string | null;
   confirmedDiscovery?: ConfirmedJobDiscovery | null;
 };
@@ -52,6 +53,7 @@ export type ConfirmedJobDiscovery = {
 export type JobUrlPreview = {
   title: string | null;
   companyName: string | null;
+  description: string | null;
   board: DetectedBoard | null;
   careersUrl: string | null;
 };
@@ -62,6 +64,7 @@ export type UpdateJobInput = {
   status?: JobStatus;
   appliedAt?: string | null;
   notes?: string | null;
+  description?: string | null;
   location?: string | null;
   url?: string;
   isNewFromWatch?: boolean;

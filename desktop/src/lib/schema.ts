@@ -65,6 +65,7 @@ export type Job = {
   lastCheckResult: string | null;
   source: JobSource;
   notes: string | null;
+  description: string | null;
   location: string | null;
   isNewFromWatch: boolean;
   watchDisposition: WatchDisposition | null;

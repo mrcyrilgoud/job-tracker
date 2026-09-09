@@ -65,6 +65,7 @@ function job(
     status?: JobStatus;
     source?: Job["source"];
     watchDisposition?: WatchDisposition;
+    description?: string | null;
   } = {},
 ): Job {
   jobSeq += 1;
@@ -84,6 +85,7 @@ function job(
     lastCheckResult: null,
     source: opts.source ?? "greenhouse",
     notes: null,
+    description: opts.description ?? null,
     location,
     isNewFromWatch: opts.isNewFromWatch ?? false,
     watchDisposition: opts.watchDisposition ?? (opts.isNewFromWatch ? "new" : "saved"),

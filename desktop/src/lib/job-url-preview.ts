@@ -4,6 +4,7 @@ import type { JobListItem } from "@/lib/schema";
 export type JobPreviewFields = {
   title: string;
   companyName: string;
+  description?: string;
 };
 
 export type StoredPostingLink = {
@@ -63,6 +64,9 @@ export function applyJobUrlPreview(
     companyName: current.companyName.trim()
       ? current.companyName
       : (preview.companyName ?? current.companyName),
+    description: current.description?.trim()
+      ? current.description
+      : (preview.description ?? current.description ?? ""),
   };
 }
 

@@ -19,6 +19,7 @@ function mockJob(id: string, isFavorite: boolean, status: JobListItem["job"]["st
       lastCheckResult: null,
       source: "manual",
       notes: null,
+      description: null,
       location: "San Francisco, CA",
       isNewFromWatch: false,
       watchDisposition: null,

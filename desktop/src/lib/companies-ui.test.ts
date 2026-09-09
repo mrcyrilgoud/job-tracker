@@ -42,6 +42,7 @@ function role(overrides: Partial<Job> & Pick<Job, "id">, companyName = "Acme"): 
       lastCheckResult: null,
       source: "greenhouse",
       notes: null,
+      description: null,
       location: null,
       isNewFromWatch: true,
       watchDisposition: "new",

@@ -24,6 +24,7 @@ function mockJob(
       lastCheckResult: null,
       source: "manual",
       notes: null,
+      description: null,
       location: "San Francisco, CA",
       isNewFromWatch: false,
       watchDisposition: null,

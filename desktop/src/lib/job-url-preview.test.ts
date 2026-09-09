@@ -30,6 +30,7 @@ function jobItem(overrides: Partial<Job> & Pick<Job, "id" | "url">): JobListItem
       lastCheckResult: null,
       source: "manual",
       notes: null,
+      description: null,
       location: null,
       isNewFromWatch: false,
       watchDisposition: null,
@@ -45,6 +46,7 @@ function jobItem(overrides: Partial<Job> & Pick<Job, "id" | "url">): JobListItem
 const boardPreview: JobUrlPreview = {
   title: "Software Engineer",
   companyName: "Acme",
+  description: "Build robust distributed systems",
   board: {
     provider: "ashby",
     boardSlug: "acme",
@@ -57,6 +59,7 @@ const boardPreview: JobUrlPreview = {
 const careersPreview: JobUrlPreview = {
   title: null,
   companyName: "Onebrief",
+  description: null,
   board: null,
   careersUrl: "https://www.onebrief.com/careers",
 };
@@ -69,11 +72,12 @@ describe("applyJobUrlPreview", () => {
         {
           title: "Software Engineer",
           companyName: "Acme",
+          description: null,
           board: null,
           careersUrl: null,
         },
       ),
-    ).toEqual({ title: "Software Engineer", companyName: "Acme" });
+    ).toEqual({ title: "Software Engineer", companyName: "Acme", description: "" });
   });
 
   it("preserves non-empty manually entered values", () => {
@@ -83,11 +87,12 @@ describe("applyJobUrlPreview", () => {
         {
           title: "Detected title",
           companyName: "Detected company",
+          description: null,
           board: null,
           careersUrl: null,
         },
       ),
-    ).toEqual({ title: "My title", companyName: "My company" });
+    ).toEqual({ title: "My title", companyName: "My company", description: "" });
   });
 
   it("fills only the available blank field from a partial preview", () => {
@@ -97,20 +102,46 @@ describe("applyJobUrlPreview", () => {
         {
           title: "Product Designer",
           companyName: null,
+          description: null,
           board: null,
           careersUrl: null,
         },
       ),
-    ).toEqual({ title: "Product Designer", companyName: "" });
+    ).toEqual({ title: "Product Designer", companyName: "", description: "" });
+  });
+
+  it("fills description when available from preview", () => {
+    expect(
+      applyJobUrlPreview(
+        { title: "", companyName: "", description: "" },
+        {
+          title: "Staff Engineer",
+          companyName: "Acme",
+          description: "Build cloud infrastructure",
+          board: null,
+          careersUrl: null,
+        },
+      ),
+    ).toEqual({
+      title: "Staff Engineer",
+      companyName: "Acme",
+      description: "Build cloud infrastructure",
+    });
   });
 
   it("leaves current values unchanged for an empty preview", () => {
     expect(
       applyJobUrlPreview(
         { title: "", companyName: "Existing company" },
-        { title: null, companyName: null, board: null, careersUrl: null },
+        {
+          title: null,
+          companyName: null,
+          description: null,
+          board: null,
+          careersUrl: null,
+        },
       ),
-    ).toEqual({ title: "", companyName: "Existing company" });
+    ).toEqual({ title: "", companyName: "Existing company", description: "" });
   });
 
   it("starts detected boards unconfirmed and confirms them explicitly", () => {

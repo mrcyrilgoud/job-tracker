@@ -19,6 +19,7 @@ type Initial = {
   status: JobStatus;
   appliedAt: string | null;
   notes: string | null;
+  description: string | null;
   postingState: PostingState;
   lastCheckedAt: string | null;
   lastCheckResult: string | null;
@@ -35,6 +36,7 @@ type Draft = {
   status: JobStatus;
   appliedAt: string;
   notes: string;
+  description: string;
   isFavorite: boolean;
 };
 
@@ -49,6 +51,7 @@ function toDraft(initial: Initial): Draft {
     status: initial.status,
     appliedAt: initial.appliedAt ? initial.appliedAt.slice(0, 10) : "",
     notes: initial.notes ?? "",
+    description: initial.description ?? "",
     isFavorite: initial.isFavorite,
   };
 }
@@ -60,6 +63,7 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.status === b.status &&
     a.appliedAt === b.appliedAt &&
     a.notes === b.notes &&
+    a.description === b.description &&
     a.isFavorite === b.isFavorite
   );
 }
@@ -156,6 +160,7 @@ export function JobDetailClient({
         status: attempted.status,
         appliedAt: attempted.appliedAt ? new Date(attempted.appliedAt).toISOString() : null,
         notes: attempted.notes,
+        description: attempted.description,
         isNewFromWatch: false,
         isFavorite: attempted.isFavorite,
       });
@@ -166,6 +171,7 @@ export function JobDetailClient({
         status: detail.job.status,
         appliedAt: detail.job.appliedAt ? detail.job.appliedAt.slice(0, 10) : "",
         notes: detail.job.notes ?? "",
+        description: detail.job.description ?? "",
         isFavorite: detail.job.isFavorite,
       };
       setSaved(baseline);
@@ -404,15 +410,31 @@ export function JobDetailClient({
           </div>
 
           <div>
-            <label htmlFor="job-notes" className="field-label">
-              Notes
+            <label htmlFor="job-description" className="field-label flex items-center justify-between">
+              <span>Job Description</span>
+              <span className="text-xs font-normal text-[var(--faint)]">Scraped or pasted role details</span>
+            </label>
+            <textarea
+              id="job-description"
+              value={draft.description}
+              onChange={(event) => update("description", event.target.value)}
+              rows={6}
+              placeholder="Paste full job description, role expectations, qualifications, or requirements…"
+              className="field font-mono text-xs leading-relaxed"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="job-notes" className="field-label flex items-center justify-between">
+              <span>Notes</span>
+              <span className="text-xs font-normal text-[var(--faint)]">Personal thoughts & prep</span>
             </label>
             <textarea
               id="job-notes"
               value={draft.notes}
               onChange={(event) => update("notes", event.target.value)}
               rows={4}
-              placeholder="Anything worth remembering about this one…"
+              placeholder="Anything worth remembering about this one (referrals, compensation, prep thoughts)…"
               className="field"
             />
           </div>

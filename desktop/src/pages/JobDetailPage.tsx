@@ -136,6 +136,7 @@ export function JobDetailPage() {
           status: detail.job.status,
           appliedAt: detail.job.appliedAt,
           notes: detail.job.notes,
+          description: detail.job.description,
           postingState: detail.job.postingState,
           lastCheckedAt: detail.job.lastCheckedAt,
           lastCheckResult: detail.job.lastCheckResult,

@@ -28,10 +28,12 @@ export function useJobUrlPreview(args: {
   url: string;
   title: string;
   companyName: string;
+  description?: string;
   setTitle: (value: string | ((current: string) => string)) => void;
   setCompanyName: (value: string | ((current: string) => string)) => void;
+  setDescription?: (value: string | ((current: string) => string)) => void;
 }) {
-  const { url, setTitle, setCompanyName } = args;
+  const { url, setTitle, setCompanyName, setDescription } = args;
   const [preview, setPreview] = useState<JobUrlPreview | null>(null);
   const [confirmedDiscovery, setConfirmedDiscovery] =
     useState<ConfirmedJobDiscovery | null>(null);
@@ -42,9 +44,11 @@ export function useJobUrlPreview(args: {
   const urlRef = useRef(url);
   const titleRef = useRef(args.title);
   const companyRef = useRef(args.companyName);
+  const descriptionRef = useRef(args.description ?? "");
   urlRef.current = url;
   titleRef.current = args.title;
   companyRef.current = args.companyName;
+  descriptionRef.current = args.description ?? "";
 
   const clearDiscoveryForUrlChange = useCallback(() => {
     requestIdRef.current += 1;
@@ -78,16 +82,24 @@ export function useJobUrlPreview(args: {
       setConfirmedDiscovery(resetJobUrlDiscovery().confirmedDiscovery);
       setTitle((current) =>
         applyJobUrlPreview(
-          { title: current, companyName: companyRef.current },
+          { title: current, companyName: companyRef.current, description: descriptionRef.current },
           nextPreview,
         ).title,
       );
       setCompanyName((current) =>
         applyJobUrlPreview(
-          { title: titleRef.current, companyName: current },
+          { title: titleRef.current, companyName: current, description: descriptionRef.current },
           nextPreview,
         ).companyName,
       );
+      if (setDescription) {
+        setDescription((current) =>
+          applyJobUrlPreview(
+            { title: titleRef.current, companyName: companyRef.current, description: current },
+            nextPreview,
+          ).description ?? current,
+        );
+      }
 
       if (nextPreview.title && nextPreview.companyName) {
         setAutofillStatus("Found the role title and company.");

@@ -19,6 +19,7 @@ export function NewJobPage() {
   const [companyName, setCompanyName] = useState("");
   const [status, setStatus] = useState<JobStatus>("wishlist");
   const [appliedAt, setAppliedAt] = useState("");
+  const [description, setDescription] = useState("");
   const [notes, setNotes] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -36,8 +37,10 @@ export function NewJobPage() {
     url,
     title,
     companyName,
+    description,
     setTitle,
     setCompanyName,
+    setDescription,
   });
 
   async function onSubmit(event: React.FormEvent) {
@@ -51,6 +54,7 @@ export function NewJobPage() {
         companyName: companyName || undefined,
         status,
         appliedAt: appliedAt ? new Date(appliedAt).toISOString() : null,
+        description: description || null,
         notes: notes || null,
         confirmedDiscovery: serializeConfirmedJobDiscovery(preview, confirmedDiscovery),
       });
@@ -255,14 +259,35 @@ export function NewJobPage() {
         </div>
 
         <div className="space-y-1.5 text-sm">
-          <label htmlFor="notes" className="block font-medium">
-            Notes
-          </label>
+          <div className="flex items-center justify-between">
+            <label htmlFor="description" className="block font-medium">
+              Job Description
+            </label>
+            <span className="text-xs text-[var(--faint)]">Optional / Auto-detected</span>
+          </div>
+          <textarea
+            id="description"
+            rows={5}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Role overview, responsibilities, or requirements…"
+            className="field font-mono text-xs leading-relaxed"
+          />
+        </div>
+
+        <div className="space-y-1.5 text-sm">
+          <div className="flex items-center justify-between">
+            <label htmlFor="notes" className="block font-medium">
+              Notes
+            </label>
+            <span className="text-xs text-[var(--faint)]">Personal notes</span>
+          </div>
           <textarea
             id="notes"
-            rows={4}
+            rows={3}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
+            placeholder="Referral info, recruiter name, compensation notes…"
             className="field"
           />
         </div>
