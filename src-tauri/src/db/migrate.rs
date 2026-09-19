@@ -130,7 +130,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS job_events_occurred_at_idx ON job_events(occurred_at);
     CREATE INDEX IF NOT EXISTS jobs_company_id_updated_at_idx ON jobs(company_id, updated_at);
     CREATE INDEX IF NOT EXISTS jobs_status_updated_at_idx ON jobs(status, updated_at);
+    CREATE INDEX IF NOT EXISTS jobs_posting_state_updated_at_idx ON jobs(posting_state, updated_at);
     CREATE INDEX IF NOT EXISTS jobs_is_new_from_watch_updated_at_idx ON jobs(is_new_from_watch, updated_at);
+    CREATE INDEX IF NOT EXISTS jobs_watch_state_updated_at_idx ON jobs(is_new_from_watch, posting_state, updated_at);
     CREATE INDEX IF NOT EXISTS job_documents_document_id_idx ON job_documents(document_id);
     CREATE INDEX IF NOT EXISTS job_documents_job_id_idx ON job_documents(job_id);
     CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);

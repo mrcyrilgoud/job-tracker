@@ -25,6 +25,7 @@ export type JobFilters = {
   newFromWatch?: boolean;
   isFavorite?: boolean;
   isArchived?: boolean;
+  limit?: number;
 };
 
 export type LocationSettings = {
@@ -123,10 +124,14 @@ export const api = {
   listJobs: (filters?: JobFilters) =>
     call<{
       jobs: JobListItem[];
+    }>("list_jobs_cmd", { filters: filters ?? null }),
+
+  getJobsDashboard: () =>
+    call<{
       counts: Record<string, number>;
       weeklyActivity: WeeklyActivity;
       dataDir: string;
-    }>("list_jobs_cmd", { filters: filters ?? null }),
+    }>("get_jobs_dashboard"),
 
   createJob: (input: CreateJobInput) =>
     call<{ job: Job; company: Company }>("create_job", { input }),
@@ -241,4 +246,6 @@ export const api = {
 
   setLocationSettings: (settings: LocationSettings) =>
     call<{ ok: boolean }>("set_location_settings_cmd", { settings }),
+
+  showMainWindow: () => call<void>("show_main_window"),
 };

@@ -125,6 +125,7 @@ pub fn handle_list(
         } else {
             Some(false)
         },
+        limit: args.limit,
     };
 
     let mut jobs = list_jobs(conn, filters)?;

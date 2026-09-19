@@ -19,7 +19,7 @@ import {
 import { JobsBoardView } from "@/components/JobsBoardView";
 import { NewRolesList } from "@/components/companies/NewRolesList";
 import { api, type JobsRunnerProgress } from "@/lib/api";
-import { roleCountLabel } from "@/lib/companies-ui";
+import { watchPreviewCountLabel } from "@/lib/companies-ui";
 import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { isDesktopShell } from "@/lib/tauri";
 import {
@@ -76,7 +76,7 @@ export function JobsPage() {
     }
     setError(null);
     try {
-      const [listResult, companiesResult, watchResult] = await Promise.all([
+      const [listResult, dashboardResult, companiesResult, watchResult] = await Promise.all([
         api.listJobs({
           status,
           companyId,
@@ -89,8 +89,9 @@ export function JobsPage() {
               ? false
               : undefined,
         }),
+        api.getJobsDashboard(),
         api.listCompanies(),
-        api.listJobs({ newFromWatch: true }),
+        api.listJobs({ newFromWatch: true, limit: WATCH_PREVIEW_COUNT + 1 }),
       ]);
       if (sequence !== loadSequenceRef.current) return;
       if (
@@ -106,8 +107,8 @@ export function JobsPage() {
         return;
       }
       setJobs(listResult.jobs);
-      setCounts(listResult.counts);
-      setActivity(listResult.weeklyActivity);
+      setCounts(dashboardResult.counts);
+      setActivity(dashboardResult.weeklyActivity);
       setCompanies(companiesResult.companies.map((row) => row.company));
       setNewFromWatch(watchResult.jobs);
     } catch (err) {
@@ -312,19 +313,8 @@ export function JobsPage() {
     setSearchParams(next);
   }
 
-  if (loading && jobs.length === 0) {
-    return <p className="text-sm text-[var(--muted)]">Loading jobs…</p>;
-  }
-
-  if (error && jobs.length === 0) {
-    return (
-      <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
-        {error}
-      </p>
-    );
-  }
-
   const activeJobsCount = Math.max(0, (counts.all ?? 0) - (counts.archivedTotal ?? 0));
+  const hasMoreWatchRoles = newFromWatch.length > WATCH_PREVIEW_COUNT;
 
   return (
     <>
@@ -543,7 +533,7 @@ export function JobsPage() {
                 <div>
                   <h3 className="font-display text-lg font-medium">
                     {newFromWatch.length > 0
-                      ? `${roleCountLabel(newFromWatch.length)} from your watches`
+                      ? `${watchPreviewCountLabel(newFromWatch.length, WATCH_PREVIEW_COUNT)} from your watches`
                       : "0 new roles from your watches"}
                   </h3>
                   <p className="mt-0.5 text-sm text-[var(--muted)]">
@@ -552,9 +542,9 @@ export function JobsPage() {
                       : "Your watches are up to date. No new matches found."}
                   </p>
                 </div>
-                {newFromWatch.length > WATCH_PREVIEW_COUNT ? (
+                {hasMoreWatchRoles ? (
                   <Link to="/companies" className="btn btn-secondary btn-sm">
-                    Browse all {newFromWatch.length}
+                    Browse all roles
                   </Link>
                 ) : null}
               </div>
@@ -579,7 +569,20 @@ export function JobsPage() {
             </section>
           ) : null}
 
-          {jobs.length === 0 ? (
+          {error && jobs.length === 0 ? (
+            <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+              {error}
+            </p>
+          ) : loading && jobs.length === 0 ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="card flex h-24 items-center justify-between p-4 animate-pulse bg-[var(--surface-muted)]/50"
+                />
+              ))}
+            </div>
+          ) : jobs.length === 0 ? (
             <div className="card flex flex-col items-center justify-center gap-3 p-12 text-center">
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface-muted)] text-[var(--muted)]">
                 {isFavoriteFilter ? (

@@ -73,6 +73,17 @@ export function roleCountLabel(count: number): string {
 }
 
 /**
+ * The dashboard asks for one more row than it displays to cheaply determine
+ * whether additional watch discoveries exist. That extra row is a probe, not
+ * the complete count, so never present it as one.
+ */
+export function watchPreviewCountLabel(loadedCount: number, previewCount: number): string {
+  return loadedCount > previewCount
+    ? `More than ${previewCount} new roles`
+    : roleCountLabel(loadedCount);
+}
+
+/**
  * Roles a watch found that are not on the board yet, keyed by company. The
  * backend already scopes these (`is_new_from_watch = 1`); this only groups them
  * so a company card can show its own count without a second round trip.

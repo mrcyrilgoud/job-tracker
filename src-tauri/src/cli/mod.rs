@@ -335,6 +335,7 @@ mod tests {
                 new_from_watch: None,
                 is_favorite: None,
                 is_archived: Some(false),
+                limit: None,
             },
         )
         .unwrap();

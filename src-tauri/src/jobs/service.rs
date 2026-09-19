@@ -256,6 +256,8 @@ pub struct JobFilters {
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
     pub is_archived: Option<bool>,
+    /// Optional row cap applied as `LIMIT ?` — used to cap watch-preview fetches.
+    pub limit: Option<usize>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
@@ -655,6 +657,11 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
 
     sql.push_str(" ORDER BY j.updated_at DESC");
+
+    if let Some(lim) = filters.limit {
+        sql.push_str(" LIMIT ?");
+        values.push(Box::new(lim as i64));
+    }
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();

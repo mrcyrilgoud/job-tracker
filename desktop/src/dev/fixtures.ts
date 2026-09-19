@@ -193,6 +193,7 @@ export function createFixtureBackend() {
       .filter((j) => (companyId ? j.companyId === companyId : true))
       .filter((j) => j.isNewFromWatch === newFromWatch)
       .filter((j) => (search ? j.title.toLowerCase().includes(search) : true))
+      .slice(0, typeof filters?.limit === "number" ? filters.limit : undefined)
       .map((j) => ({
         job: j,
         companyName: companies.find((c) => c.id === j.companyId)?.name ?? "Unknown",
@@ -216,19 +217,30 @@ export function createFixtureBackend() {
       const filters = (args?.filters ?? null) as Record<string, unknown> | null;
       return {
         jobs: jobListItems(filters),
-        counts: { wishlist: 6, applied: 1, interviewing: 1, offer: 0 },
-        weeklyActivity: {
-          total: 4,
-          days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => ({
-            key: `d${i}`,
-            label,
-            count: i % 3,
-            isToday: i === 6,
-          })),
-        },
-        dataDir: "/Users/preview/Library/Application Support/job-tracker",
       };
     },
+
+    get_jobs_dashboard: () => ({
+      counts: {
+        all: 13,
+        archivedTotal: 1,
+        favorites: 0,
+        wishlist: 6,
+        applied: 1,
+        interviewing: 1,
+        offer: 0,
+      },
+      weeklyActivity: {
+        total: 4,
+        days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => ({
+          key: `d${i}`,
+          label,
+          count: i % 3,
+          isToday: i === 6,
+        })),
+      },
+      dataDir: "/Users/preview/Library/Application Support/job-tracker",
+    }),
 
     create_company: (args) => {
       const input = (args?.input ?? {}) as { name: string; careersUrl: string | null };

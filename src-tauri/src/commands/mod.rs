@@ -47,6 +47,8 @@ pub struct ListJobsArgs {
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
     pub is_archived: Option<bool>,
+    /// Optional row cap forwarded to SQLite LIMIT — used to cap watch-preview fetches.
+    pub limit: Option<usize>,
 }
 
 #[tauri::command]
@@ -63,6 +65,7 @@ pub async fn list_jobs_cmd(
         new_from_watch: None,
         is_favorite: None,
         is_archived: None,
+        limit: None,
     });
     state.with_db(|conn| {
         let jobs = list_jobs(
@@ -76,12 +79,22 @@ pub async fn list_jobs_cmd(
                 new_from_watch: filters.new_from_watch,
                 is_favorite: filters.is_favorite,
                 is_archived: filters.is_archived,
+                limit: filters.limit,
             },
         )?;
+        Ok(serde_json::json!({ "jobs": jobs }))
+    })
+}
+
+/// Returns pipeline counts, 7-day activity, and the data directory path.
+/// Decoupled from `list_jobs_cmd` so expensive aggregations are not
+/// re-computed on every filter change or watch-preview refresh.
+#[tauri::command]
+pub async fn get_jobs_dashboard(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    state.with_db(|conn| {
         let counts = get_pipeline_counts(conn)?;
         let weekly = get_weekly_activity(conn)?;
         Ok(serde_json::json!({
-            "jobs": jobs,
             "counts": counts,
             "weeklyActivity": weekly,
             "dataDir": state.paths.data_dir
