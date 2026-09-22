@@ -1,4 +1,5 @@
 import { formatDistanceToNow } from "date-fns";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { FavoriteButton } from "@/components/FavoriteButton";
@@ -19,6 +20,8 @@ const NEXT_STAGE: Partial<Record<JobStatus, JobStatus>> = {
   interviewing: "offer",
 };
 
+const BOARD_PAGE_SIZE = 25;
+
 export function JobsBoardView({
   jobs,
   onToggleFavorite,
@@ -34,21 +37,28 @@ export function JobsBoardView({
   onDeleteJob?: (job: { id: string; title: string; companyName: string }) => void;
   isPendingFavorite?: (jobId: string) => boolean;
 }) {
-  const jobsByStage = BOARD_COLUMNS.reduce<Record<JobStatus, JobListItem[]>>(
-    (acc, stage) => {
-      acc[stage] = jobs.filter((item) => item.job.status === stage);
-      return acc;
-    },
-    { wishlist: [], applied: [], interviewing: [], offer: [], rejected: [], withdrawn: [], closed: [], archived: [] },
-  );
+  const [expandedStages, setExpandedStages] = useState<Set<JobStatus>>(new Set());
+  const jobsByStage = useMemo(() => {
+    const grouped: Record<JobStatus, JobListItem[]> = {
+      wishlist: [],
+      applied: [],
+      interviewing: [],
+      offer: [],
+      rejected: [],
+      withdrawn: [],
+      closed: [],
+      archived: [],
+    };
+    for (const item of jobs) {
+      grouped[item.job.status].push(item);
+    }
+    return grouped;
+  }, [jobs]);
 
   // Check if there are closed / archived jobs in the current set
-  const archivedJobs = jobs.filter(
-    (item) =>
-      item.job.status === "rejected" ||
-      item.job.status === "withdrawn" ||
-      item.job.status === "closed" ||
-      item.job.status === "archived",
+  const archivedJobs = useMemo(
+    () => jobs.filter((item) => item.job.status === "rejected" || item.job.status === "withdrawn" || item.job.status === "closed" || item.job.status === "archived"),
+    [jobs],
   );
 
   return (
@@ -58,6 +68,9 @@ export function JobsBoardView({
           const stageInfo = jobStatusPresentation(stage);
           const StageIcon = statusIcons[stage];
           const stageJobs = jobsByStage[stage] ?? [];
+          const isExpanded = expandedStages.has(stage);
+          const visibleJobs = isExpanded ? stageJobs : stageJobs.slice(0, BOARD_PAGE_SIZE);
+          const remainingJobs = stageJobs.length - visibleJobs.length;
           const nextStage = NEXT_STAGE[stage];
 
           return (
@@ -85,7 +98,7 @@ export function JobsBoardView({
                     <p className="text-xs text-[var(--faint)]">No roles here yet</p>
                   </div>
                 ) : (
-                  stageJobs.map(({ job, companyName }) => {
+                  visibleJobs.map(({ job, companyName }) => {
                     const postingInfo = postingStateMatters(job.status)
                       ? postingStatePresentation(job.postingState)
                       : null;
@@ -209,6 +222,17 @@ export function JobsBoardView({
                   })
                 )}
               </div>
+              {remainingJobs > 0 ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedStages((current) => new Set(current).add(stage))
+                  }
+                  className="mt-3 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"
+                >
+                  Show {remainingJobs} more
+                </button>
+              ) : null}
             </div>
           );
         })}
