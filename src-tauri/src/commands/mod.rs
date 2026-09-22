@@ -1048,9 +1048,12 @@ fn restore_csv_config(
 
 #[tauri::command]
 pub async fn gmail_status(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    // Read the macOS Keychain *before* acquiring the SQLite mutex.
+    // Keychain IPC can take 50–500 ms; holding with_db during that window
+    // would block every other DB read/write across the app.
+    let connected = gmail::is_gmail_connected()?;
     state.with_db(|conn| {
         let config = gmail::get_gmail_config(conn)?;
-        let connected = gmail::is_gmail_connected()?;
         let pending = gmail::list_pending_email_matches(conn)?;
         Ok(serde_json::json!({
             "connected": connected,
