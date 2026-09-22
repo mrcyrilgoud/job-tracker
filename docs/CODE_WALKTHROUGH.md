@@ -10,7 +10,7 @@ flowchart LR
   R --> A[desktop/src/lib/api.ts\nTyped Tauri invoke wrapper]
   A --> C[src-tauri/src/commands/mod.rs\n50 IPC commands]
   C --> S[Domain services\njobs, companies, documents]
-  C --> X[External adapters\nATS, careers pages, Gmail]
+  C --> X[External adapters\nATS and careers pages]
   S --> D[(SQLite + WAL)]
   S --> F[data/documents + jobs.csv]
   B[LaunchAgent or CLI] --> RUN[runner.rs jobs cycle]
@@ -26,7 +26,7 @@ The browser UI never connects to a web server. In a Tauri window, `invoke` calls
 2. Browser startup and routes: `desktop/src/main.tsx`, `desktop/src/App.tsx`
 3. IPC contract: `desktop/src/lib/api.ts` and `src-tauri/src/commands/mod.rs`
 4. Storage and job rules: `db/`, `models.rs`, `jobs/service.rs`
-5. Feature adapters and the background worker: `ats/`, `gmail/`, `runner.rs`
+5. Feature adapters and the background worker: `ats/`, `runner.rs`
 
 ## 1. Startup, line by line
 
@@ -65,7 +65,7 @@ The browser UI never connects to a web server. In a Tauri window, `invoke` calls
 | `desktop/src/main.tsx:1-10` | Imports the app and CSS, then mounts `<App />` inside React `StrictMode`. |
 | `desktop/src/App.tsx:17-41` | Defines the normal-browser fallback. A browser can render the shell but cannot use Tauri's Rust bridge, so it shows the command required to open the app. |
 | `desktop/src/App.tsx:43-52` | On first mount, asks Rust to show/focus the main window. Outside Tauri it returns the fallback instead of mounting usable-looking broken controls. |
-| `desktop/src/App.tsx:54-70` | Provides theme state, creates the browser router, wraps pages in `Layout`, and declares routes for jobs, documents, companies, Gmail, and settings. |
+| `desktop/src/App.tsx:54-69` | Provides theme state, creates the browser router, wraps pages in `Layout`, and declares routes for jobs, documents, companies, and settings. |
 
 ## 2. Data location, state, and database
 
@@ -111,7 +111,6 @@ erDiagram
   JOBS ||--o{ JOB_EVENTS : records
   JOBS ||--o{ JOB_DOCUMENTS : attaches
   DOCUMENTS ||--o{ JOB_DOCUMENTS : is_attached_by
-  JOBS ||--o{ EMAIL_MATCHES : may_match
 ```
 
 Important constraints are encoded in the migration rather than in the UI:
@@ -132,9 +131,8 @@ Lines 3-160 define Rust structs serialized to camelCase JSON. The TypeScript mir
 | 41-48 | `JobEvent` | Auditable timeline entries such as creation, state change, or document attachment. |
 | 52-70 | `Document`, `JobDocument` | Content-addressed library record and its job-specific attachment. |
 | 74-96 | Watch and careers review shapes | Monitoring state and changes requiring a user decision. |
-| 100-112 | `EmailMatch` | Candidate Gmail match awaiting confirmation. |
-| 116-160 | View models | List rows, job detail, and seven-day activity data that avoid repeated frontend joins. |
-| 162-175 | Allowed job statuses | One source of truth used by service validation. |
+| 100-144 | View models | List rows, job detail, and seven-day activity data that avoid repeated frontend joins. |
+| 146-159 | Allowed job statuses | One source of truth used by service validation. |
 
 ## 3. The frontend contract and page flow
 
@@ -148,8 +146,7 @@ Lines 3-160 define Rust structs serialized to camelCase JSON. The TypeScript mir
 | 165-201 | Companies, watches, careers reviews, watch triage | Company monitoring |
 | 203-211 | Document list/import/attach/open | Documents |
 | 213-220 | CSV configuration | CSV mirror |
-| 222-234 | OAuth, polling, and email triage | Gmail |
-| 236-250 | Jobs cycle, settings, and window visibility | Background runner/app settings |
+| 222-236 | Jobs cycle, settings, and window visibility | Background runner/app settings |
 
 ### Layout and routes
 
@@ -163,7 +160,6 @@ Lines 3-160 define Rust structs serialized to camelCase JSON. The TypeScript mir
 | `/documents` | `DocumentsPage` + `DocumentsClient` | Document library and import. |
 | `/companies` | `CompaniesPage` + `CompaniesClient` | Companies, their watches, careers reviews, and discovery counts. |
 | `/companies/:id` | `CompanyDetailPage` | One company and its watch-management controls. |
-| `/gmail` | `GmailPage` + `GmailClient` | OAuth configuration, connection, polling, and triage. |
 | `/settings` | `SettingsPage` | CSV path plus watch-keyword and location settings. |
 
 ### Jobs dashboard: `desktop/src/pages/JobsPage.tsx`
@@ -204,8 +200,7 @@ Lines 3-160 define Rust structs serialized to camelCase JSON. The TypeScript mir
 | 591-752 | companies/watches/reviews | Validates a board before saving a watch. Sync uses both the in-process mutex and runner file lock. |
 | 755-869 | documents | Base64-decodes bytes, stages/imports them in a DB transaction, then finalizes the file after commit; opens documents through Tauri's native shell plugin. |
 | 871-1047 | CSV | Uses a CSV-specific lock and dedicated connection for file I/O; configuration restores the previous setting if import/export fails. |
-| 1049-1126 | Gmail | Reads Keychain before locking SQLite, stores configuration, starts/finishes OAuth, polls, and confirms matches. |
-| 1128-1196 | runner/settings/window | Starts guarded jobs operations, reads/writes app settings, and shows/focuses the webview window. |
+| 1049-1117 | runner/settings/window | Starts guarded jobs operations, reads/writes app settings, and shows/focuses the webview window. |
 
 ## 5. Job domain rules
 
@@ -240,7 +235,7 @@ This module owns SQL queries and business rules, leaving page components and Tau
 
 `check_active.rs` combines that safe result with persistence: fetch the posting state, compare it with the prior state, and write timestamps/results/events. `metadata.rs` uses the same guarded network path to extract a preview title/company/description. `board_discovery.rs` recognizes only valid Greenhouse, Lever, Ashby, and conventional `/careers` URL forms.
 
-## 6. Monitoring: ATS boards, careers pages, Gmail
+## 6. Monitoring: ATS Boards And Careers Pages
 
 ### ATS watches and careers pages
 
@@ -266,23 +261,6 @@ sequenceDiagram
 - `ats/sync.rs:56-263` separates the remote fetch from `apply_watch_sync`, which updates failure state, inserts new external IDs once, and tracks roles missing from a sync.
 - `ats/careers.rs:10-55` strips volatile HTML content, normalizes text, and hashes a versioned representation.
 - `ats/careers.rs:57-176` compares the new hash with the last snapshot and creates a pending review only when content changed.
-
-### Gmail
-
-```mermaid
-flowchart TD
-  CFG[Client ID, secret, redirect URI in app_settings] --> START[begin_gmail_oauth]
-  START --> LOOP[Bind 127.0.0.1 ephemeral callback listener]
-  LOOP --> BROWSER[Open Google authorization URL]
-  BROWSER --> CODE[Callback supplies code + state]
-  CODE --> TOKEN[Exchange code and store refresh token in macOS Keychain]
-  TOKEN --> POLL[poll_gmail_matches]
-  POLL --> MATCH[Classify messages against jobs]
-  MATCH --> PENDING[Pending email_matches]
-  PENDING --> TRIAGE[User confirms job or dismisses]
-```
-
-`gmail/oauth.rs:63-108` reads/stores config and manages the Keychain entry. Lines 115-220 generate PKCE/state, bind the loopback listener, and create the authorization URL. Lines 221-346 complete the exchange or refresh an access token without putting the refresh token in SQLite. `gmail/poll.rs:14-266` locks polling, reads messages with short-lived connections around awaits, classifies candidates, and writes deduplicated pending matches. `confirm_email_match` (289-335) lets the user resolve a match to a job.
 
 ## 7. Documents and the CSV mirror
 
@@ -316,7 +294,7 @@ flowchart LR
 | 46-65 | Opens a runner-owned WAL connection and obtains an exclusive file lock, preventing a second process from running the cycle. |
 | 73-140 | Fetches every posting with at most four concurrent requests, each capped at 30 seconds; writes results as requests finish. |
 | 143-154 | Wraps only the all-postings operation in the cross-process runner lock. |
-| 157-365 | Runs the ordered cycle under one lock: posting checks → ATS watch sync (two concurrent requests) → careers pages (four) → Gmail when connected → locked CSV sync. It returns one JSON summary and writes start/end log markers. |
+| 157-344 | Runs the ordered cycle under one lock: posting checks → ATS watch sync (two concurrent requests) → careers pages (four) → locked CSV sync. It returns one JSON summary and writes start/end log markers. |
 | 368-381 | Provides the headless `--run-jobs` entry point used by LaunchAgent. |
 
 ### CLI
@@ -340,7 +318,7 @@ flowchart LR
 
 `src-tauri/src/error.rs:3-15` defines application errors. Its `Serialize` implementation (17-24) converts every error to the message Tauri returns to TypeScript. `map_sqlite` (40-50) turns SQLite busy/locked errors into the actionable `database busy; retry shortly` message.
 
-The Rust unit tests live beside their modules and exercise migration, URL normalization/discovery, safe-fetch restrictions, CSV merge behavior, document validation, ATS parsing/sync, Gmail classification, runner behavior, service rules, and CLI parsing/CRUD. The six desktop Vitest files focus on pure UI helpers and testable client behaviors. Run the checks from the repository root:
+The Rust unit tests live beside their modules and exercise migration, URL normalization/discovery, safe-fetch restrictions, CSV merge behavior, document validation, ATS parsing/sync, runner behavior, service rules, and CLI parsing/CRUD. The six desktop Vitest files focus on pure UI helpers and testable client behaviors. Run the checks from the repository root:
 
 ```bash
 npm test
@@ -358,12 +336,12 @@ Use this as the short index for files not expanded above.
 | Desktop models/API | `lib/schema.ts`, `lib/api.ts`, `lib/ui.ts`, `lib/utils.ts` | Shared wire types, command calls, labels/colors, and formatting. |
 | Job UI | `pages/JobsPage.tsx`, `NewJobPage.tsx`, `JobDetailPage.tsx`, `components/JobsBoardView.tsx`, `JobDetailClient.tsx`, `FavoriteButton.tsx` | Lists, board, creation, detail editing, and favorite controls. |
 | Company UI | `pages/CompaniesPage.tsx`, `CompanyDetailPage.tsx`, `components/CompaniesClient.tsx`, `components/companies/*`, `lib/companies-ui.ts`, `lib/use-company-actions.ts` | Company list/detail, watch controls, new-role triage, and presentation rules. |
-| Document/Gmail/settings UI | `pages/DocumentsPage.tsx`, `GmailPage.tsx`, `SettingsPage.tsx`, matching client components | Library import, Gmail workflow, CSV and monitoring preferences. |
+| Document/settings UI | `pages/DocumentsPage.tsx`, `SettingsPage.tsx`, matching client components | Library import, CSV, and monitoring preferences. |
 | UI async helpers | `use-job-url-preview.ts`, `job-url-preview.ts`, `use-pending-actions.ts`, `use-latest-async.ts` | Race-safe previews/loading and keyed pending-action feedback. |
 | Rust app core | `main.rs`, `lib.rs`, `models.rs`, `error.rs`, `util.rs` | Process selection, Tauri builder, JSON models, errors, IDs/URLs/timestamps. |
 | Rust persistence | `db/paths.rs`, `db/mod.rs`, `db/migrate.rs`, `companies.rs`, `documents.rs` | Path policy, connections/transactions, schema, company records, document library. |
 | Rust jobs | `jobs/service.rs`, `check_active.rs`, `metadata.rs`, `board_discovery.rs`, `safe_fetch.rs`, `csv*.rs` | Job rules, guarded network fetches, URL detection, and CSV synchronization. |
-| Rust external integrations | `ats/*.rs`, `gmail/*.rs`, `runner.rs` | Provider parsing/sync, OAuth/polling/classification, and scheduled work. |
+| Rust external integrations | `ats/*.rs`, `runner.rs` | Provider parsing/sync and scheduled work. |
 | Terminal and macOS tools | `cli/*.rs`, `scripts/*.ts` | Clap command interface, output formatting, app rebuilding, CLI symlinks, LaunchAgent, and git hooks. |
 
 ## When you change the app

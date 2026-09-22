@@ -7,11 +7,11 @@
 | Layer | Primary locations | Current responsibility |
 | --- | --- | --- |
 | Route/UI tree | `desktop/src/App.tsx`, `desktop/src/pages/*` | Each route owns its own fetch lifecycle and page-local state. |
-| Interactive state | `desktop/src/components/JobDetailClient.tsx`, `CompaniesClient.tsx`, `GmailClient.tsx`, `CompanyWatchAutomation.tsx` | Form drafts, busy/error state, and mutation follow-up reloads. There is no shared query cache or request coordinator. |
+| Interactive state | `desktop/src/components/JobDetailClient.tsx`, `CompaniesClient.tsx`, `CompanyWatchAutomation.tsx` | Form drafts, busy/error state, and mutation follow-up reloads. There is no shared query cache or request coordinator. |
 | UI-to-backend boundary | `desktop/src/lib/api.ts` | Thin, direct `invoke` wrappers; no cancellation, invalidation, pagination, or mutation serialization. |
 | Tauri command layer | `src-tauri/src/commands/mod.rs` | Commands make synchronous `with_db` calls around a single in-process SQLite connection, while network work is generally separated from the mutex. |
-| Data/state layer | `src-tauri/src/jobs/service.rs`, `companies.rs`, `documents.rs`, `ats/sync.rs`, `gmail/poll.rs` | SQLite reads/writes, watch sync, document import/attach, and Gmail classification. |
-| Background work | `src-tauri/src/runner.rs`, `src-tauri/src/jobs/csv.rs` | LaunchAgent/manual runner, posting checks, ATS/careers/Gmail processing, and CSV synchronization. |
+| Data/state layer | `src-tauri/src/jobs/service.rs`, `companies.rs`, `documents.rs`, `ats/sync.rs` | SQLite reads/writes, watch sync, and document import/attach. |
+| Background work | `src-tauri/src/runner.rs`, `src-tauri/src/jobs/csv.rs` | LaunchAgent/manual runner, posting checks, ATS/careers processing, and CSV synchronization. |
 
 ## Prioritized action plan
 
@@ -81,7 +81,7 @@
 
 **Required changes:**
 
-1. Define transactional service methods for `create job + optional watch`, `attach/import document + event`, `watch sync`, `careers snapshot + review`, and Gmail match + job event.
+1. Define transactional service methods for `create job + optional watch`, `attach/import document + event`, `watch sync`, and `careers snapshot + review`.
 2. Use a SQLite transaction for all database writes in each operation. For document import, write to a uniquely named temporary file, execute the transaction, then atomically move it into place; remove the temporary/final file on DB failure. Treat a failed final move as a recoverable, surfaced consistency error.
 3. Add failure-injection tests for the second and final write of each operation, asserting neither partial DB state nor orphaned file remains.
 
@@ -91,7 +91,7 @@
 - In `create_job_with_validator`, validate/fetch outside the DB lock as today, then create/reuse company, create the job, write its `created` event, and insert the optional watch inside one transaction. Add a database uniqueness constraint for normalized `(company_id, provider, board_slug)` so the idempotency guarantee does not depend on a prior read.
 - For attachment flows, verify the job and document exist, insert `job_documents`, and append `document_attached` inside the same transaction. Add a unique constraint appropriate to the product rule—usually `(job_id, document_id, kind)`—to prevent accidental duplicate attachment clicks.
 - For new document bytes, write to `documents/.tmp/<uuid>` first. Insert the DB record in a transaction, commit, then rename to the content-addressed final name. If rename fails, delete/compensate the DB row in a short recovery transaction and report the failure; startup maintenance should purge old temporary files and flag rows whose file is missing.
-- In watch, careers, and Gmail workflows, collect remote data before opening the write transaction. Then perform every dependent insert/update, including success/failure bookkeeping and job events, in one short transaction. This prevents a network await from holding a write lock.
+- In watch and careers workflows, collect remote data before opening the write transaction. Then perform every dependent insert/update, including success/failure bookkeeping and job events, in one short transaction. This prevents a network await from holding a write lock.
 - Add a test-only fault hook around each statement/file move; assert rollback leaves no company/job/watch/event/attachment residue and no final or temporary document file.
 
 **Acceptance check:** Each mutation is all-or-nothing from the user's perspective, including its related history/audit event.
@@ -100,7 +100,7 @@
 
 **Categories:** Data consistency, UI usability, performance
 
-**Evidence:** `JobsPage` loads three requests at once and unconditionally commits their result (`desktop/src/pages/JobsPage.tsx:45-68`); the route changes filters via URL (`141-152`). `JobDetailPage` unconditionally sets `loading` then fetches detail plus the full document library (`18-35`), and each successful save/check/attachment calls that full reload (`63-78`, `114-121`). The same load/unmount pattern appears in Companies, Company Detail, Documents, and Gmail pages. In contrast, `CompanyWatchAutomation` correctly uses a cancellation guard (`55-84`).
+**Evidence:** `JobsPage` loads three requests at once and unconditionally commits their result (`desktop/src/pages/JobsPage.tsx:45-68`); the route changes filters via URL (`141-152`). `JobDetailPage` unconditionally sets `loading` then fetches detail plus the full document library (`18-35`), and each successful save/check/attachment calls that full reload (`63-78`, `114-121`). The same load/unmount pattern appears in Companies, Company Detail, and Documents pages. In contrast, `CompanyWatchAutomation` correctly uses a cancellation guard (`55-84`).
 
 **Root cause:** Page-local fetches have no request identity, abort signal, or latest-response guard. The detail page treats every background refresh as an initial load, unmounting its editable form.
 
@@ -153,7 +153,7 @@
 
 **Categories:** Data consistency, UI usability
 
-**Evidence:** The runner does use a cross-process file lock (`src-tauri/src/runner.rs:50-61`), but manual `sync_watch` (`src-tauri/src/commands/mod.rs:545-558`) and `gmail_poll` (`817-820`) do not participate. The stated in-memory lock in the two runner commands is dropped immediately at the end of its block (`839-875`), so it does not provide the advertised in-process single flight. Gmail’s read-before-insert sequence (`src-tauri/src/gmail/poll.rs:79-92`, `182-237`) can race with a manual poll or runner poll; the unique key then turns a benign duplicate into a failed poll.
+**Evidence:** The runner does use a cross-process file lock (`src-tauri/src/runner.rs:50-61`), but manual `sync_watch` (`src-tauri/src/commands/mod.rs:545-558`) does not participate. The stated in-memory lock in the two runner commands is dropped immediately at the end of its block (`839-875`), so it does not provide the advertised in-process single flight.
 
 **Root cause:** Concurrency ownership is split across an ineffective in-memory guard, a runner-only file lock, and independent commands that mutate the same tables.
 
@@ -161,26 +161,25 @@
 
 **Required changes:**
 
-1. Create keyed operation coordinators for `runner`, each `watch:{id}`, and `gmail-poll`; retain the guard for the entire future and have all entry points use the same coordinator/file lock.
-2. Make writes idempotent at the database boundary (`INSERT ... ON CONFLICT DO NOTHING` where appropriate) and wrap the Gmail batch in a transaction. On a duplicate message, continue rather than failing the entire poll.
+1. Create keyed operation coordinators for `runner` and each `watch:{id}`; retain the guard for the entire future and have all entry points use the same coordinator/file lock.
+2. Make writes idempotent at the database boundary (`INSERT ... ON CONFLICT DO NOTHING` where appropriate).
 3. Return a typed "already running" result with enough status to let the UI display the active operation instead of a generic error.
-4. Add integration tests that launch concurrent runner/manual-poll and manual/runner-watch paths.
+4. Add integration tests that launch concurrent manual/runner-watch paths.
 
 **Implementation detail:**
 
 - Replace the scoped `runner_lock.try_lock()` blocks with a guard stored across the awaited call (or, more simply, rely on one shared file-lock helper whose returned file remains alive until the operation completes). The current guards are dropped before `run_jobs_cycle`/`check_all_postings` begins.
-- Establish lock identities under the data directory: one cycle lock, one Gmail lock, and one per-watch lock derived from a safe watch-id hash. `run_jobs_cycle`, `check_all_postings`, `sync_watch`, and `gmail_poll` must acquire the relevant lock in a documented, consistent order to avoid deadlocks.
-- In `poll_gmail_matches`, use `INSERT ... ON CONFLICT(gmail_message_id) DO NOTHING`, inspect affected-row count, and only create the `job_events` record when the email match insert succeeded. Execute the complete write batch and checkpoint update in one transaction.
-- Convert operation conflicts into a structured response/error code such as `{ code: "operation_in_progress", operation: "gmail-poll", startedAt }`. Map that in `api.ts`, and show a disabled button plus current operation text instead of an action-failed alert.
+- Establish lock identities under the data directory: one cycle lock and one per-watch lock derived from a safe watch-id hash. `run_jobs_cycle`, `check_all_postings`, and `sync_watch` must acquire the relevant lock in a documented, consistent order to avoid deadlocks.
+- Convert operation conflicts into a structured response/error code such as `{ code: "operation_in_progress", operation: "watch-sync", startedAt }`. Map that in `api.ts`, and show a disabled button plus current operation text instead of an action-failed alert.
 - Test with two independent SQLite connections and two concurrent tasks, including one that crosses the manual/scheduled boundary. Assert one task performs the work and the other receives the typed in-progress result without data loss.
 
-**Acceptance check:** Only one logical sync/poll runs per key; a duplicate Gmail message cannot fail an otherwise valid cycle.
+**Acceptance check:** Only one logical sync runs per key.
 
 ### P1 — Bound background network work and avoid linear cycle duration
 
 **Categories:** Performance, UI usability
 
-**Evidence:** The jobs runner checks every posting sequentially (`src-tauri/src/runner.rs:69-103`), then each watch (`139-171`) and careers page (`173-212`) sequentially. A cycle duration is therefore the sum of every remote request. The Gmail poll then fetches up to 50 messages one at a time (`src-tauri/src/gmail/poll.rs:47-180`). Progress is event-only and the main UI does not refresh when the cycle completes.
+**Evidence:** The jobs runner checks every posting sequentially (`src-tauri/src/runner.rs:69-103`), then each watch (`139-171`) and careers page (`173-212`) sequentially. A cycle duration is therefore the sum of every remote request. Progress is event-only and the main UI does not refresh when the cycle completes.
 
 **Root cause:** Network I/O is intentionally safe with respect to the DB mutex but has no bounded concurrency or time budget.
 
@@ -196,7 +195,7 @@
 **Implementation detail:**
 
 - Refactor `runner.rs` into a two-phase pattern for postings, watch syncs, and careers checks: snapshot eligible IDs/URLs, fetch with a shared semaphore, then apply each completed outcome using a short transaction/connection operation. Do not share a mutable `rusqlite::Connection` through concurrent fetch futures.
-- Start conservatively (for example 4 concurrent posting/careers fetches, 2 concurrent ATS/Gmail message fetches) and make limits constants/configuration with rate-limit-aware backoff. Preserve result ordering in summaries by attaching each result to its original ID rather than relying on completion order.
+- Start conservatively (for example 4 concurrent posting/careers fetches and 2 concurrent ATS fetches) and make limits constants/configuration with rate-limit-aware backoff. Preserve result ordering in summaries by attaching each result to its original ID rather than relying on completion order.
 - Wrap each remote call in `tokio::time::timeout`; classify timeouts, HTTP errors, and parse errors separately. A failed item must yield a result and progress update, not abort a healthy batch unless the failure is global (for example invalid credentials).
 - Emit a final `jobs-runner-progress` event that includes a cycle id, phase, success/failure counts, and `done` state. Pages/listeners should invalidate affected queries only for the matching completed cycle; `RunJobsButton` and `JobsPage` must not treat another operation's events as their own.
 - Use injectable async fetch traits/test functions to measure maximum observed parallelism and prove the set limit is never exceeded.
@@ -213,7 +212,7 @@
 
 **Required changes:**
 
-1. Add cursor/limit pagination to jobs, documents, Gmail pending matches, and the company list; request a small `newFromWatch` preview separately with a limit of five.
+1. Add cursor/limit pagination to jobs, documents, and the company list; request a small `newFromWatch` preview separately with a limit of five.
 2. Split dashboard summary/count/activity from list rows or return them once from one purpose-built dashboard command. Select only fields each view renders.
 3. Add migration indexes for queried foreign keys and sort/filter paths, including `job_events(job_id, type)`, `job_events(occurred_at)`, `jobs(company_id, updated_at)`, `jobs(status, updated_at)`, `jobs(is_new_from_watch, updated_at)`, `job_documents(document_id)`, `job_documents(job_id)`, `company_watches(company_id)`, and pending-review/pending-email predicates. Confirm choices with `EXPLAIN QUERY PLAN` against realistic data.
 4. Replace per-company/per-document loops with grouped joins/aggregates; let SQLite bucket weekly activity where practical.
@@ -222,8 +221,8 @@
 **Implementation detail:**
 
 - Extend `JobFilters` with `limit` and a stable cursor such as `(updated_at, id)`. Query with `ORDER BY updated_at DESC, id DESC` and return `{ jobs, nextCursor }`; carry the same request shape through `desktop/src/lib/api.ts` and a "load more" or virtualized list. Keep the watch preview endpoint explicitly capped at five rather than fetching all discoveries and slicing in React.
-- Add a dedicated `get_jobs_dashboard` command that returns counts, seven-day activity, and the five newest watch discoveries. `list_jobs_cmd` should return only the current page. On Gmail, request enough job choices for the interaction deliberately (searchable server-side picker for large sets) rather than loading every job.
-- Create migrations with `CREATE INDEX IF NOT EXISTS` and verify their order against actual predicates before adding all suggested indexes blindly. Include `EXPLAIN QUERY PLAN` regression assertions/seeds for the list, count, activity, company, documents, and pending-email queries. Remove redundant indexes if a composite one covers the same leading columns.
+- Add a dedicated `get_jobs_dashboard` command that returns counts, seven-day activity, and the five newest watch discoveries. `list_jobs_cmd` should return only the current page.
+- Create migrations with `CREATE INDEX IF NOT EXISTS` and verify their order against actual predicates before adding all suggested indexes blindly. Include `EXPLAIN QUERY PLAN` regression assertions/seeds for the list, count, activity, company, and documents queries. Remove redundant indexes if a composite one covers the same leading columns.
 - Rewrite `list_companies_with_watches` as either three grouped queries indexed by company id or one join folded into a map; rewrite document usage as a grouped query over `job_documents`. Aggregate weekly activity with SQLite date/group expressions where timezone semantics are explicitly specified and tested.
 - Choose search semantics first: use an escaped case-insensitive prefix field/index for simple type-ahead, or an FTS5 virtual table with synchronized insert/update/delete triggers for arbitrary token search. Keep query text debounced only after introducing search-on-change; the current submit-only filter does not need debounce.
 

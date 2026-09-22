@@ -5,7 +5,6 @@ mod companies;
 mod db;
 mod documents;
 mod error;
-mod gmail;
 mod jobs;
 mod models;
 mod runner;
@@ -103,12 +102,6 @@ pub fn run() {
             commands::csv_path_status,
             commands::csv_configure,
             commands::csv_reset_config,
-            commands::gmail_status,
-            commands::gmail_configure,
-            commands::gmail_connect,
-            commands::gmail_disconnect,
-            commands::gmail_poll,
-            commands::gmail_triage,
             commands::run_jobs_cycle_cmd,
             commands::check_all_postings_cmd,
             commands::get_data_dir,

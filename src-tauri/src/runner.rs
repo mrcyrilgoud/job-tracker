@@ -14,7 +14,6 @@ use crate::ats::sync::{apply_watch_sync, fetch_remote_jobs};
 use crate::db::migrate;
 use crate::db::paths::DataPaths;
 use crate::error::{AppError, AppResult};
-use crate::gmail::{is_gmail_connected, poll_gmail_matches};
 use crate::jobs::check_active::{apply_posting_check, fetch_posting_state};
 use crate::jobs::csv::sync_jobs_csv_with_disk;
 use crate::jobs::csv_config::{active_csv_path, csv_lock_path};
@@ -302,28 +301,7 @@ pub async fn run_jobs_cycle(
         },
     );
 
-    // 4) Gmail
-    let gmail = if is_gmail_connected().unwrap_or(false) {
-        emit_progress(
-            app.as_ref(),
-            RunnerProgress {
-                stage: "gmail".into(),
-                message: "Polling Gmail".into(),
-                current: 0,
-                total: 1,
-                done: false,
-            },
-        );
-        // Dedicated connection avoids holding shared UI mutex; this conn is runner-owned.
-        match poll_gmail_matches(&paths.db_path, &paths.gmail_poll_lock_path).await {
-            Ok(v) => v,
-            Err(e) => serde_json::json!({ "error": e.to_string() }),
-        }
-    } else {
-        serde_json::json!({ "skipped": true })
-    };
-
-    // 5) CSV sync
+    // 4) CSV sync
     emit_progress(
         app.as_ref(),
         RunnerProgress {
@@ -343,7 +321,6 @@ pub async fn run_jobs_cycle(
         "postings": posting_results.len(),
         "watches": watch_results,
         "careers": careers_results,
-        "gmail": gmail,
         "csv": {
             "imported": csv.0,
             "exported": csv.1

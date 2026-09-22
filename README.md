@@ -1,6 +1,6 @@
 # Job Tracker
 
-Personal local Mac app for tracking job applications, resumes/cover letters, company ATS watches, and Gmail updates.
+Personal local Mac app for tracking job applications, resumes/cover letters, and company ATS watches.
 
 The app is a **Tauri 2** desktop shell (`desktop/` UI + `src-tauri/` Rust backend).
 
@@ -73,7 +73,7 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 2. **Jobs CSV** — `jobs.csv` mirrors editable fields; rewritten after changes and by the jobs runner
 3. **Documents** — import PDF/DOCX/TXT; open with the system viewer (`shell.open`), not raw web paths
 4. **Companies / watches** — Greenhouse, Lever, Ashby board sync; careers pages produce review items
-5. **Gmail** — readonly OAuth with PKCE; refresh token in macOS Keychain (`job-tracker-local` / `gmail-refresh-token`)
+5. **Settings** — choose a CSV mirror path and tune watch/location preferences
 
 ### Jobs CSV
 
@@ -110,31 +110,16 @@ npm run jobs
 
 The runner is single-instance (flock on `jobs-runner.lock`) and emits `jobs-runner-progress` events when started from the UI.
 
-## Gmail setup
-
-Default OAuth is **loopback**, not a custom URL scheme:
-
-1. Create a Google Cloud OAuth client (Desktop recommended)
-2. Add a redirect URI of the form `http://127.0.0.1:<port>/callback`  
-   The app binds an ephemeral port and shows the exact redirect URI after you click Connect — add that URI (or a small port range) in Google Cloud.
-3. In the app’s **Gmail** screen, paste client ID/secret, then Connect (opens the system browser)
-
-Keychain service/account: `job-tracker-local` / `gmail-refresh-token`.  
-If a notarized/sandboxed build cannot see an older Keychain item, reconnect Gmail once.
-
 Optional env vars:
 
 ```bash
-GMAIL_CLIENT_ID=...
-GMAIL_CLIENT_SECRET=...
-# GMAIL_REDIRECT_URI is usually set automatically to the loopback listener
 JOB_TRACKER_DATA_DIR=/absolute/path/to/data
 ```
 
 ## Tests
 
 ```bash
-npm test                 # Rust unit tests (CSV, classify, safe_fetch, ATS parsers, …)
+npm test                 # Rust unit tests (CSV, safe_fetch, ATS parsers, …)
 npm run test:desktop     # Desktop Vitest suite
 npm run desktop:build    # Vite UI typecheck + build
 ```
@@ -149,7 +134,7 @@ npm run desktop:build    # Vite UI typecheck + build
 | `npm run hooks:install` | Install local post-commit hook (background rebuild on app-code commits) |
 | `npm run cli -- <cmd>` | Run Job Tracker CLI subcommands (e.g. `npm run cli -- list`, `stats`) |
 | `npm run cli:install` | Symlink `jt` and `job-tracker` into `~/.local/bin/` for global terminal access |
-| `npm run jobs` | One-shot posting / ATS / careers / Gmail / CSV cycle |
+| `npm run jobs` | One-shot posting / ATS / careers / CSV cycle |
 | `npm run jobs:install` | Write/retarget the LaunchAgent plist |
 | `npm test` | Rust unit tests |
 | `npm run test:desktop` | Desktop UI unit tests |
@@ -191,7 +176,7 @@ jt watches dismiss <job_id>
 
 ```text
 desktop/          Vite + React + Tailwind SPA
-src-tauri/        Rust/Tauri backend (rusqlite, keyring, reqwest)
+src-tauri/        Rust/Tauri backend (rusqlite, reqwest)
 scripts/          LaunchAgent + rebuild + git hook installers
 data/             Local SQLite + documents + CSV (gitignored)
 ```

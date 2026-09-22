@@ -128,8 +128,6 @@ Talk like a helpful person. Humanize every machine detail:
 - Watches: "Syncing automatically" / "Needs attention" instead of "consecutive sync failures".
   Keep board slug and other plumbing as a small, de-emphasized detail — visible if you look,
   never shouting.
-- Gmail: explain in plain language what connecting does; tuck OAuth/redirect-URI/Keychain
-  specifics under a quiet "Technical details" area rather than in the headline.
 
 ## Accessibility
 

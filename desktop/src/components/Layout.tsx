@@ -4,7 +4,6 @@ import {
   BriefcaseIcon,
   BuildingIcon,
   DocumentIcon,
-  MailIcon,
   MoonIcon,
   SettingsIcon,
   SunIcon,
@@ -16,7 +15,6 @@ const nav = [
   { href: "/", label: "Jobs", Icon: BriefcaseIcon },
   { href: "/documents", label: "Documents", Icon: DocumentIcon },
   { href: "/companies", label: "Companies", Icon: BuildingIcon },
-  { href: "/gmail", label: "Gmail", Icon: MailIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];
 

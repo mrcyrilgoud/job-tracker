@@ -15,7 +15,6 @@ use crate::companies;
 use crate::db::AppState;
 use crate::documents;
 use crate::error::AppResult;
-use crate::gmail;
 use crate::jobs::board_discovery::discover_from_url;
 use crate::jobs::check_active::{apply_posting_check, fetch_posting_state, load_job_check_context};
 use crate::jobs::csv::{export_jobs_csv, get_jobs_csv_status, import_jobs_csv, ImportMode};
@@ -1044,85 +1043,6 @@ fn restore_csv_config(
         }
         Ok(())
     })
-}
-
-#[tauri::command]
-pub async fn gmail_status(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
-    // Read the macOS Keychain *before* acquiring the SQLite mutex.
-    // Keychain IPC can take 50–500 ms; holding with_db during that window
-    // would block every other DB read/write across the app.
-    let connected = gmail::is_gmail_connected()?;
-    state.with_db(|conn| {
-        let config = gmail::get_gmail_config(conn)?;
-        let pending = gmail::list_pending_email_matches(conn)?;
-        Ok(serde_json::json!({
-            "connected": connected,
-            "configured": config.get("clientId").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false),
-            "redirectUri": config.get("redirectUri"),
-            "pending": pending
-        }))
-    })
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GmailConfigArgs {
-    pub client_id: String,
-    pub client_secret: String,
-    pub redirect_uri: Option<String>,
-}
-
-#[tauri::command]
-pub async fn gmail_configure(state: State<'_, AppState>, input: GmailConfigArgs) -> AppResult<()> {
-    state.with_db(|conn| {
-        gmail::save_gmail_config(
-            conn,
-            &input.client_id,
-            &input.client_secret,
-            input.redirect_uri.as_deref(),
-        )
-    })
-}
-
-#[tauri::command]
-pub async fn gmail_connect(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<serde_json::Value> {
-    let started = state.with_db(|conn| gmail::begin_gmail_oauth(conn))?;
-    if let Some(url) = started.get("url").and_then(|v| v.as_str()) {
-        app.shell()
-            .open(url.to_string(), None)
-            .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-    }
-    let paths = state.paths.clone();
-    let result = gmail::complete_gmail_oauth_from_pending(&paths.db_path).await?;
-    Ok(result)
-}
-
-#[tauri::command]
-pub async fn gmail_disconnect() -> AppResult<()> {
-    gmail::disconnect_gmail()
-}
-
-#[tauri::command]
-pub async fn gmail_poll(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
-    gmail::poll_gmail_matches(&state.paths.db_path, &state.paths.gmail_poll_lock_path).await
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TriageArgs {
-    pub match_id: String,
-    pub job_id: Option<String>,
-}
-
-#[tauri::command]
-pub async fn gmail_triage(
-    state: State<'_, AppState>,
-    input: TriageArgs,
-) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| gmail::confirm_email_match(conn, &input.match_id, input.job_id.as_deref()))
 }
 
 #[tauri::command]

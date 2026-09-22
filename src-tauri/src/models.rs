@@ -97,22 +97,6 @@ pub struct CareersPageReview {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EmailMatch {
-    pub id: String,
-    pub job_id: Option<String>,
-    pub gmail_message_id: String,
-    pub thread_id: Option<String>,
-    pub subject: Option<String>,
-    pub snippet: Option<String>,
-    pub from_address: Option<String>,
-    pub received_at: Option<String>,
-    pub confidence: String,
-    pub triage_status: String,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct JobListItem {
     pub job: Job,
     pub company_name: String,

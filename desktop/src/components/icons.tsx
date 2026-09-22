@@ -47,15 +47,6 @@ export function BuildingIcon({ size = 16, className }: IconProps) {
   );
 }
 
-export function MailIcon({ size = 16, className }: IconProps) {
-  return (
-    <svg {...svgProps(size)} className={className}>
-      <rect x="3" y="5" width="18" height="14" rx="2" />
-      <path d="m4 7 8 5 8-5" />
-    </svg>
-  );
-}
-
 export function BookmarkIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>

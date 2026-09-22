@@ -352,12 +352,6 @@ export function createFixtureBackend() {
     run_jobs_cycle_cmd: () => ({ ok: true }),
     check_all_postings_cmd: () => ({ ok: true }),
     list_documents: () => ({ documents: [] }),
-    gmail_status: () => ({
-      connected: false,
-      configured: false,
-      redirectUri: "http://127.0.0.1:8765/callback",
-      pending: [],
-    }),
   };
 
   async function invoke(cmd: string, args?: Record<string, unknown>) {

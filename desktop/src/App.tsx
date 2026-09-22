@@ -8,7 +8,6 @@ import { ThemeProvider } from "@/lib/ThemeContext";
 import { CompaniesPage } from "@/pages/CompaniesPage";
 import { CompanyDetailPage } from "@/pages/CompanyDetailPage";
 import { DocumentsPage } from "@/pages/DocumentsPage";
-import { GmailPage } from "@/pages/GmailPage";
 import { JobDetailPage } from "@/pages/JobDetailPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { NewJobPage } from "@/pages/NewJobPage";
@@ -62,7 +61,6 @@ export function App() {
             <Route path="documents" element={<DocumentsPage />} />
             <Route path="companies" element={<CompaniesPage />} />
             <Route path="companies/:id" element={<CompanyDetailPage />} />
-            <Route path="gmail" element={<GmailPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

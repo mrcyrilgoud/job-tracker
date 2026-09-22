@@ -82,22 +82,6 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       used_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS email_matches (
-      id TEXT PRIMARY KEY NOT NULL,
-      job_id TEXT REFERENCES jobs(id),
-      gmail_message_id TEXT NOT NULL,
-      thread_id TEXT,
-      subject TEXT,
-      snippet TEXT,
-      from_address TEXT,
-      received_at TEXT,
-      confidence TEXT NOT NULL,
-      triage_status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS email_matches_message_uidx ON email_matches(gmail_message_id);
-
     CREATE TABLE IF NOT EXISTS careers_page_snapshots (
       id TEXT PRIMARY KEY NOT NULL,
       company_id TEXT NOT NULL REFERENCES companies(id),
@@ -137,6 +121,21 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS job_documents_job_id_idx ON job_documents(job_id);
     CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);
     "#,
+    )?;
+
+    conn.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS email_matches;
+        DELETE FROM app_settings
+        WHERE key IN (
+          'gmail_client_id',
+          'gmail_client_secret',
+          'gmail_redirect_uri',
+          'gmail_oauth_state',
+          'gmail_oauth_verifier',
+          'gmail_history_checkpoint'
+        );
+        "#,
     )?;
 
     // `CREATE TABLE IF NOT EXISTS` does not evolve databases created by older

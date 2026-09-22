@@ -66,7 +66,7 @@ export function RunJobsButton() {
         onClick={() => void run()}
         disabled={busy}
         className="btn btn-secondary text-xs"
-        title="Run posting checks, watch sync, Gmail poll, and CSV export"
+        title="Run posting checks, watch sync, careers checks, and CSV export"
       >
         {busy ? "Running…" : "Run jobs"}
       </button>

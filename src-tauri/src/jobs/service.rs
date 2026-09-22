@@ -1027,12 +1027,6 @@ pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
     )
     .map_err(map_sqlite)?;
 
-    conn.execute(
-        "UPDATE email_matches SET job_id = NULL WHERE job_id = ?1",
-        params![job_id],
-    )
-    .map_err(map_sqlite)?;
-
     conn.execute("DELETE FROM jobs WHERE id = ?1", params![job_id])
         .map_err(map_sqlite)?;
 

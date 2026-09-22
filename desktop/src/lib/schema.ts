@@ -113,20 +113,6 @@ export type JobDocument = {
   usedAt: string;
 };
 
-export type EmailMatch = {
-  id: string;
-  jobId: string | null;
-  gmailMessageId: string;
-  threadId: string | null;
-  subject: string | null;
-  snippet: string | null;
-  fromAddress: string | null;
-  receivedAt: string | null;
-  confidence: string;
-  triageStatus: string;
-  createdAt: string;
-};
-
 export type CareersPageReview = {
   id: string;
   companyId: string;

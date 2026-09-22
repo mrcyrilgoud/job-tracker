@@ -80,20 +80,6 @@ export type ImportDocumentInput = {
   kind?: DocumentKind;
 };
 
-export type GmailStatus = {
-  connected: boolean;
-  configured: boolean;
-  redirectUri: string;
-  pending: Array<{
-    id: string;
-    subject: string | null;
-    snippet: string | null;
-    fromAddress: string | null;
-    confidence: string;
-    jobId: string | null;
-  }>;
-};
-
 export type CsvConfig = {
   path: string;
   defaultPath: string;
@@ -218,20 +204,6 @@ export const api = {
     call<CsvConfig>("csv_configure", { input: { path, mode } }),
 
   resetCsvConfig: () => call<CsvConfig>("csv_reset_config"),
-
-  gmailStatus: () => call<GmailStatus>("gmail_status"),
-
-  gmailConfigure: (clientId: string, clientSecret: string, redirectUri: string) =>
-    call<{ ok: boolean }>("gmail_configure", { clientId, clientSecret, redirectUri }),
-
-  gmailConnect: () => call<{ url: string }>("gmail_connect"),
-
-  gmailDisconnect: () => call<{ ok: boolean }>("gmail_disconnect"),
-
-  gmailPoll: () => call<{ linked: number; triaged: number }>("gmail_poll"),
-
-  gmailTriage: (matchId: string, jobId: string | null) =>
-    call<{ ok: boolean }>("gmail_triage", { matchId, jobId }),
 
   runJobsCycle: () => call<Record<string, unknown>>("run_jobs_cycle_cmd"),
 

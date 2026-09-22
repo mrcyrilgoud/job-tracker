@@ -12,7 +12,6 @@ pub struct DataPaths {
     pub jobs_csv_path: PathBuf,
     pub worker_log_path: PathBuf,
     pub runner_lock_path: PathBuf,
-    pub gmail_poll_lock_path: PathBuf,
 }
 
 impl DataPaths {
@@ -22,7 +21,6 @@ impl DataPaths {
         let jobs_csv_path = data_dir.join("jobs.csv");
         let worker_log_path = data_dir.join("jobs-worker.log");
         let runner_lock_path = data_dir.join("jobs-runner.lock");
-        let gmail_poll_lock_path = data_dir.join("gmail-poll.lock");
         Self {
             data_dir,
             db_path,
@@ -30,7 +28,6 @@ impl DataPaths {
             jobs_csv_path,
             worker_log_path,
             runner_lock_path,
-            gmail_poll_lock_path,
         }
     }
 
