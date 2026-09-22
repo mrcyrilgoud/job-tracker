@@ -5,7 +5,7 @@ use std::pin::Pin;
 
 use rusqlite::Connection;
 use serde::Deserialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_shell::ShellExt;
 
 use crate::ats;
@@ -1184,6 +1184,15 @@ pub async fn set_location_settings_cmd(
 ) -> AppResult<()> {
     let conn = state.db.lock();
     set_location_settings(&conn, &settings)
+}
+
+#[tauri::command]
+pub async fn show_main_window(window: WebviewWindow) -> AppResult<()> {
+    window
+        .show()
+        .map_err(|e| crate::error::AppError::from(e.to_string()))?;
+    let _ = window.set_focus();
+    Ok(())
 }
 
 #[allow(dead_code)]

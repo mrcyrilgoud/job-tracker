@@ -18,7 +18,9 @@
         "minWidth": 900,
         "minHeight": 600,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "visible": false,
+        "backgroundColor": "#faf8f4"
       }
     ],
     "security": {
@@ -27,7 +29,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app"],
     "macOS": {
       "minimumSystemVersion": "11.0"
     },

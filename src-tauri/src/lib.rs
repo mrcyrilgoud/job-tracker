@@ -52,9 +52,21 @@ pub fn run() {
 
             let state = AppState::open(paths)?;
             app.manage(state);
+
+            // Safety fallback: ensure the window is displayed even if the webview frontend
+            // encounters an unexpected issue before calling show_main_window.
+            if let Some(main_window) = app.get_webview_window("main") {
+                let win = main_window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    let _ = win.show();
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::show_main_window,
             commands::list_jobs_cmd,
             commands::get_jobs_dashboard,
             commands::preview_job_url,

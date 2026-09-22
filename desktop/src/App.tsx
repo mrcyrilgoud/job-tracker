@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import { Layout } from "@/components/Layout";
+import { api } from "@/lib/api";
 import { isDesktopShell } from "@/lib/tauri";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { CompaniesPage } from "@/pages/CompaniesPage";
@@ -39,6 +41,12 @@ function BrowserOnlyNotice() {
 }
 
 export function App() {
+  useEffect(() => {
+    if (isDesktopShell()) {
+      api.showMainWindow().catch(console.error);
+    }
+  }, []);
+
   if (!isDesktopShell()) {
     return <BrowserOnlyNotice />;
   }
