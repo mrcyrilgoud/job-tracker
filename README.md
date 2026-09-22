@@ -195,3 +195,9 @@ src-tauri/        Rust/Tauri backend (rusqlite, keyring, reqwest)
 scripts/          LaunchAgent + rebuild + git hook installers
 data/             Local SQLite + documents + CSV (gitignored)
 ```
+
+## Code walkthrough
+
+For a line-oriented explanation of the Tauri startup, React pages, Rust command bridge,
+SQLite schema, integrations, CSV synchronization, CLI, and hourly worker, see
+[`docs/CODE_WALKTHROUGH.md`](docs/CODE_WALKTHROUGH.md).
