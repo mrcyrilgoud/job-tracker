@@ -167,6 +167,10 @@ export function JobDetailClient({
         isFavorite: attempted.isFavorite,
       });
       const detail = result.detail;
+      if (attempted.status === "closed") {
+        onDeleted?.();
+        return;
+      }
       const baseline: Draft = {
         title: detail.job.title,
         companyName: detail.company.name,

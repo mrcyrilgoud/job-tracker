@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::service::{
-    add_job_event, create_job_from_url, get_job_by_id, update_job, UpdateJobInput,
+    add_job_event, create_job_from_url, delete_closed_jobs, delete_job, get_job_by_id, update_job,
+    UpdateJobInput,
 };
 use crate::models::{is_job_status, Job};
 use crate::util::{normalize_canonical_url, now_iso};
@@ -313,6 +314,7 @@ pub fn export_jobs_csv(
     csv_path: &Path,
     latest_note_overrides: Option<&HashMap<String, Option<String>>>,
 ) -> AppResult<ExportResult> {
+    delete_closed_jobs(conn)?;
     let sync = read_sync_state(csv_path);
     let rows = load_job_rows(conn)?;
     let mut next_rows = HashMap::new();
@@ -732,6 +734,18 @@ fn process_row(
 
     let existing = existing.unwrap();
     seen_job_ids.insert(existing.id.clone());
+
+    if csv_fields.status == "closed" {
+        if !dry_run {
+            delete_job(conn, &existing.id)?;
+        }
+        result.changes.push(serde_json::json!({
+            "action": "delete",
+            "jobId": existing.id,
+            "reason": "closed"
+        }));
+        return Ok(());
+    }
     let company_name = company_name_for_job(conn, &existing.company_id)?;
     let baseline = sync
         .rows
@@ -1024,5 +1038,34 @@ mod tests {
 
         let parsed_restored = parse_csv(&fs::read_to_string(&csv_path).unwrap());
         assert_eq!(parsed_restored[1][6], "applied");
+    }
+
+    #[test]
+    fn export_removes_legacy_closed_jobs_from_database_and_csv() {
+        let conn = test_connection();
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("jobs.csv");
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/legacy-closed",
+            "Legacy closed role",
+            Some("Acme"),
+            Some("applied"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE jobs SET status = 'closed' WHERE id = ?1",
+            params![job.id],
+        )
+        .unwrap();
+
+        let exported = export_jobs_csv(&conn, &csv_path, None).unwrap();
+
+        assert_eq!(exported.row_count, 0);
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
+        assert_eq!(parse_csv(&fs::read_to_string(csv_path).unwrap()).len(), 1);
     }
 }

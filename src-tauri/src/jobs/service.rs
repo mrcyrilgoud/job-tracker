@@ -101,6 +101,11 @@ pub fn create_job_from_url_with_careers(
     location: Option<&str>,
     careers_url: Option<&str>,
 ) -> AppResult<(Job, Company)> {
+    if status == Some("closed") {
+        return Err(AppError::from(
+            "Closed jobs are deleted and cannot be added to the pipeline",
+        ));
+    }
     let canonical_url = normalize_canonical_url(url).map_err(AppError::from)?;
     let existing: Option<String> = conn
         .query_row(
@@ -912,6 +917,14 @@ pub fn update_job(
         .status
         .clone()
         .unwrap_or_else(|| existing.status.clone());
+
+    if next_status == "closed" {
+        let mut detail =
+            get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+        detail.job.status = "closed".to_string();
+        delete_job(conn, job_id)?;
+        return Ok(detail);
+    }
     let next_applied = if let Some(applied) = &updates.applied_at {
         applied.clone()
     } else if next_status == "applied" && existing.applied_at.is_none() {
@@ -1033,6 +1046,21 @@ pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
     delete_untracked_empty_company(conn, &existing.company_id)?;
 
     Ok(())
+}
+
+/// Permanently remove legacy closed jobs so they cannot reappear in the app or CSV.
+pub fn delete_closed_jobs(conn: &Connection) -> AppResult<usize> {
+    let ids = conn
+        .prepare("SELECT id FROM jobs WHERE status = 'closed'")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(map_sqlite)?;
+
+    let count = ids.len();
+    for id in ids {
+        delete_job(conn, &id)?;
+    }
+    Ok(count)
 }
 
 /// Move a job out of the active pipeline into the archived status.
@@ -2101,5 +2129,34 @@ mod tests {
         let counts_after = get_pipeline_counts(&conn).unwrap();
         assert_eq!(counts_after.get("archived"), Some(&0));
         assert_eq!(counts_after.get("wishlist"), Some(&1));
+    }
+
+    #[test]
+    fn setting_status_to_closed_deletes_job() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/closed",
+            "Closed role",
+            Some("Acme"),
+            Some("applied"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let result = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                status: Some("closed".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.job.status, "closed");
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
     }
 }
