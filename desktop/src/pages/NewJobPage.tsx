@@ -7,6 +7,7 @@ import {
   formatJobSaveError,
   isConfirmedJobDiscovery,
   serializeConfirmedJobDiscovery,
+  watchOptionForJobUrlPreview,
 } from "@/lib/job-url-preview";
 import { jobStatuses, type JobStatus } from "@/lib/schema";
 import { jobStatusPresentation } from "@/lib/ui";
@@ -42,6 +43,8 @@ export function NewJobPage() {
     setCompanyName,
     setDescription,
   });
+  const watchEnabled = isConfirmedJobDiscovery(preview, confirmedDiscovery);
+  const watchOption = watchOptionForJobUrlPreview(preview, companyName);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -78,16 +81,21 @@ export function NewJobPage() {
       <div>
         <h1 className="font-display text-3xl font-semibold tracking-tight">Add a job</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          Paste the posting link and hit Autofill — we&apos;ll fill title/company and detect the
-          job board when we can. To watch a company&apos;s board ongoing, use the Companies tab.
+          Import a posting first, then review its details and decide whether Job Tracker should
+          keep watching for related roles.
         </p>
       </div>
 
       <form onSubmit={(e) => void onSubmit(e)} className="card space-y-5 p-6">
         <div className="space-y-1.5 text-sm">
-          <label htmlFor="posting-url" className="block font-medium">
-            Posting link
-          </label>
+          <div className="flex items-center gap-2">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--accent-soft)] text-xs font-semibold text-[var(--accent-ink)]">
+              1
+            </span>
+            <label htmlFor="posting-url" className="block font-medium">
+              Import posting
+            </label>
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
               id="posting-url"
@@ -107,7 +115,7 @@ export function NewJobPage() {
               onClick={() => void onAutofill()}
               className="btn btn-secondary shrink-0"
             >
-              {isAutofilling ? "Finding details…" : "Autofill + detect board"}
+              {isAutofilling ? "Finding details…" : "Find details"}
             </button>
           </div>
           {autofillError ? (
@@ -121,82 +129,51 @@ export function NewJobPage() {
             </p>
           ) : null}
         </div>
-        {preview?.board ? (
+        {preview && watchOption ? (
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">
-                  {isConfirmedJobDiscovery(preview, confirmedDiscovery)
-                    ? "Watch confirmed"
-                    : "Detected job board"}
-                </p>
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-xs font-semibold text-[var(--accent-ink)]">
+                2
+              </span>
+              <div className="min-w-0 flex-1 space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Review detected source</p>
+                  <p className="text-sm text-[var(--muted)]">
+                    {preview.board
+                      ? `Job Tracker found a ${preview.board.provider} job board.`
+                      : "Job Tracker found this company careers page."}
+                  </p>
+                </div>
                 <p className="text-sm text-[var(--muted)]">
-                  {preview.board.provider} / {preview.board.boardSlug}
+                  {preview.board
+                    ? `${preview.board.provider} / ${preview.board.boardSlug}`
+                    : preview.careersUrl}
                 </p>
                 <a
-                  href={preview.board.boardUrl}
+                  href={preview.board ? preview.board.boardUrl : preview.careersUrl!}
                   target="_blank"
                   rel="noreferrer"
                   className="text-sm text-[var(--accent)] hover:underline"
                 >
-                  {preview.board.boardUrl}
+                  {preview.board ? preview.board.boardUrl : preview.careersUrl}
                 </a>
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={watchEnabled}
+                    onChange={(event) =>
+                      setConfirmedDiscovery(event.target.checked ? confirmJobUrlPreview(preview) : null)
+                    }
+                    className="mt-0.5 h-4 w-4 accent-[var(--accent)]"
+                  />
+                  <span>
+                    <span className="block font-medium">{watchOption.label}</span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-[var(--muted)]">
+                      {watchOption.description}
+                    </span>
+                  </span>
+                </label>
               </div>
-              {isConfirmedJobDiscovery(preview, confirmedDiscovery) ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setConfirmedDiscovery(null)}
-                >
-                  Clear
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setConfirmedDiscovery(confirmJobUrlPreview(preview))}
-                >
-                  Confirm watch
-                </button>
-              )}
-            </div>
-          </div>
-        ) : null}
-        {preview?.careersUrl && !preview.board ? (
-          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">
-                  {isConfirmedJobDiscovery(preview, confirmedDiscovery)
-                    ? "Careers page confirmed"
-                    : "Detected careers page"}
-                </p>
-                <a
-                  href={preview.careersUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-[var(--accent)] hover:underline"
-                >
-                  {preview.careersUrl}
-                </a>
-              </div>
-              {isConfirmedJobDiscovery(preview, confirmedDiscovery) ? (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setConfirmedDiscovery(null)}
-                >
-                  Clear
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setConfirmedDiscovery(confirmJobUrlPreview(preview))}
-                >
-                  Confirm
-                </button>
-              )}
             </div>
           </div>
         ) : null}
@@ -299,7 +276,7 @@ export function NewJobPage() {
         ) : null}
 
         <button type="submit" disabled={isSaving} className="btn btn-primary">
-          {isSaving ? "Saving…" : "Save job"}
+          {isSaving ? "Saving…" : watchEnabled ? "Save job and start watch" : "Save job"}
         </button>
       </form>
     </div>

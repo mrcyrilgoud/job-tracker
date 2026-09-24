@@ -83,6 +83,27 @@ export function confirmJobUrlPreview(preview: JobUrlPreview): ConfirmedJobDiscov
   return null;
 }
 
+export function watchOptionForJobUrlPreview(
+  preview: JobUrlPreview | null,
+  fallbackCompanyName: string,
+): { label: string; description: string } | null {
+  if (!preview) return null;
+  const companyName = (preview.companyName ?? fallbackCompanyName).trim() || "this company";
+  if (preview.board) {
+    return {
+      label: `Watch ${companyName} for new roles`,
+      description: `We’ll check this ${preview.board.provider} board during scheduled runs and surface new matching roles.`,
+    };
+  }
+  if (preview.careersUrl) {
+    return {
+      label: `Watch ${companyName} careers page`,
+      description: "We’ll check this careers page during scheduled runs and surface new matching roles.",
+    };
+  }
+  return null;
+}
+
 export function isConfirmedJobDiscovery(
   preview: JobUrlPreview | null,
   confirmedDiscovery: ConfirmedJobDiscovery | null,

@@ -13,6 +13,7 @@ import {
   resetJobUrlDiscovery,
   serializeConfirmedJobDiscovery,
   storedPostingLinksFromJobs,
+  watchOptionForJobUrlPreview,
 } from "./job-url-preview";
 
 function jobItem(overrides: Partial<Job> & Pick<Job, "id" | "url">): JobListItem {
@@ -159,6 +160,18 @@ describe("applyJobUrlPreview", () => {
     expect(isConfirmedJobDiscovery(careersPreview, confirmed)).toBe(true);
     expect(confirmed?.provider).toBeUndefined();
     expect(confirmed?.boardSlug).toBeUndefined();
+  });
+
+  it("describes the optional watch consistently for board and careers discoveries", () => {
+    expect(watchOptionForJobUrlPreview(boardPreview, "Fallback")).toEqual({
+      label: "Watch Acme for new roles",
+      description: "We’ll check this ashby board during scheduled runs and surface new matching roles.",
+    });
+    expect(watchOptionForJobUrlPreview(careersPreview, "Fallback")).toEqual({
+      label: "Watch Onebrief careers page",
+      description: "We’ll check this careers page during scheduled runs and surface new matching roles.",
+    });
+    expect(watchOptionForJobUrlPreview(null, "Fallback")).toBeNull();
   });
 
   it("serializes only an explicit confirmation for the current preview", () => {
