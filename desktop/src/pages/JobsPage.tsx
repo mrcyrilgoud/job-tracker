@@ -20,6 +20,7 @@ import { JobsBoardView } from "@/components/JobsBoardView";
 import { NewRolesList } from "@/components/companies/NewRolesList";
 import { api, type JobsRunnerProgress } from "@/lib/api";
 import { watchPreviewCountLabel } from "@/lib/companies-ui";
+import { filterDraftFromUrl } from "@/lib/job-filters";
 import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { isDesktopShell } from "@/lib/tauri";
 import {
@@ -53,6 +54,7 @@ export function JobsPage() {
   const [checkingPostings, setCheckingPostings] = useState(false);
   const [checkProgress, setCheckProgress] = useState<JobsRunnerProgress | null>(null);
   const [checkError, setCheckError] = useState<string | null>(null);
+  const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null));
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
@@ -60,6 +62,10 @@ export function JobsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const checkingPostingsRef = useRef(false);
   const loadSequenceRef = useRef(0);
+
+  useEffect(() => {
+    setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null));
+  }, [postingState, search]);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const requestKey = JSON.stringify({
@@ -299,10 +305,9 @@ export function JobsPage() {
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
     const next = new URLSearchParams();
-    const nextSearch = String(form.get("search") ?? "").trim();
-    const nextPosting = String(form.get("postingState") ?? "");
+    const nextSearch = filterDraft.search.trim();
+    const nextPosting = filterDraft.postingState;
     if (isFavoriteFilter) next.set("favorites", "true");
     if (isArchivedFilter) next.set("archived", "true");
     if (status) next.set("status", status);
@@ -439,14 +444,16 @@ export function JobsPage() {
               <input
                 type="search"
                 name="search"
-                defaultValue={search ?? ""}
+                value={filterDraft.search}
+                onChange={(event) => setFilterDraft((current) => ({ ...current, search: event.target.value }))}
                 placeholder="Search jobs…"
                 aria-label="Search jobs"
                 className="field max-w-xs"
               />
               <select
                 name="postingState"
-                defaultValue={postingState ?? ""}
+                value={filterDraft.postingState}
+                onChange={(event) => setFilterDraft((current) => ({ ...current, postingState: event.target.value }))}
                 aria-label="Posting status"
                 className="field max-w-[160px]"
               >
