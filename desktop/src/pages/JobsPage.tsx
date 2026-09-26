@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { formatDistanceToNow } from "date-fns";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { FavoriteButton } from "@/components/FavoriteButton";
@@ -20,7 +20,7 @@ import { JobsBoardView } from "@/components/JobsBoardView";
 import { NewRolesList } from "@/components/companies/NewRolesList";
 import { api, type JobsRunnerProgress } from "@/lib/api";
 import { watchPreviewCountLabel } from "@/lib/companies-ui";
-import { filterDraftFromUrl } from "@/lib/job-filters";
+import { filterCompaniesBySearch, filterDraftFromUrl } from "@/lib/job-filters";
 import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { isDesktopShell } from "@/lib/tauri";
 import {
@@ -49,6 +49,7 @@ export function JobsPage() {
   const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [companySidebarSearch, setCompanySidebarSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [checkingPostings, setCheckingPostings] = useState(false);
@@ -320,6 +321,10 @@ export function JobsPage() {
 
   const activeJobsCount = Math.max(0, (counts.all ?? 0) - (counts.archivedTotal ?? 0));
   const hasMoreWatchRoles = newFromWatch.length > WATCH_PREVIEW_COUNT;
+  const visibleCompanies = useMemo(
+    () => filterCompaniesBySearch(companies, companySidebarSearch),
+    [companies, companySidebarSearch],
+  );
 
   return (
     <>
@@ -367,8 +372,18 @@ export function JobsPage() {
                 Manage
               </Link>
             </div>
-            <div className="space-y-1">
-              {companies.map((company) => (
+            {companies.length > 0 ? (
+              <input
+                type="search"
+                value={companySidebarSearch}
+                onChange={(event) => setCompanySidebarSearch(event.target.value)}
+                placeholder="Search companies…"
+                aria-label="Search companies"
+                className="field mb-3 py-2 text-xs"
+              />
+            ) : null}
+            <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
+              {visibleCompanies.map((company) => (
                 <SidebarLink
                   key={company.id}
                   to={`/?companyId=${company.id}`}
@@ -378,6 +393,8 @@ export function JobsPage() {
               ))}
               {companies.length === 0 ? (
                 <p className="text-sm text-[var(--faint)]">No companies yet.</p>
+              ) : visibleCompanies.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-[var(--faint)]">No matching companies.</p>
               ) : null}
             </div>
           </section>
@@ -530,7 +547,14 @@ export function JobsPage() {
                 tint="bg-[var(--green-soft)] text-[var(--green-ink)]"
               />
             </div>
-          ) : null}
+          ) : (
+            <PipelineSummary
+              activeJobsCount={activeJobsCount}
+              appliedCount={counts.applied ?? 0}
+              interviewingCount={counts.interviewing ?? 0}
+              offerCount={counts.offer ?? 0}
+            />
+          )}
 
           {!isFiltered && activity ? <ActivityLine activity={activity} /> : null}
 
@@ -868,6 +892,45 @@ function StatCard({
         <div className="mt-1 truncate text-xs text-[var(--muted)]">{label}</div>
       </div>
     </div>
+  );
+}
+
+function PipelineSummary({
+  activeJobsCount,
+  appliedCount,
+  interviewingCount,
+  offerCount,
+}: {
+  activeJobsCount: number;
+  appliedCount: number;
+  interviewingCount: number;
+  offerCount: number;
+}) {
+  const metrics = [
+    { label: "Tracking", value: activeJobsCount },
+    { label: "Applied", value: appliedCount },
+    { label: "Interviewing", value: interviewingCount },
+    { label: "Offers", value: offerCount },
+  ];
+
+  return (
+    <section
+      aria-label="Pipeline totals across all jobs"
+      className="card flex flex-wrap items-center gap-x-6 gap-y-3 px-4 py-3"
+    >
+      <div>
+        <h2 className="text-sm font-semibold text-[var(--muted)]">Pipeline</h2>
+        <p className="text-xs text-[var(--faint)]">All jobs</p>
+      </div>
+      <dl className="grid flex-1 grid-cols-2 gap-x-5 gap-y-2 sm:grid-cols-4">
+        {metrics.map((metric) => (
+          <div key={metric.label} className="flex items-baseline justify-between gap-2 sm:block">
+            <dt className="text-xs text-[var(--muted)]">{metric.label}</dt>
+            <dd className="font-display text-lg leading-none text-[var(--foreground)]">{metric.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }
 

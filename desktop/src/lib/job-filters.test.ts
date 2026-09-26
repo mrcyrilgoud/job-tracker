@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { filterDraftFromUrl } from "./job-filters";
+import { filterCompaniesBySearch, filterDraftFromUrl } from "./job-filters";
 
 describe("job filter draft", () => {
   it("hydrates both controls from the active URL filters", () => {
@@ -15,5 +15,23 @@ describe("job filter draft", () => {
       search: "",
       postingState: "",
     });
+  });
+});
+
+describe("company sidebar filter", () => {
+  const companies = [
+    { id: "1", name: "OpenAI" },
+    { id: "2", name: "Anthropic" },
+    { id: "3", name: "Acme Labs" },
+  ];
+
+  it("matches company names case-insensitively after trimming the query", () => {
+    expect(filterCompaniesBySearch(companies, "  AI ")).toEqual([
+      { id: "1", name: "OpenAI" },
+    ]);
+  });
+
+  it("keeps every company when the query is blank", () => {
+    expect(filterCompaniesBySearch(companies, "  ")).toEqual(companies);
   });
 });
