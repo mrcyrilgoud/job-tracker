@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { jobStatuses, type JobListItem } from "./schema";
-import { jobStatusPresentation, postingStateMatters } from "./ui";
+import { jobStatusPresentation, nextActiveJobStage, postingStateMatters } from "./ui";
 
 function mockJob(
   id: string,
@@ -47,6 +47,14 @@ describe("Archive and Delete UI logic", () => {
     expect(presentation.tone).toBe("stone");
 
     expect(postingStateMatters("archived")).toBe(false);
+  });
+
+  it("returns only the next active pipeline stage for the board action", () => {
+    expect(nextActiveJobStage("wishlist")).toBe("applied");
+    expect(nextActiveJobStage("applied")).toBe("interviewing");
+    expect(nextActiveJobStage("interviewing")).toBe("offer");
+    expect(nextActiveJobStage("offer")).toBeNull();
+    expect(nextActiveJobStage("archived")).toBeNull();
   });
 
   it("filters jobs into active and archived partitions", () => {

@@ -41,6 +41,28 @@ export function jobStatusPresentation(status: JobStatus): Presentation {
   }
 }
 
+/** The next active stage for the board's primary, forward-only action. */
+export function nextActiveJobStage(status: JobStatus): JobStatus | null {
+  switch (status) {
+    case "wishlist":
+      return "applied";
+    case "applied":
+      return "interviewing";
+    case "interviewing":
+      return "offer";
+    case "offer":
+    case "rejected":
+    case "withdrawn":
+    case "closed":
+    case "archived":
+      return null;
+    default: {
+      const _exhaustive: never = status;
+      return _exhaustive;
+    }
+  }
+}
+
 /**
  * Whether the posting is still live only matters while you could still apply.
  * Once an application is in, the listing closing says nothing about the job.

@@ -7,18 +7,13 @@ import { ArchiveIcon, statusIcons, TrashIcon } from "@/components/icons";
 import { jobStatuses, type JobListItem, type JobStatus } from "@/lib/schema";
 import {
   jobStatusPresentation,
+  nextActiveJobStage,
   postingStateMatters,
   postingStatePresentation,
   toneClasses,
 } from "@/lib/ui";
 
 const BOARD_COLUMNS: JobStatus[] = ["wishlist", "applied", "interviewing", "offer"];
-
-const NEXT_STAGE: Partial<Record<JobStatus, JobStatus>> = {
-  wishlist: "applied",
-  applied: "interviewing",
-  interviewing: "offer",
-};
 
 const BOARD_PAGE_SIZE = 25;
 
@@ -71,7 +66,7 @@ export function JobsBoardView({
           const isExpanded = expandedStages.has(stage);
           const visibleJobs = isExpanded ? stageJobs : stageJobs.slice(0, BOARD_PAGE_SIZE);
           const remainingJobs = stageJobs.length - visibleJobs.length;
-          const nextStage = NEXT_STAGE[stage];
+          const nextStage = nextActiveJobStage(stage);
 
           return (
             <div
@@ -174,14 +169,14 @@ export function JobsBoardView({
                           </div>
                         </div>
 
-                        <div className="mt-3 flex items-center justify-between border-t border-[var(--border)]/60 pt-2.5 text-[11px] text-[var(--faint)]">
-                          <span>
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)]/60 pt-2.5 text-xs text-[var(--faint)]">
+                          <span className="mr-auto">
                             {job.appliedAt
                               ? `Applied ${formatDistanceToNow(new Date(job.appliedAt), { addSuffix: true })}`
                               : `Updated ${formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}`}
                           </span>
 
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-2">
                             {onUpdateStatus && nextStage ? (
                               <button
                                 type="button"
@@ -190,30 +185,32 @@ export function JobsBoardView({
                                   e.stopPropagation();
                                   onUpdateStatus(job.id, nextStage);
                                 }}
-                                className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--accent)] hover:bg-[var(--accent-soft)]"
-                                title={`Advance to ${jobStatusPresentation(nextStage).label}`}
+                                className="rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--accent-ink)] transition-colors hover:bg-[var(--accent)] hover:text-white"
                               >
-                                Advance →
+                                Move to {jobStatusPresentation(nextStage).label}
                               </button>
                             ) : null}
                             {onUpdateStatus ? (
-                              <select
-                                value={job.status}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onUpdateStatus(job.id, e.target.value as JobStatus);
-                                }}
-                                aria-label="Change stage"
-                                className="cursor-pointer rounded bg-transparent p-0.5 text-[10px] font-medium text-[var(--muted)] hover:text-[var(--foreground)]"
-                              >
-                                {jobStatuses.map((st) => (
-                                  <option key={st} value={st}>
-                                    {jobStatusPresentation(st).label}
-                                  </option>
-                                ))}
-                              </select>
+                              <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
+                                <span>Move to</span>
+                                <select
+                                  value={job.status}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    onUpdateStatus(job.id, e.target.value as JobStatus);
+                                  }}
+                                  aria-label="Move to another stage"
+                                  className="cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs font-medium text-[var(--foreground)] hover:border-[var(--accent)]"
+                                >
+                                  {jobStatuses.map((st) => (
+                                    <option key={st} value={st}>
+                                      {jobStatusPresentation(st).label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
                             ) : null}
                           </div>
                         </div>
