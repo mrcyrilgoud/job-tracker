@@ -1,7 +1,16 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
 
-import { api, type CsvConfig, type CsvPathStatus } from "@/lib/api";
+import { FilterCriteriaEditor } from "@/components/companies/FilterCriteriaEditor";
+import { api, type CsvConfig, type CsvPathStatus, type FilterCriteria } from "@/lib/api";
+
+/** Match-all default so the editor always has a well-formed criteria to edit. */
+const MATCH_ALL_CRITERIA: FilterCriteria = {
+  version: 1,
+  title: { include: [], exclude: [], matchMode: "word" },
+  location: { country: null, include: [], exclude: [], matchMode: "word" },
+  remote: "any",
+};
 
 /** Normalized status for a single saveable setting. */
 type SaveStatus =
@@ -124,16 +133,13 @@ function Hint({ summary, children }: { summary: string; children: React.ReactNod
 export function SettingsPage() {
   const [config, setConfig] = useState<CsvConfig | null>(null);
   const [pendingPath, setPendingPath] = useState<CsvPathStatus | null>(null);
-  const [roleKeywords, setRoleKeywords] = useState("");
-  const [locationCountry, setLocationCountry] = useState("");
-  const [locationCities, setLocationCities] = useState("");
+  const [criteria, setCriteria] = useState<FilterCriteria>(MATCH_ALL_CRITERIA);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [csvStatus, setCsvStatus] = useState<SaveStatus>(IDLE);
-  const [keywordsStatus, setKeywordsStatus] = useState<SaveStatus>(IDLE);
-  const [locationStatus, setLocationStatus] = useState<SaveStatus>(IDLE);
+  const [filterStatus, setFilterStatus] = useState<SaveStatus>(IDLE);
 
   const csvBusy = csvStatus.kind === "saving";
 
@@ -141,15 +147,12 @@ export function SettingsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [csv, keywords, locationSettings] = await Promise.all([
+      const [csv, filterCriteria] = await Promise.all([
         api.csvConfig(),
-        api.getWatchRoleKeywords(),
-        api.getLocationSettings(),
+        api.getFilterCriteria(),
       ]);
       setConfig(csv);
-      setRoleKeywords(keywords);
-      setLocationCountry(locationSettings.country);
-      setLocationCities(locationSettings.cities);
+      setCriteria(filterCriteria);
     } catch (err) {
       setLoadError(errorMessage(err, "Failed to load settings"));
     } finally {
@@ -207,25 +210,13 @@ export function SettingsPage() {
     }
   }
 
-  async function handleKeywordsSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setKeywordsStatus({ kind: "saving" });
+  async function saveFilter() {
+    setFilterStatus({ kind: "saving" });
     try {
-      await api.setWatchRoleKeywords(roleKeywords);
-      flashSaved(setKeywordsStatus);
+      await api.setFilterCriteria(criteria);
+      flashSaved(setFilterStatus);
     } catch (err) {
-      setKeywordsStatus({ kind: "error", message: errorMessage(err, "Failed to save keywords") });
-    }
-  }
-
-  async function handleLocationSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLocationStatus({ kind: "saving" });
-    try {
-      await api.setLocationSettings({ country: locationCountry, cities: locationCities });
-      flashSaved(setLocationStatus);
-    } catch (err) {
-      setLocationStatus({ kind: "error", message: errorMessage(err, "Failed to save location settings") });
+      setFilterStatus({ kind: "error", message: errorMessage(err, "Failed to save filter") });
     }
   }
 
@@ -253,96 +244,27 @@ export function SettingsPage() {
             description="Control which new roles surface from your watches."
           >
             <SettingCard
-              id="keywords-heading"
-              title="Role keywords"
-              description='Only show new roles matching these comma-separated keywords. Leave empty to show all.'
-              error={keywordsStatus.kind === "error" ? keywordsStatus.message : null}
+              id="filter-heading"
+              title="Filter new roles"
+              description="Choose which new roles surface from your watches by title, location, and remote preference. Leave everything empty to show all."
+              error={filterStatus.kind === "error" ? filterStatus.message : null}
               footer={
                 <>
                   <button
-                    type="submit"
-                    form="keywords-form"
+                    type="button"
                     className="btn-primary btn-sm"
-                    disabled={keywordsStatus.kind === "saving"}
+                    disabled={filterStatus.kind === "saving"}
+                    onClick={() => void saveFilter()}
                   >
-                    {keywordsStatus.kind === "saving" ? "Saving…" : "Save"}
+                    {filterStatus.kind === "saving" ? "Saving…" : "Save"}
                   </button>
-                  <SaveState status={keywordsStatus} />
+                  <SaveState status={filterStatus} />
                 </>
               }
             >
-              <form id="keywords-form" className="mt-4" onSubmit={handleKeywordsSubmit}>
-                <label htmlFor="role-keywords" className="field-label">
-                  Keywords
-                </label>
-                <input
-                  id="role-keywords"
-                  value={roleKeywords}
-                  onChange={(e) => setRoleKeywords(e.target.value)}
-                  placeholder="e.g. Software Engineer, Frontend"
-                  className="field border-transparent bg-[var(--surface-muted)]"
-                />
-              </form>
-            </SettingCard>
-
-            <SettingCard
-              id="location-heading"
-              title="Location preferences"
-              description="Include jobs that match your preferred country or cities."
-              error={locationStatus.kind === "error" ? locationStatus.message : null}
-              footer={
-                <>
-                  <button
-                    type="submit"
-                    form="location-form"
-                    className="btn-primary btn-sm"
-                    disabled={locationStatus.kind === "saving"}
-                  >
-                    {locationStatus.kind === "saving" ? "Saving…" : "Save"}
-                  </button>
-                  <SaveState status={locationStatus} />
-                </>
-              }
-            >
-              <form id="location-form" className="mt-4 flex flex-col gap-4" onSubmit={handleLocationSubmit}>
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="country" className="field-label">
-                    Country
-                  </label>
-                  <select
-                    id="country"
-                    value={locationCountry}
-                    onChange={(e) => setLocationCountry(e.target.value)}
-                    className="field border-transparent bg-[var(--surface-muted)]"
-                  >
-                    <option value="">Any country</option>
-                    <option value="United States">United States</option>
-                    <option value="Canada">Canada</option>
-                    <option value="United Kingdom">United Kingdom</option>
-                    <option value="Australia">Australia</option>
-                    <option value="Germany">Germany</option>
-                    <option value="France">France</option>
-                    <option value="Spain">Spain</option>
-                    <option value="India">India</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="cities" className="field-label">
-                    Cities / regions
-                  </label>
-                  <input
-                    id="cities"
-                    value={locationCities}
-                    onChange={(e) => setLocationCities(e.target.value)}
-                    placeholder="e.g. San Jose, Austin, Seattle"
-                    className="field border-transparent bg-[var(--surface-muted)]"
-                  />
-                </div>
-                <Hint summary="How city matching works">
-                  The cities field is smart. Type a major hub like “San Jose” or “Bay Area” and nearby
-                  cities such as San Francisco and Oakland are matched automatically.
-                </Hint>
-              </form>
+              <div className="mt-4">
+                <FilterCriteriaEditor value={criteria} onChange={setCriteria} />
+              </div>
             </SettingCard>
           </SettingsGroup>
 

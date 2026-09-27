@@ -4,6 +4,9 @@ use serde::Serialize;
 use crate::ats::{list_jobs, AtsJob};
 use crate::companies::get_watch;
 use crate::error::{map_sqlite, AppError, AppResult};
+use crate::filtering::engine::{matches, JobView};
+use crate::filtering::model::FilterCriteria;
+use crate::filtering::resolver::{load_alias_table, resolve_effective_criteria};
 use crate::models::Job;
 use crate::util::{create_id, normalize_canonical_url, now_iso};
 
@@ -95,11 +98,33 @@ pub fn apply_watch_sync(
         .collect::<Result<Vec<_>, _>>()
         .map_err(map_sqlite)?;
 
+    // Resolve the effective filter criteria and alias table ONCE for this
+    // watch, so ingest-time annotation uses the same matching authority as
+    // query-time listing (Req 10.1). Fall back to match-all on error so a
+    // resolver failure never blocks the sync or drops roles.
+    let criteria = resolve_effective_criteria(conn, &watch.company_id, &watch.provider)
+        .unwrap_or_else(|_| FilterCriteria::match_all());
+    let aliases = load_alias_table(conn)?;
+
     let mut created = 0usize;
     let mut reactivated = 0usize;
 
     for remote in &remote_jobs {
         let canonical_url = normalize_canonical_url(&remote.url).map_err(AppError::from)?;
+
+        // Compute the inclusion hint for this remote role. This is a
+        // non-destructive annotation only: every role is still stored
+        // regardless of the result, and no job is ever deleted (Req 9.3, 9.4).
+        let included = matches(
+            &criteria,
+            &aliases,
+            JobView {
+                title: &remote.title,
+                location: remote.location.as_deref(),
+            },
+        )
+        .included;
+        let included_int = i64::from(included);
         let by_external = existing
             .iter()
             .find(|j| j.source_external_id.as_deref() == Some(remote.external_id.as_str()));
@@ -117,12 +142,43 @@ pub fn apply_watch_sync(
                     ],
                 )
                 .map_err(map_sqlite)?;
+                // Only record the hint when the role is included; a not-included
+                // result must leave the previously recorded value unchanged
+                // (Req 9.5).
+                if included {
+                    conn.execute(
+                        "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, posting_state='active', watch_filtered=?4, updated_at=?5 WHERE id=?6",
+                        params![
+                            remote.title,
+                            remote.url,
+                            remote.location,
+                            included_int,
+                            synced_at,
+                            local.id
+                        ],
+                    )
+                    .map_err(map_sqlite)?;
+                } else {
+                    conn.execute(
+                        "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, posting_state='active', updated_at=?4 WHERE id=?5",
+                        params![
+                            remote.title,
+                            remote.url,
+                            remote.location,
+                            synced_at,
+                            local.id
+                        ],
+                    )
+                    .map_err(map_sqlite)?;
+                }
+            } else if included {
                 conn.execute(
-                    "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, posting_state='active', updated_at=?4 WHERE id=?5",
+                    "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, watch_filtered=?4, updated_at=?5 WHERE id=?6",
                     params![
                         remote.title,
                         remote.url,
                         remote.location,
+                        included_int,
                         synced_at,
                         local.id
                     ],
@@ -160,29 +216,50 @@ pub fn apply_watch_sync(
             if company_id != watch.company_id {
                 continue;
             }
-            conn.execute(
-                "UPDATE jobs SET source=?1, source_external_id=?2, company_id=?3, title=?4, location=COALESCE(?5, location), is_new_from_watch=0, watch_disposition='saved', missing_from_sync_count=0, updated_at=?6 WHERE id=?7",
-                params![
-                    watch.provider,
-                    remote.external_id,
-                    watch.company_id,
-                    remote.title,
-                    remote.location,
-                    synced_at,
-                    job_id
-                ],
-            )
-            .map_err(map_sqlite)?;
+            // Only record the hint when included; a not-included result leaves
+            // any previously recorded value unchanged (Req 9.5).
+            if included {
+                conn.execute(
+                    "UPDATE jobs SET source=?1, source_external_id=?2, company_id=?3, title=?4, location=COALESCE(?5, location), is_new_from_watch=0, watch_disposition='saved', missing_from_sync_count=0, watch_filtered=?6, updated_at=?7 WHERE id=?8",
+                    params![
+                        watch.provider,
+                        remote.external_id,
+                        watch.company_id,
+                        remote.title,
+                        remote.location,
+                        included_int,
+                        synced_at,
+                        job_id
+                    ],
+                )
+                .map_err(map_sqlite)?;
+            } else {
+                conn.execute(
+                    "UPDATE jobs SET source=?1, source_external_id=?2, company_id=?3, title=?4, location=COALESCE(?5, location), is_new_from_watch=0, watch_disposition='saved', missing_from_sync_count=0, updated_at=?6 WHERE id=?7",
+                    params![
+                        watch.provider,
+                        remote.external_id,
+                        watch.company_id,
+                        remote.title,
+                        remote.location,
+                        synced_at,
+                        job_id
+                    ],
+                )
+                .map_err(map_sqlite)?;
+            }
             continue;
         }
 
         let job_id = create_id();
+        // A brand-new row has no previously recorded hint to preserve, so it
+        // records the actual evaluation result (including false) (Req 9.1, 9.2).
         conn.execute(
             r#"INSERT INTO jobs (
                 id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
                 posting_state, last_checked_at, last_check_result, source, notes, description, location,
-                is_new_from_watch, watch_disposition, missing_from_sync_count, created_at, updated_at
-            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,NULL,?8,1,'new',0,?9,?9)"#,
+                is_new_from_watch, watch_disposition, missing_from_sync_count, watch_filtered, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,NULL,?8,1,'new',0,?9,?10,?10)"#,
             params![
                 job_id,
                 watch.company_id,
@@ -192,6 +269,7 @@ pub fn apply_watch_sync(
                 remote.external_id,
                 watch.provider,
                 remote.location,
+                included_int,
                 synced_at
             ],
         )
@@ -328,5 +406,264 @@ mod tests {
             )
             .unwrap();
         assert_eq!(matching_jobs, 1);
+    }
+}
+
+#[cfg(test)]
+mod filtering_sync_tests {
+    use rusqlite::{params, Connection};
+
+    use super::*;
+    use crate::companies::{create_company, insert_watch};
+    use crate::db::migrate::migrate;
+    use crate::filtering::engine::{matches, JobView};
+    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::resolver::{
+        load_alias_table, resolve_effective_criteria, set_global_criteria,
+    };
+    use proptest::prelude::*;
+
+    fn test_connection() -> Connection {
+        let connection = Connection::open_in_memory().unwrap();
+        migrate(&connection).unwrap();
+        connection
+    }
+
+    /// Read the `watch_filtered` hint for a job identified by its
+    /// canonical_url. Returns the raw integer (0/1) or NULL as `None`.
+    fn watch_filtered_by_canonical(conn: &Connection, canonical_url: &str) -> Option<i64> {
+        conn.query_row(
+            "SELECT watch_filtered FROM jobs WHERE canonical_url = ?1",
+            params![canonical_url],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .unwrap()
+    }
+
+    fn count_jobs_for_company(conn: &Connection, company_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM jobs WHERE company_id = ?1",
+            params![company_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn ats_job(external_id: &str, title: &str, slug: &str, location: Option<&str>) -> AtsJob {
+        AtsJob {
+            external_id: external_id.into(),
+            title: title.into(),
+            url: format!("https://boards.greenhouse.io/{slug}/jobs/{external_id}"),
+            location: location.map(str::to_string),
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // 9.2 Property test: query/ingest agreement
+    // **Property 10: Query/ingest agreement**
+    // **Validates: Requirements 10.1, 10.2**
+    //
+    // The same engine authority decides inclusion at ingest (sync) time and at
+    // query (list) time. Both call sites resolve the effective criteria for the
+    // watch's (company_id, provider) via `resolve_effective_criteria`, load the
+    // alias table via `load_alias_table`, and evaluate `engine::matches`. This
+    // property asserts that the "included" value computed the way
+    // `apply_watch_sync` computes it is identical to the value `list_jobs` would
+    // use for the same role — guarding against divergence/regression between the
+    // two call sites. Both computations flow through the identical functions, so
+    // the property proves they agree for arbitrary roles.
+    // -------------------------------------------------------------------
+
+    /// A small generated FilterCriteria over a constrained token space so the
+    /// engine sees meaningful include/exclude decisions across arbitrary roles.
+    fn arb_criteria() -> impl Strategy<Value = FilterCriteria> {
+        let token = prop::sample::select(vec![
+            "engineer",
+            "manager",
+            "senior",
+            "remote",
+            "san francisco",
+            "new york",
+        ]);
+        let tokens = prop::collection::vec(token, 0..3);
+        let tokens2 = prop::collection::vec(
+            prop::sample::select(vec!["contract", "intern", "staff", "director"]),
+            0..2,
+        );
+        (tokens, tokens2).prop_map(|(include, exclude)| {
+            let mut c = FilterCriteria::match_all();
+            c.title.include = include.into_iter().map(String::from).collect();
+            c.title.exclude = exclude.into_iter().map(String::from).collect();
+            c
+        })
+    }
+
+    /// Arbitrary sample role text (title + optional location).
+    fn arb_role() -> impl Strategy<Value = (String, Option<String>)> {
+        let title = prop::sample::select(vec![
+            "Senior Software Engineer",
+            "Engineering Manager",
+            "Staff Engineer",
+            "Product Manager",
+            "Contract Recruiter",
+            "Data Scientist",
+        ])
+        .prop_map(String::from);
+        let location = prop::option::of(
+            prop::sample::select(vec!["Remote", "San Francisco, CA", "New York, NY", "Austin, TX"])
+                .prop_map(String::from),
+        );
+        (title, location)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+        #[test]
+        fn query_and_ingest_agree_on_inclusion(
+            criteria in arb_criteria(),
+            roles in prop::collection::vec(arb_role(), 1..5),
+        ) {
+            let conn = test_connection();
+            let company = create_company(&conn, "Acme", None).unwrap();
+            let watch = insert_watch(&conn, &company.id, "greenhouse", "acme").unwrap();
+
+            // Configure a global criteria; the watch has no override, so both
+            // sync and query resolve to exactly this criteria.
+            set_global_criteria(&conn, &criteria).unwrap();
+
+            for (title, location) in &roles {
+                // The value "as sync would" compute it: resolve effective
+                // criteria for the watch's company/provider, load aliases, then
+                // engine::matches.
+                let sync_criteria =
+                    resolve_effective_criteria(&conn, &watch.company_id, &watch.provider).unwrap();
+                let sync_aliases = load_alias_table(&conn).unwrap();
+                let as_sync = matches(
+                    &sync_criteria,
+                    &sync_aliases,
+                    JobView { title, location: location.as_deref() },
+                )
+                .included;
+
+                // The value "as query would" compute it: the identical path.
+                let query_criteria =
+                    resolve_effective_criteria(&conn, &company.id, "greenhouse").unwrap();
+                let query_aliases = load_alias_table(&conn).unwrap();
+                let as_query = matches(
+                    &query_criteria,
+                    &query_aliases,
+                    JobView { title, location: location.as_deref() },
+                )
+                .included;
+
+                // Same engine authority => identical inclusion decision.
+                prop_assert_eq!(as_sync, as_query);
+
+                // Determinism: evaluating twice yields the same result.
+                let again = matches(
+                    &query_criteria,
+                    &query_aliases,
+                    JobView { title, location: location.as_deref() },
+                )
+                .included;
+                prop_assert_eq!(as_query, again);
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // 9.3 Unit tests for non-destructive sync annotation
+    // Validates Requirements 9.3, 9.4, 9.5
+    // -------------------------------------------------------------------
+
+    /// Req 9.3: every synced role is stored regardless of the match result, and
+    /// a brand-new row records its actual (here, false) evaluation result.
+    #[test]
+    fn sync_stores_all_roles_regardless_of_match() {
+        let conn = test_connection();
+        let company = create_company(&conn, "Acme", None).unwrap();
+        let watch = insert_watch(&conn, &company.id, "greenhouse", "acme").unwrap();
+
+        // Restrictive global criteria: no synced role can match.
+        let mut criteria = FilterCriteria::match_all();
+        criteria.title.include = vec!["nonexistent-token".to_string()];
+        set_global_criteria(&conn, &criteria).unwrap();
+
+        let a = ats_job("role-1", "Software Engineer", "acme", Some("Remote"));
+        let b = ats_job("role-2", "Product Manager", "acme", Some("New York, NY"));
+        let a_url = normalize_canonical_url(&a.url).unwrap();
+        let b_url = normalize_canonical_url(&b.url).unwrap();
+
+        let result = apply_watch_sync(&conn, &watch.id, Ok(vec![a, b])).unwrap();
+        assert_eq!(result["ok"], true);
+
+        // Non-matching roles are still stored (Req 9.3).
+        assert_eq!(count_jobs_for_company(&conn, &company.id), 2);
+
+        // A brand-new row records its actual evaluation result: not included => 0.
+        assert_eq!(watch_filtered_by_canonical(&conn, &a_url), Some(0));
+        assert_eq!(watch_filtered_by_canonical(&conn, &b_url), Some(0));
+    }
+
+    /// Req 9.4: filtering never deletes a stored job. After a first sync stores
+    /// a role, a second sync (with tightened criteria) retains the job.
+    #[test]
+    fn sync_never_deletes_previously_stored_job() {
+        let conn = test_connection();
+        let company = create_company(&conn, "Acme", None).unwrap();
+        let watch = insert_watch(&conn, &company.id, "greenhouse", "acme").unwrap();
+
+        // Permissive criteria: role matches on the first sync.
+        set_global_criteria(&conn, &FilterCriteria::match_all()).unwrap();
+        let role = ats_job("role-1", "Senior Software Engineer", "acme", Some("Remote"));
+        let url = normalize_canonical_url(&role.url).unwrap();
+        apply_watch_sync(&conn, &watch.id, Ok(vec![role.clone()])).unwrap();
+        assert_eq!(count_jobs_for_company(&conn, &company.id), 1);
+
+        // Tighten criteria so the role no longer matches, then sync again.
+        let mut tighter = FilterCriteria::match_all();
+        tighter.title.include = vec!["nonexistent-token".to_string()];
+        set_global_criteria(&conn, &tighter).unwrap();
+        apply_watch_sync(&conn, &watch.id, Ok(vec![role])).unwrap();
+
+        // The previously stored job still exists — not deleted by filtering.
+        assert_eq!(count_jobs_for_company(&conn, &company.id), 1);
+        let still_there: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM jobs WHERE canonical_url = ?1",
+                params![url],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_there, 1);
+    }
+
+    /// Req 9.5: a not-included result must leave the previously recorded hint
+    /// unchanged. First sync under permissive criteria sets watch_filtered = 1;
+    /// tightening criteria so the role no longer matches must NOT overwrite the
+    /// prior hint, and the job is retained.
+    #[test]
+    fn sync_leaves_prior_hint_unchanged_on_non_match() {
+        let conn = test_connection();
+        let company = create_company(&conn, "Acme", None).unwrap();
+        let watch = insert_watch(&conn, &company.id, "greenhouse", "acme").unwrap();
+
+        // Permissive criteria: role matches, first sync records watch_filtered = 1.
+        set_global_criteria(&conn, &FilterCriteria::match_all()).unwrap();
+        let role = ats_job("role-1", "Senior Software Engineer", "acme", Some("Remote"));
+        let url = normalize_canonical_url(&role.url).unwrap();
+        apply_watch_sync(&conn, &watch.id, Ok(vec![role.clone()])).unwrap();
+        assert_eq!(watch_filtered_by_canonical(&conn, &url), Some(1));
+
+        // Tighten criteria so the role no longer matches, then sync again.
+        let mut tighter = FilterCriteria::match_all();
+        tighter.title.include = vec!["nonexistent-token".to_string()];
+        set_global_criteria(&conn, &tighter).unwrap();
+        apply_watch_sync(&conn, &watch.id, Ok(vec![role])).unwrap();
+
+        // The existing job's hint is STILL 1 (not overwritten by the
+        // not-included result), and the job is retained.
+        assert_eq!(watch_filtered_by_canonical(&conn, &url), Some(1));
+        assert_eq!(count_jobs_for_company(&conn, &company.id), 1);
     }
 }

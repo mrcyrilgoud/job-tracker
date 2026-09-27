@@ -171,6 +171,28 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         conn.execute("ALTER TABLE jobs ADD COLUMN description TEXT", [])?;
     }
 
+    // Watchlist job filtering: nullable hint recording the sync-time filter
+    // evaluation result. NULL means not-yet-evaluated (Req 9.2). Additive,
+    // idempotent, and non-destructive.
+    let has_watch_filtered = table_columns.iter().any(|name| name == "watch_filtered");
+    if !has_watch_filtered {
+        conn.execute("ALTER TABLE jobs ADD COLUMN watch_filtered INTEGER", [])?;
+    }
+
+    // Watchlist job filtering: nullable per-watch FilterCriteria JSON. NULL
+    // means inherit the global criteria. Additive, idempotent, no data loss.
+    let watch_columns = conn
+        .prepare("PRAGMA table_info(company_watches)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let has_filter_criteria = watch_columns.iter().any(|name| name == "filter_criteria");
+    if !has_filter_criteria {
+        conn.execute(
+            "ALTER TABLE company_watches ADD COLUMN filter_criteria TEXT",
+            [],
+        )?;
+    }
+
     // Existing watch jobs used an event plus `is_new_from_watch` to represent
     // triage. Preserve that history in the explicit state introduced above.
     conn.execute_batch(
@@ -188,6 +210,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
           AND source IN ('greenhouse', 'lever', 'ashby');
         "#,
     )?;
+
+    // Watchlist job filtering: seed the default alias table and convert legacy
+    // country/cities/keyword settings into structured global criteria. Both
+    // steps are idempotent and guarded by key-absent checks (Req 14.1–14.7).
+    crate::filtering::resolver::migrate_legacy_settings(conn)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
     Ok(())
 }
 
@@ -229,6 +258,18 @@ mod tests {
               created_at TEXT NOT NULL,
               updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE company_watches (
+              id TEXT PRIMARY KEY NOT NULL,
+              company_id TEXT NOT NULL REFERENCES companies(id),
+              provider TEXT NOT NULL,
+              board_slug TEXT NOT NULL,
+              last_synced_at TEXT,
+              consecutive_sync_failures INTEGER NOT NULL DEFAULT 0,
+              last_sync_error TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
             "#,
         )
         .unwrap();
@@ -247,5 +288,51 @@ mod tests {
         assert!(cols.contains(&"is_favorite".to_string()));
         assert!(cols.contains(&"watch_disposition".to_string()));
         assert!(cols.contains(&"description".to_string()));
+        assert!(cols.contains(&"watch_filtered".to_string()));
+
+        let watch_cols = conn
+            .prepare("PRAGMA table_info(company_watches)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(watch_cols.contains(&"filter_criteria".to_string()));
+    }
+
+    #[test]
+    fn migrate_is_idempotent_for_additive_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        // First run creates the canonical schema.
+        migrate(&conn).unwrap();
+        // Second run must not error (ALTER TABLE guards prevent duplicate columns).
+        migrate(&conn).unwrap();
+
+        let cols = conn
+            .prepare("PRAGMA table_info(jobs)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            cols.iter().filter(|name| *name == "watch_filtered").count(),
+            1
+        );
+
+        let watch_cols = conn
+            .prepare("PRAGMA table_info(company_watches)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            watch_cols
+                .iter()
+                .filter(|name| *name == "filter_criteria")
+                .count(),
+            1
+        );
     }
 }

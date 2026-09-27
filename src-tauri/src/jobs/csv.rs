@@ -255,6 +255,15 @@ fn write_sync_state(state: &SyncState) -> AppResult<()> {
 }
 
 fn load_job_rows(conn: &Connection) -> AppResult<Vec<(Job, String)>> {
+    // NON-DESTRUCTIVE CSV CONTRACT (Requirements 18.2, 18.3, 18.4):
+    // CSV export row selection is intentionally INDEPENDENT of watchlist
+    // Filter_Criteria and the `jobs.watch_filtered` hint. This SELECT chooses
+    // rows solely by the existing pipeline-tracking columns
+    // (`is_new_from_watch`, `watch_disposition`) — never by filter match
+    // results. Filtering only affects on-screen watch listings; it must never
+    // change what is stored or exported here. Do NOT add references to
+    // `filter_criteria`, `watch_filtered`, or the filter engine to this query.
+    //
     // Pending watch discoveries and dismissed watch roles stay out of jobs.csv —
     // only pipeline jobs the user is tracking are exported.
     let mut stmt = conn.prepare(
@@ -933,6 +942,10 @@ pub fn sync_jobs_csv_with_disk(
 mod tests {
     use super::*;
     use crate::db::migrate::migrate;
+    use crate::filtering::model::{
+        FilterCriteria, LocationCriteria, MatchMode, RemoteMode, TitleCriteria,
+    };
+    use crate::filtering::resolver::set_global_criteria;
     use crate::jobs::service::{archive_job, create_job_from_url, delete_job, unarchive_job};
     use tempfile::tempdir;
 
@@ -1067,5 +1080,123 @@ mod tests {
         assert_eq!(exported.row_count, 0);
         assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
         assert_eq!(parse_csv(&fs::read_to_string(csv_path).unwrap()).len(), 1);
+    }
+
+    /// Read the set of job ids from an exported CSV file (excluding the header).
+    fn exported_ids(csv_path: &Path) -> HashSet<String> {
+        let parsed = parse_csv(&fs::read_to_string(csv_path).unwrap());
+        // Row 0 is the header; column 0 is the job id.
+        parsed
+            .into_iter()
+            .skip(1)
+            .map(|row| row[0].clone())
+            .collect()
+    }
+
+    /// Regression: CSV export row selection is INDEPENDENT of filter criteria.
+    ///
+    /// A restrictive global `FilterCriteria` that would hide these jobs from a
+    /// watch listing must not change which tracked pipeline jobs are exported.
+    /// The exported row set (job ids and count) must be identical to the
+    /// match-all run, and tracked jobs that a watch listing would filter out
+    /// must still be present in the CSV.
+    ///
+    /// **Validates: Requirements 18.2, 18.3, 18.4**
+    #[test]
+    fn csv_export_unaffected_by_restrictive_filter_criteria() {
+        let conn = test_connection();
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("jobs.csv");
+
+        // Several TRACKED pipeline jobs: create_job_from_url sets
+        // is_new_from_watch = 0 and watch_disposition = NULL, so they qualify
+        // for CSV export regardless of any filter criteria.
+        let (job1, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/pipeline-1",
+            "Software Engineer",
+            Some("Acme"),
+            Some("applied"),
+            None,
+            None,
+            Some("San Francisco, CA"),
+        )
+        .unwrap();
+        let (job2, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/pipeline-2",
+            "Product Manager",
+            Some("Globex"),
+            Some("wishlist"),
+            None,
+            None,
+            Some("New York, NY"),
+        )
+        .unwrap();
+        let (job3, _) = create_job_from_url(
+            &conn,
+            "https://example.com/job/pipeline-3",
+            "Data Scientist",
+            Some("Initech"),
+            Some("interview"),
+            None,
+            None,
+            Some("Remote"),
+        )
+        .unwrap();
+
+        let expected_ids: HashSet<String> =
+            [job1.id.clone(), job2.id.clone(), job3.id.clone()]
+                .into_iter()
+                .collect();
+
+        // Baseline: export under match-all / no global criteria.
+        set_global_criteria(&conn, &FilterCriteria::match_all()).unwrap();
+        let baseline_export = export_jobs_csv(&conn, &csv_path, None).unwrap();
+        let baseline_ids = exported_ids(&csv_path);
+        assert_eq!(baseline_export.row_count, 3);
+        assert_eq!(baseline_ids, expected_ids);
+
+        // Now set a RESTRICTIVE global filter that would hide every one of
+        // these jobs from a watch listing: a title include no job matches, plus
+        // a non-matching location include, plus a remote-only gate.
+        let restrictive = FilterCriteria {
+            version: 1,
+            title: TitleCriteria {
+                include: vec!["zzz-nonmatching-title".to_string()],
+                exclude: Vec::new(),
+                match_mode: MatchMode::Word,
+            },
+            location: LocationCriteria {
+                country: Some("Antarctica".to_string()),
+                include: vec!["zzz-nonmatching-location".to_string()],
+                exclude: Vec::new(),
+                match_mode: MatchMode::Word,
+            },
+            remote: RemoteMode::RemoteOnly,
+        };
+        set_global_criteria(&conn, &restrictive).unwrap();
+
+        // Export again with the restrictive criteria in place.
+        let filtered_export = export_jobs_csv(&conn, &csv_path, None).unwrap();
+        let filtered_ids = exported_ids(&csv_path);
+
+        // Req 18.2 / 18.3: the exported row set is IDENTICAL to the match-all
+        // run — CSV export is unaffected by filter criteria.
+        assert_eq!(filtered_export.row_count, baseline_export.row_count);
+        assert_eq!(filtered_ids, baseline_ids);
+        assert_eq!(filtered_ids, expected_ids);
+
+        // Req 18.4: jobs that a watch listing would filter out (e.g. the
+        // onsite-only San Francisco role under a RemoteOnly gate) are STILL
+        // present in the CSV export because they are tracked pipeline jobs.
+        assert!(filtered_ids.contains(&job1.id));
+        assert!(filtered_ids.contains(&job2.id));
+        assert!(filtered_ids.contains(&job3.id));
+
+        // Also confirm the underlying selection is stable directly.
+        let rows = load_job_rows(&conn).unwrap();
+        let load_ids: HashSet<String> = rows.into_iter().map(|(job, _)| job.id).collect();
+        assert_eq!(load_ids, expected_ids);
     }
 }

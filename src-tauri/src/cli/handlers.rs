@@ -11,6 +11,9 @@ use crate::cli::output::{
 };
 use crate::db::paths::DataPaths;
 use crate::error::{map_sqlite, AppError, AppResult};
+use crate::filtering::engine::{matches, JobView};
+use crate::filtering::model::FilterCriteria;
+use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::active_csv_path;
 use crate::jobs::metadata::resolve_job_metadata;
@@ -619,6 +622,30 @@ fn load_watch_positions(conn: &Connection, args: WatchListArgs) -> AppResult<Vec
     })?;
 
     let mut positions = rows.collect::<Result<Vec<_>, _>>()?;
+
+    // Route watch listing through the single filter engine authority (Req 10.1,
+    // 10.2) so the CLI agrees with the desktop listings. Resolve the structured
+    // criteria per (company_id, source) via the per-call cache, keep only rows
+    // the engine includes, and only THEN apply the caller's limit so truncation
+    // happens post-filter (Req 8.3). This is a read-only filter — no job is
+    // mutated or deleted (Req 18). The coarse dismissed/new_only/all predicates
+    // above remain in SQL.
+    let aliases = load_alias_table(conn)?;
+    let mut cache = CriteriaCache::new();
+    positions.retain(|item| {
+        let criteria = cache
+            .resolve(conn, &item.job.company_id, &item.job.source)
+            .unwrap_or_else(|_| FilterCriteria::match_all());
+        matches(
+            &criteria,
+            &aliases,
+            JobView {
+                title: &item.job.title,
+                location: item.job.location.as_deref(),
+            },
+        )
+        .included
+    });
 
     if let Some(limit) = args.limit {
         positions.truncate(limit);
