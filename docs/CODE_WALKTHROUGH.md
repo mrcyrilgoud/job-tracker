@@ -303,6 +303,8 @@ flowchart LR
 
 `cli/mod.rs:12-20` opens the CLI's own WAL connection and runs migrations. `run_cli` (22-91) resolves data paths, sends `--run-jobs` directly to the full-cycle handler, defaults no subcommand to `list`, and dispatches every subcommand to `cli/handlers.rs`. The handlers reuse the same service modules as Tauri, so terminal and GUI behavior share persistence rules.
 
+**Agent contract (status quo):** external automation uses this CLI only — there is no Job Tracker MCP or HTTP API. Packaged `jt` resolves data like a release build (`Application Support` unless `--data-dir` / `JOB_TRACKER_DATA_DIR` is set). Prefer `--json` for machine-readable output. See [`AGENTS.md`](../AGENTS.md) for the ops checklist.
+
 ### Hourly LaunchAgent: `scripts/install-launchd.ts`
 
 | Lines | What happens |

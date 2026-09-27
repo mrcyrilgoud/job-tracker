@@ -141,33 +141,46 @@ npm run desktop:build    # Vite UI typecheck + build
 
 ## CLI / Terminal Usage
 
-Job Tracker includes a full-featured CLI for terminal workflows and AI agent automation (Cursor, Claude Code, terminal scripts):
+Job Tracker’s agent surface is the **CLI only** (no MCP server, no in-app chat). Terminal users and AI agents (Cursor, Claude Code, Grok Bot via local Shell, scripts) share the same `jt` binary as the packaged Mac app. Longer agent notes live in [`AGENTS.md`](AGENTS.md).
 
 ```bash
-# Install global 'jt' alias
+# Install global jt / job-tracker → packaged Job Tracker.app binary
 npm run cli:install
 
-# List & search jobs
+# List & search (agents: always add --json)
 jt list --status interviewing
 jt list --search "Staff" --favorites --json
 
 # Pipeline overview
-jt stats
+jt stats --json
 
 # View job details and event history
-jt get <job_id_or_url>
+jt get <job_id_or_url> --json
 
 # Add job by URL (auto-scrapes title, company, location)
-jt add "https://boards.greenhouse.io/stripe/jobs/12345" --notes "Referred by Alex"
+jt add "https://boards.greenhouse.io/stripe/jobs/12345" --status wishlist --notes "Referred by Alex" --json
 
 # Update status or log notes
-jt update <job_id> --status applied --applied-at today
-jt note <job_id> "Recruiter phone screen scheduled for Friday"
+jt update <job_id> --status applied --applied-at today --json
+jt note <job_id> "Recruiter phone screen scheduled for Friday" --json
 
 # ATS Watch triage
-jt watches list --new-only
+jt watches list --new-only --json
 jt watches save <job_id>
 jt watches dismiss <job_id>
+```
+
+### Data directory for CLI vs GUI
+
+Packaged `jt` defaults to the **same** release data dir as the GUI:
+
+`~/Library/Application Support/com.jobtracker.local/`
+
+Override with `--data-dir` or `JOB_TRACKER_DATA_DIR`. Debug/`cargo run` builds prefer the repo `data/` folder when present — that is **not** the live Application Support DB. Agents targeting the real pipeline should use packaged `jt` (or set `JOB_TRACKER_DATA_DIR` explicitly).
+
+```bash
+export JOB_TRACKER_DATA_DIR="$HOME/Library/Application Support/com.jobtracker.local"
+jt list --status wishlist --json
 ```
 
 `app:rebuild` flags: `--skip-jobs` (build only), `--background` (used by the post-commit hook). Concurrent rebuilds use `data/rebuild.lock` and fail clearly if one is already running. Log: `data/rebuild.log`.
