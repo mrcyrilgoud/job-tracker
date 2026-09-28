@@ -5,6 +5,7 @@ mod companies;
 mod db;
 mod documents;
 mod error;
+pub mod filtering;
 mod jobs;
 mod models;
 mod runner;
@@ -109,6 +110,11 @@ pub fn run() {
             commands::set_watch_role_keywords,
             commands::get_location_settings_cmd,
             commands::set_location_settings_cmd,
+            commands::get_filter_criteria,
+            commands::set_filter_criteria,
+            commands::get_watch_filter_criteria,
+            commands::set_watch_filter_criteria,
+            commands::preview_filter_match,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

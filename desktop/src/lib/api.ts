@@ -7,6 +7,7 @@ import type {
   Document,
   DocumentKind,
   DocumentListItem,
+  FilterCriteria,
   Job,
   JobDetail,
   JobListItem,
@@ -15,6 +16,18 @@ import type {
   WatchProvider,
 } from "@/lib/schema";
 import { DESKTOP_SHELL_REQUIRED, isDesktopShell } from "@/lib/tauri";
+
+export type { FilterCriteria, MatchMode, RemoteMode } from "@/lib/schema";
+
+export type FilterPreviewSample = {
+  title: string;
+  location?: string | null;
+};
+
+export type FilterPreviewOutcome = {
+  included: boolean;
+  reason: string;
+};
 
 export type JobFilters = {
   status?: string;
@@ -218,6 +231,20 @@ export const api = {
 
   setLocationSettings: (settings: LocationSettings) =>
     call<{ ok: boolean }>("set_location_settings_cmd", { settings }),
+
+  getFilterCriteria: () => call<FilterCriteria>("get_filter_criteria"),
+
+  setFilterCriteria: (criteria: FilterCriteria) =>
+    call<void>("set_filter_criteria", { criteria }),
+
+  getWatchFilterCriteria: (watchId: string) =>
+    call<FilterCriteria | null>("get_watch_filter_criteria", { watchId }),
+
+  setWatchFilterCriteria: (watchId: string, criteria: FilterCriteria | null) =>
+    call<void>("set_watch_filter_criteria", { watchId, criteria }),
+
+  previewFilterMatch: (criteria: FilterCriteria, samples: FilterPreviewSample[]) =>
+    call<FilterPreviewOutcome[]>("preview_filter_match", { criteria, samples }),
 
   showMainWindow: () => call<void>("show_main_window"),
 };

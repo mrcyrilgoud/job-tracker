@@ -75,6 +75,30 @@ export type Job = {
   updatedAt: string;
 };
 
+export type MatchMode = "word" | "substring";
+
+export type RemoteMode = "any" | "remoteOnly" | "onsiteOnly";
+
+export type TitleCriteria = {
+  include: string[];
+  exclude: string[];
+  matchMode: MatchMode;
+};
+
+export type LocationCriteria = {
+  country: string | null;
+  include: string[];
+  exclude: string[];
+  matchMode: MatchMode;
+};
+
+export type FilterCriteria = {
+  version: number;
+  title: TitleCriteria;
+  location: LocationCriteria;
+  remote: RemoteMode;
+};
+
 export type CompanyWatch = {
   id: string;
   companyId: string;
@@ -83,6 +107,7 @@ export type CompanyWatch = {
   lastSyncedAt: string | null;
   consecutiveSyncFailures: number;
   lastSyncError: string | null;
+  filterCriteria?: FilterCriteria | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -271,282 +271,6 @@ pub struct LocationSettings {
     pub cities: String,
 }
 
-fn expand_country_keywords(country: &str) -> Vec<String> {
-    let mut expanded = Vec::new();
-    let lower_country = country.trim().to_lowercase();
-
-    if lower_country.is_empty() {
-        return expanded;
-    }
-
-    expanded.push(lower_country.clone());
-
-    if lower_country == "united states" || lower_country == "usa" || lower_country == "us" {
-        expanded.push("united states".to_string());
-        expanded.push("usa".to_string());
-        expanded.push(", us".to_string());
-        expanded.push("remote - us".to_string());
-        expanded.push("EXACT:us".to_string());
-        expanded.push("us,%".to_string());
-        expanded.push("us %".to_string());
-        expanded.push("% us".to_string());
-        expanded.push("% us %".to_string());
-        expanded.push("%(us)%".to_string());
-        expanded.push("%us -%".to_string());
-        expanded.push("%- us%".to_string());
-
-        let states = vec![
-            "al",
-            "alabama",
-            "ak",
-            "alaska",
-            "az",
-            "arizona",
-            "ar",
-            "arkansas",
-            "ca",
-            "california",
-            "co",
-            "colorado",
-            "ct",
-            "connecticut",
-            "de",
-            "delaware",
-            "fl",
-            "florida",
-            "ga",
-            "georgia",
-            "hi",
-            "hawaii",
-            "id",
-            "idaho",
-            "il",
-            "illinois",
-            "in",
-            "indiana",
-            "ia",
-            "iowa",
-            "ks",
-            "kansas",
-            "ky",
-            "kentucky",
-            "la",
-            "louisiana",
-            "me",
-            "maine",
-            "md",
-            "maryland",
-            "ma",
-            "massachusetts",
-            "mi",
-            "michigan",
-            "mn",
-            "minnesota",
-            "ms",
-            "mississippi",
-            "mo",
-            "missouri",
-            "mt",
-            "montana",
-            "ne",
-            "nebraska",
-            "nv",
-            "nevada",
-            "nh",
-            "new hampshire",
-            "nj",
-            "new jersey",
-            "nm",
-            "new mexico",
-            "ny",
-            "new york",
-            "nc",
-            "north carolina",
-            "nd",
-            "north dakota",
-            "oh",
-            "ohio",
-            "ok",
-            "oklahoma",
-            "or",
-            "oregon",
-            "pa",
-            "pennsylvania",
-            "ri",
-            "rhode island",
-            "sc",
-            "south carolina",
-            "sd",
-            "south dakota",
-            "tn",
-            "tennessee",
-            "tx",
-            "texas",
-            "ut",
-            "utah",
-            "vt",
-            "vermont",
-            "va",
-            "virginia",
-            "wa",
-            "washington",
-            "wv",
-            "west virginia",
-            "wi",
-            "wisconsin",
-            "wy",
-            "wyoming",
-        ];
-        for state in states {
-            expanded.push(format!(", {}", state));
-            expanded.push(format!(" {}", state));
-            expanded.push(format!("EXACT:{}", state));
-        }
-
-        let hubs = vec![
-            "san francisco",
-            "san jose",
-            "new york",
-            "nyc",
-            "seattle",
-            "austin",
-            "boston",
-            "chicago",
-            "los angeles",
-            "palo alto",
-            "mountain view",
-            "sunnyvale",
-            "santa clara",
-            "menlo park",
-            "redwood city",
-            "san mateo",
-            "oakland",
-            "berkeley",
-            "santa monica",
-            "venice",
-            "culver city",
-            "irvine",
-            "brooklyn",
-            "manhattan",
-            "queens",
-            "jersey city",
-            "bellevue",
-            "redmond",
-            "kirkland",
-            "cambridge",
-            "atlanta",
-            "denver",
-            "boulder",
-            "salt lake city",
-            "washington dc",
-            "miami",
-            "dallas",
-            "houston",
-            "raleigh",
-            "bay area",
-        ];
-        for hub in hubs {
-            expanded.push(hub.to_string());
-        }
-    } else if lower_country == "united kingdom" || lower_country == "uk" {
-        expanded.push("united kingdom".to_string());
-        expanded.push("uk".to_string());
-        expanded.push(", uk".to_string());
-        expanded.push("london".to_string());
-    } else if lower_country == "canada" {
-        expanded.push("canada".to_string());
-        // Careful with "ca" which is California in the US context
-        expanded.push(", on".to_string());
-        expanded.push(", bc".to_string());
-        expanded.push(", qc".to_string());
-        expanded.push(", ab".to_string());
-    }
-
-    let mut unique = Vec::new();
-    for e in expanded {
-        if !unique.contains(&e) {
-            unique.push(e);
-        }
-    }
-    unique
-}
-
-fn expand_location_keywords(cities: &str) -> Vec<String> {
-    let mut expanded = Vec::new();
-    let lower_cities = cities.to_lowercase();
-
-    // Simple predefined regions mapping for smarter "dynamic" filtering
-    if lower_cities.contains("san jose")
-        || lower_cities.contains("san francisco")
-        || lower_cities.contains("oakland")
-        || lower_cities.contains("bay area")
-    {
-        expanded.push("san jose".to_string());
-        expanded.push("san francisco".to_string());
-        expanded.push("oakland".to_string());
-        expanded.push("santa clara".to_string());
-        expanded.push("palo alto".to_string());
-        expanded.push("mountain view".to_string());
-        expanded.push("sunnyvale".to_string());
-        expanded.push("cupertino".to_string());
-        expanded.push("menlo park".to_string());
-        expanded.push("san mateo".to_string());
-        expanded.push("redwood city".to_string());
-        expanded.push("bay area".to_string());
-    }
-
-    if lower_cities.contains("new york")
-        || lower_cities.contains("nyc")
-        || lower_cities.contains("brooklyn")
-    {
-        expanded.push("new york".to_string());
-        expanded.push("nyc".to_string());
-        expanded.push("brooklyn".to_string());
-        expanded.push("manhattan".to_string());
-        expanded.push("queens".to_string());
-        expanded.push("jersey city".to_string());
-    }
-
-    if lower_cities.contains("seattle")
-        || lower_cities.contains("bellevue")
-        || lower_cities.contains("redmond")
-    {
-        expanded.push("seattle".to_string());
-        expanded.push("bellevue".to_string());
-        expanded.push("redmond".to_string());
-        expanded.push("kirkland".to_string());
-    }
-
-    if lower_cities.contains("los angeles")
-        || lower_cities.contains("santa monica")
-        || lower_cities.contains("la")
-        || lower_cities.contains("socal")
-    {
-        expanded.push("los angeles".to_string());
-        expanded.push("santa monica".to_string());
-        expanded.push("venice".to_string());
-        expanded.push("culver city".to_string());
-        expanded.push("irvine".to_string());
-    }
-
-    // Include user typed cities
-    for city in cities
-        .split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        expanded.push(city.to_lowercase());
-    }
-
-    let mut unique = Vec::new();
-    for e in expanded {
-        if !unique.contains(&e) {
-            unique.push(e);
-        }
-    }
-    unique
-}
-
 pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
     let mut sql = String::from(
         "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
@@ -594,76 +318,30 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         values.push(Box::new(pattern));
     }
 
-    // Location filtering based on global settings
-    if filters.new_from_watch == Some(true) {
-        let loc_settings = get_location_settings(conn).unwrap_or_default();
-        let mut location_clauses = Vec::new();
-
-        if !loc_settings.country.trim().is_empty() {
-            let expanded_country = expand_country_keywords(&loc_settings.country);
-            for c in expanded_country {
-                if let Some(exact) = c.strip_prefix("EXACT:") {
-                    location_clauses.push("j.location COLLATE NOCASE = ?");
-                    values.push(Box::new(exact.to_string()));
-                } else if c.contains('%') {
-                    location_clauses.push("j.location LIKE ?");
-                    values.push(Box::new(c));
-                } else {
-                    location_clauses.push("j.location LIKE ?");
-                    values.push(Box::new(format!("%{}%", c)));
-                }
-            }
-        }
-        if !loc_settings.cities.trim().is_empty() {
-            let expanded_cities = expand_location_keywords(&loc_settings.cities);
-            for city in expanded_cities {
-                if let Some(exact) = city.strip_prefix("EXACT:") {
-                    location_clauses.push("j.location COLLATE NOCASE = ?");
-                    values.push(Box::new(exact.to_string()));
-                } else if city.contains('%') {
-                    location_clauses.push("j.location LIKE ?");
-                    values.push(Box::new(city));
-                } else {
-                    location_clauses.push("j.location LIKE ?");
-                    values.push(Box::new(format!("%{}%", city)));
-                }
-            }
-        }
-
-        if !location_clauses.is_empty() {
-            sql.push_str(" AND (");
-            sql.push_str(&location_clauses.join(" OR "));
-            sql.push_str(")");
-        }
-    } else if let Some(location) = &filters.location {
-        sql.push_str(" AND j.location LIKE ?");
-        values.push(Box::new(format!("%{location}%")));
-    }
-
-    if filters.new_from_watch == Some(true) {
-        let keywords = get_watch_role_keywords(conn).unwrap_or_default();
-        if !keywords.trim().is_empty() {
-            let terms: Vec<&str> = keywords
-                .split(|c| c == ',' || c == '\n')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !terms.is_empty() {
-                let mut keyword_clauses = Vec::new();
-                for term in terms {
-                    keyword_clauses.push("j.title LIKE ?");
-                    values.push(Box::new(format!("%{term}%")));
-                }
-                sql.push_str(" AND (");
-                sql.push_str(&keyword_clauses.join(" OR "));
-                sql.push_str(")");
-            }
+    // Location filtering: the watch path evaluates the structured filter engine
+    // in memory (below) rather than building hardcoded location/keyword SQL, so
+    // only the coarse `is_new_from_watch = 1` predicate applies here. The legacy
+    // `filters.location` LIKE branch remains for the non-watch (pipeline) path.
+    let watch_path = filters.new_from_watch == Some(true);
+    if !watch_path {
+        if let Some(location) = &filters.location {
+            sql.push_str(" AND j.location LIKE ?");
+            values.push(Box::new(format!("%{location}%")));
         }
     }
 
     sql.push_str(" ORDER BY j.updated_at DESC");
 
-    if let Some(lim) = filters.limit {
+    // LIMIT ordering (Req 8.3): on the watch path the fine filter runs in Rust
+    // *after* fetch, so the SQL LIMIT is applied post-filter (truncation below),
+    // not pushed into the query. A generous fetch cap bounds the coarse load so
+    // we never pull an unbounded number of candidate rows. On the non-watch path
+    // the existing SQL LIMIT behavior is preserved.
+    const WATCH_FETCH_CAP: i64 = 5000;
+    if watch_path {
+        sql.push_str(" LIMIT ?");
+        values.push(Box::new(WATCH_FETCH_CAP));
+    } else if let Some(lim) = filters.limit {
         sql.push_str(" LIMIT ?");
         values.push(Box::new(lim as i64));
     }
@@ -683,6 +361,42 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     for row in rows {
         out.push(row.map_err(map_sqlite)?);
     }
+
+    // Query-time watch filtering (Req 8.1, 8.2, 8.3, 8.4): evaluate the resolved
+    // structured criteria against each candidate in memory, keep only included
+    // rows, then apply the caller's limit *after* filtering. This is purely a
+    // read-only filter of the returned list — no job is deleted or mutated
+    // (Req 18). Criteria are resolved once per (company_id, source) group via a
+    // per-call cache and re-read on every call, so changing criteria re-filters
+    // existing rows on the next listing without any re-sync (Req 8.4).
+    if watch_path {
+        use crate::filtering::engine::{matches, JobView};
+        use crate::filtering::model::FilterCriteria;
+        use crate::filtering::resolver::{load_alias_table, CriteriaCache};
+
+        let aliases = load_alias_table(conn)?;
+        let mut cache = CriteriaCache::new();
+
+        out.retain(|item| {
+            let criteria = cache
+                .resolve(conn, &item.job.company_id, &item.job.source)
+                .unwrap_or_else(|_| FilterCriteria::match_all());
+            matches(
+                &criteria,
+                &aliases,
+                JobView {
+                    title: &item.job.title,
+                    location: item.job.location.as_deref(),
+                },
+            )
+            .included
+        });
+
+        if let Some(lim) = filters.limit {
+            out.truncate(lim as usize);
+        }
+    }
+
     Ok(out)
 }
 
@@ -693,61 +407,23 @@ pub fn list_open_watch_positions(
     conn: &Connection,
     company_id: &str,
 ) -> AppResult<Vec<JobListItem>> {
-    let loc_settings = get_location_settings(conn).unwrap_or_default();
-    let mut sql = String::from(
+    // Coarse SQL pre-filter only (company + active + supported providers). The
+    // fine-grained location/keyword matching that used to be built here from
+    // `expand_country_keywords`/`expand_location_keywords` is now evaluated in
+    // memory by the single filter engine (Req 10.1, 10.2), so every watch
+    // listing agrees on inclusion.
+    let sql = String::from(
         "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.company_id = ?1
            AND j.posting_state = 'active'
-           AND j.source IN ('greenhouse', 'lever', 'ashby')"
+           AND j.source IN ('greenhouse', 'lever', 'ashby')
+         ORDER BY j.updated_at DESC"
     );
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(company_id.to_string())];
-
-    let mut location_clauses = Vec::new();
-
-    if !loc_settings.country.trim().is_empty() {
-        let expanded_country = expand_country_keywords(&loc_settings.country);
-        for c in expanded_country {
-            if let Some(exact) = c.strip_prefix("EXACT:") {
-                location_clauses.push("j.location COLLATE NOCASE = ?");
-                values.push(Box::new(exact.to_string()));
-            } else if c.contains('%') {
-                location_clauses.push("j.location LIKE ?");
-                values.push(Box::new(c));
-            } else {
-                location_clauses.push("j.location LIKE ?");
-                values.push(Box::new(format!("%{}%", c)));
-            }
-        }
-    }
-    if !loc_settings.cities.trim().is_empty() {
-        let expanded_cities = expand_location_keywords(&loc_settings.cities);
-        for city in expanded_cities {
-            if let Some(exact) = city.strip_prefix("EXACT:") {
-                location_clauses.push("j.location COLLATE NOCASE = ?");
-                values.push(Box::new(exact.to_string()));
-            } else if city.contains('%') {
-                location_clauses.push("j.location LIKE ?");
-                values.push(Box::new(city));
-            } else {
-                location_clauses.push("j.location LIKE ?");
-                values.push(Box::new(format!("%{}%", city)));
-            }
-        }
-    }
-
-    if !location_clauses.is_empty() {
-        sql.push_str(" AND (");
-        sql.push_str(&location_clauses.join(" OR "));
-        sql.push_str(")");
-    }
-
-    sql.push_str(" ORDER BY j.updated_at DESC");
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
     let rows = stmt
-        .query_map(params_ref.as_slice(), |row| {
+        .query_map(params![company_id], |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
                 company_name: row.get(21)?,
@@ -755,7 +431,38 @@ pub fn list_open_watch_positions(
         })
         .map_err(map_sqlite)?;
 
-    rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)
+    let mut out = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
+
+    // Query-time watch filtering through the single engine authority (Req 8.1,
+    // 8.2, 10.1, 10.2): resolve the structured criteria per (company_id, source)
+    // via the per-call cache and keep only rows the engine includes. This is a
+    // read-only filter of the returned list — no job is mutated or deleted
+    // (Req 18). There is no explicit row cap here, so no post-filter truncation
+    // is required (had one existed, it would be applied after this retain per
+    // Req 8.3).
+    use crate::filtering::engine::{matches, JobView};
+    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::resolver::{load_alias_table, CriteriaCache};
+
+    let aliases = load_alias_table(conn)?;
+    let mut cache = CriteriaCache::new();
+
+    out.retain(|item| {
+        let criteria = cache
+            .resolve(conn, &item.job.company_id, &item.job.source)
+            .unwrap_or_else(|_| FilterCriteria::match_all());
+        matches(
+            &criteria,
+            &aliases,
+            JobView {
+                title: &item.job.title,
+                location: item.job.location.as_deref(),
+            },
+        )
+        .included
+    });
+
+    Ok(out)
 }
 
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
@@ -1414,12 +1121,28 @@ pub fn get_watch_role_keywords(conn: &Connection) -> AppResult<String> {
 
 pub fn set_watch_role_keywords(conn: &Connection, keywords: &str) -> AppResult<()> {
     let timestamp = now_iso();
+    // Retain the legacy key so legacy readers and rollback still work (Req 15.1).
     conn.execute(
         "INSERT INTO app_settings (key, value, updated_at) VALUES ('watch_role_keywords', ?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
         params![keywords, timestamp],
     )
     .map_err(map_sqlite)?;
+
+    // Write through to the structured global criteria so both surfaces stay
+    // consistent (Req 15.2). Mirrors the legacy->structured mapping used by the
+    // migration (`build_legacy_criteria`): keywords split on comma and newline,
+    // trimmed and de-blanked, become `title.include` with Word match mode,
+    // preserving the criteria's existing location/remote fields. If this
+    // write-through fails, propagate the error so the legacy setter fails rather
+    // than leaving the two surfaces inconsistent (Req 15.3).
+    let mut criteria = crate::filtering::resolver::get_global_criteria(conn)?;
+    criteria.title.include = crate::filtering::model::normalize_tokens(
+        keywords.split([',', '\n']).collect::<Vec<_>>(),
+    );
+    criteria.title.match_mode = crate::filtering::model::MatchMode::Word;
+    crate::filtering::resolver::set_global_criteria(conn, &criteria)?;
+
     Ok(())
 }
 
@@ -1460,6 +1183,26 @@ pub fn set_location_settings(conn: &Connection, settings: &LocationSettings) -> 
         params![settings.cities, timestamp],
     )
     .map_err(map_sqlite)?;
+
+    // Write through to the structured global criteria so both surfaces stay
+    // consistent (Req 15.2). Mirrors the legacy->structured mapping used by the
+    // migration (`build_legacy_criteria`): a non-empty country becomes
+    // `location.country` (else None), and cities split on comma, trimmed and
+    // de-blanked, become `location.include`; title/remote fields are preserved.
+    // Propagate any write-through failure so the legacy setter fails rather than
+    // leaving the two surfaces inconsistent (Req 15.3).
+    let mut criteria = crate::filtering::resolver::get_global_criteria(conn)?;
+    let country_trimmed = settings.country.trim();
+    criteria.location.country = if country_trimmed.is_empty() {
+        None
+    } else {
+        Some(country_trimmed.to_string())
+    };
+    criteria.location.include = crate::filtering::model::normalize_tokens(
+        settings.cities.split(',').collect::<Vec<_>>(),
+    );
+    crate::filtering::resolver::set_global_criteria(conn, &criteria)?;
+
     Ok(())
 }
 
@@ -1775,8 +1518,14 @@ mod tests {
         .unwrap();
         assert_eq!(inbox.len(), 3);
 
-        // Set keyword to "Software Engineer"
-        set_watch_role_keywords(&conn, "Software Engineer").unwrap();
+        // Configure the structured global criteria so the query-time filter
+        // engine keeps only "Software Engineer" titles. Since task 8.1, the
+        // watch listing evaluates the resolved FilterCriteria in memory rather
+        // than reading the legacy `watch_role_keywords` SQL (the legacy
+        // write-through to structured criteria is wired in task 12.2).
+        let mut criteria = crate::filtering::model::FilterCriteria::match_all();
+        criteria.title.include = vec!["Software Engineer".to_string()];
+        crate::filtering::resolver::set_global_criteria(&conn, &criteria).unwrap();
 
         // Now inbox should only have the two Software Engineer jobs
         let filtered_inbox = list_jobs(
@@ -1802,6 +1551,109 @@ mod tests {
         let pipeline = list_jobs(&conn, JobFilters::default()).unwrap();
         let pipeline_ids: Vec<_> = pipeline.iter().map(|item| item.job.id.as_str()).collect();
         assert!(pipeline_ids.contains(&tracked.id.as_str()));
+    }
+
+    #[test]
+    fn set_watch_role_keywords_write_through_filters_new_roles() {
+        // Proves the legacy setter's write-through to structured criteria works
+        // end to end (Req 15.2): calling `set_watch_role_keywords` makes the
+        // watch listing filter, because the query-time engine reads the
+        // structured global criteria the setter wrote through to.
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Thinking Machine Labs", None).unwrap();
+
+        let id1 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer, Developer Productivity",
+            "https://example.com/jobs/1",
+        );
+        let _id2 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Research Engineer, Developer Experience",
+            "https://example.com/jobs/2",
+        );
+        let id3 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer, Full stack",
+            "https://example.com/jobs/3",
+        );
+
+        // Drive the legacy setter only — no direct structured write.
+        set_watch_role_keywords(&conn, "Software Engineer").unwrap();
+
+        // The legacy key is retained for rollback (Req 15.1).
+        assert_eq!(
+            get_watch_role_keywords(&conn).unwrap(),
+            "Software Engineer".to_string()
+        );
+
+        // The structured global criteria were updated via write-through.
+        let criteria = crate::filtering::resolver::get_global_criteria(&conn).unwrap();
+        assert_eq!(criteria.title.include, vec!["Software Engineer".to_string()]);
+        assert_eq!(
+            criteria.title.match_mode,
+            crate::filtering::model::MatchMode::Word
+        );
+
+        // The watch listing now filters to the two Software Engineer roles.
+        let filtered = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        let ids: Vec<_> = filtered.iter().map(|item| item.job.id.as_str()).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&id1.as_str()));
+        assert!(ids.contains(&id3.as_str()));
+    }
+
+    #[test]
+    fn set_location_settings_writes_through_to_structured_criteria() {
+        // Proves the location legacy setter writes through to the structured
+        // global criteria's location fields (Req 15.2), while retaining the
+        // legacy keys for rollback (Req 15.1).
+        let conn = test_connection();
+
+        set_location_settings(
+            &conn,
+            &LocationSettings {
+                country: "United States".to_string(),
+                cities: "San Francisco, New York".to_string(),
+            },
+        )
+        .unwrap();
+
+        // Legacy keys retained.
+        let legacy = get_location_settings(&conn).unwrap();
+        assert_eq!(legacy.country, "United States");
+        assert_eq!(legacy.cities, "San Francisco, New York");
+
+        // Structured global criteria updated via write-through.
+        let criteria = crate::filtering::resolver::get_global_criteria(&conn).unwrap();
+        assert_eq!(criteria.location.country, Some("United States".to_string()));
+        assert_eq!(
+            criteria.location.include,
+            vec!["San Francisco".to_string(), "New York".to_string()]
+        );
+
+        // An empty country clears location.country on write-through.
+        set_location_settings(
+            &conn,
+            &LocationSettings {
+                country: "  ".to_string(),
+                cities: "Remote".to_string(),
+            },
+        )
+        .unwrap();
+        let criteria = crate::filtering::resolver::get_global_criteria(&conn).unwrap();
+        assert_eq!(criteria.location.country, None);
+        assert_eq!(criteria.location.include, vec!["Remote".to_string()]);
     }
 
     #[test]
@@ -2158,5 +2010,234 @@ mod tests {
 
         assert_eq!(result.job.status, "closed");
         assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
+    }
+
+    // ---- Query-time filtering integration tests (task 8.3) ----
+    //
+    // These cover the query-time behavior of `list_jobs` on the watch path:
+    // criteria changes re-filter without a re-sync (Req 8.4), the caller's
+    // limit is applied *after* filtering (Req 8.3), and listing is purely
+    // read-only — it never deletes or mutates stored rows (Req 18.1, 18.5).
+
+    /// Set `updated_at` explicitly so tests can control ORDER BY / pre-filter
+    /// ordering independently of insertion time.
+    fn set_updated_at(conn: &Connection, job_id: &str, updated_at: &str) {
+        conn.execute(
+            "UPDATE jobs SET updated_at = ?1 WHERE id = ?2",
+            params![updated_at, job_id],
+        )
+        .unwrap();
+    }
+
+    /// Build a title-include criteria in Word match mode (the default).
+    fn title_include(terms: &[&str]) -> crate::filtering::model::FilterCriteria {
+        let mut criteria = crate::filtering::model::FilterCriteria::match_all();
+        criteria.title.include = terms.iter().map(|t| t.to_string()).collect();
+        criteria
+    }
+
+    fn watch_inbox(conn: &Connection) -> Vec<JobListItem> {
+        list_jobs(
+            conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// Req 8.4: changing criteria re-filters the *already-stored* watch rows on
+    /// the very next listing, with no re-sync and no re-ingest. The stored rows
+    /// are untouched between calls; only the returned Vec changes.
+    #[test]
+    fn criteria_change_refilters_without_resync() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+
+        let se = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer",
+            "https://example.com/jobs/se",
+        );
+        let re = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Research Engineer",
+            "https://example.com/jobs/re",
+        );
+        let pm = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Product Manager",
+            "https://example.com/jobs/pm",
+        );
+
+        // No criteria (match-all) returns all three watch-pending rows.
+        let all = watch_inbox(&conn);
+        assert_eq!(all.len(), 3);
+
+        // Tighten to "Software Engineer": only that subset survives on the next
+        // listing — no re-sync was performed, the same stored rows are re-read.
+        crate::filtering::resolver::set_global_criteria(&conn, &title_include(&["Software Engineer"]))
+            .unwrap();
+        let filtered = watch_inbox(&conn);
+        let ids: Vec<_> = filtered.iter().map(|i| i.job.id.as_str()).collect();
+        assert_eq!(ids, vec![se.as_str()]);
+
+        // Change criteria again to "Engineer" (Word match). The listing reflects
+        // the new criteria on the next call — both engineer roles return, the PM
+        // role does not — still without any re-sync.
+        crate::filtering::resolver::set_global_criteria(&conn, &title_include(&["Engineer"]))
+            .unwrap();
+        let refiltered = watch_inbox(&conn);
+        let mut ids: Vec<_> = refiltered.iter().map(|i| i.job.id.clone()).collect();
+        ids.sort();
+        let mut expected = vec![se.clone(), re.clone()];
+        expected.sort();
+        assert_eq!(ids, expected);
+        assert!(!refiltered.iter().any(|i| i.job.id == pm));
+    }
+
+    /// Req 8.3: the caller's `limit` is applied *after* filtering. This is
+    /// constructed adversarially: the non-matching jobs are made "newer"
+    /// (later `updated_at`) so a naive pre-filter `LIMIT K` pushed into SQL
+    /// would grab those newest rows first and then filter them all out,
+    /// yielding fewer than K matches. Correct post-filter limiting still
+    /// returns exactly K matching rows.
+    #[test]
+    fn limit_applies_after_filtering() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+
+        // Three matching rows (older) ...
+        let m1 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer One",
+            "https://example.com/jobs/m1",
+        );
+        let m2 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer Two",
+            "https://example.com/jobs/m2",
+        );
+        let m3 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer Three",
+            "https://example.com/jobs/m3",
+        );
+        // ... and three non-matching rows made strictly newer so a pre-filter
+        // LIMIT would grab these first.
+        let n1 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Product Manager One",
+            "https://example.com/jobs/n1",
+        );
+        let n2 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Product Manager Two",
+            "https://example.com/jobs/n2",
+        );
+        let n3 = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Product Manager Three",
+            "https://example.com/jobs/n3",
+        );
+
+        // Matching rows are older; non-matching rows are newer (listing is
+        // ORDER BY updated_at DESC, so newest come first).
+        set_updated_at(&conn, &m1, "2024-01-01T00:00:00Z");
+        set_updated_at(&conn, &m2, "2024-01-02T00:00:00Z");
+        set_updated_at(&conn, &m3, "2024-01-03T00:00:00Z");
+        set_updated_at(&conn, &n1, "2024-06-01T00:00:00Z");
+        set_updated_at(&conn, &n2, "2024-06-02T00:00:00Z");
+        set_updated_at(&conn, &n3, "2024-06-03T00:00:00Z");
+
+        crate::filtering::resolver::set_global_criteria(&conn, &title_include(&["Software Engineer"]))
+            .unwrap();
+
+        const K: usize = 3;
+        let out = list_jobs(
+            &conn,
+            JobFilters {
+                new_from_watch: Some(true),
+                limit: Some(K),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+
+        // Exactly K matching rows returned — not fewer. Every returned row is a
+        // matching (Software Engineer) row, none of the newer PM rows leaked in.
+        assert_eq!(out.len(), K);
+        let matched: std::collections::HashSet<_> =
+            out.iter().map(|i| i.job.id.clone()).collect();
+        let expected: std::collections::HashSet<_> =
+            [m1.clone(), m2.clone(), m3.clone()].into_iter().collect();
+        assert_eq!(matched, expected);
+    }
+
+    /// Req 18.1, 18.5: listing with restrictive criteria that hides most watch
+    /// rows is non-destructive. The stored row count is unchanged before and
+    /// after listing — filtering only shaped the returned Vec, not the table.
+    #[test]
+    fn listing_with_restrictive_criteria_is_non_destructive() {
+        let conn = test_connection();
+        let company = find_or_create_company(&conn, "Acme", None).unwrap();
+
+        insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Software Engineer",
+            "https://example.com/jobs/1",
+        );
+        insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Research Engineer",
+            "https://example.com/jobs/2",
+        );
+        insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Product Manager",
+            "https://example.com/jobs/3",
+        );
+
+        let count_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count_before, 3);
+
+        // A restrictive title that matches nothing hides every watch row.
+        crate::filtering::resolver::set_global_criteria(
+            &conn,
+            &title_include(&["Chief Executive Officer"]),
+        )
+        .unwrap();
+        let out = watch_inbox(&conn);
+        assert!(out.is_empty(), "restrictive criteria should hide all rows");
+
+        // The stored jobs are untouched — nothing was deleted by listing.
+        let count_after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count_after, count_before);
+
+        // Relaxing back to match-all shows all rows again, proving the data was
+        // preserved rather than removed.
+        crate::filtering::resolver::set_global_criteria(
+            &conn,
+            &crate::filtering::model::FilterCriteria::match_all(),
+        )
+        .unwrap();
+        assert_eq!(watch_inbox(&conn).len(), 3);
     }
 }

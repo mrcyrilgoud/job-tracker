@@ -133,6 +133,7 @@ export function CompanyCard({
               feedback={feedback[`sync:${watch.id}`] ?? feedback[`remove:${watch.id}`]}
               onSync={() => onSync(watch.id)}
               onRemove={() => onRemoveWatch(watch.id)}
+              onFilterChanged={onChanged}
             />
           ))}
         </div>
