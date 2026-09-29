@@ -65,6 +65,24 @@ pub fn apply_watch_sync(
     watch_id: &str,
     remote_jobs: Result<Vec<AtsJob>, String>,
 ) -> AppResult<serde_json::Value> {
+    let transaction = conn.unchecked_transaction().map_err(map_sqlite)?;
+    match apply_watch_sync_inner(&transaction, watch_id, remote_jobs) {
+        Ok(value) => {
+            transaction.commit().map_err(map_sqlite)?;
+            Ok(value)
+        }
+        Err(error) => {
+            transaction.rollback().map_err(map_sqlite)?;
+            Err(error)
+        }
+    }
+}
+
+fn apply_watch_sync_inner(
+    conn: &Connection,
+    watch_id: &str,
+    remote_jobs: Result<Vec<AtsJob>, String>,
+) -> AppResult<serde_json::Value> {
     let watch = get_watch(conn, watch_id)?.ok_or_else(|| AppError::from("Watch not found"))?;
     let synced_at = now_iso();
 
@@ -406,6 +424,62 @@ mod tests {
             )
             .unwrap();
         assert_eq!(matching_jobs, 1);
+    }
+
+    #[test]
+    fn sync_rolls_back_when_a_later_role_is_invalid() {
+        let connection = test_connection();
+        let company = create_company(&connection, "Source Co", None).unwrap();
+        let watch = insert_watch(&connection, &company.id, "greenhouse", "source-co").unwrap();
+        let valid = AtsJob {
+            external_id: "role-123".into(),
+            title: "Platform Engineer".into(),
+            url: "https://boards.greenhouse.io/source-co/jobs/123".into(),
+            location: Some("Remote".into()),
+        };
+        let invalid = AtsJob {
+            external_id: "role-456".into(),
+            title: "Backend Engineer".into(),
+            url: "not a valid URL".into(),
+            location: Some("Remote".into()),
+        };
+
+        let result = apply_watch_sync(&connection, &watch.id, Ok(vec![valid, invalid]));
+
+        assert!(result.is_err());
+        let jobs: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM jobs WHERE company_id = ?1",
+                params![company.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let events: i64 = connection
+            .query_row("SELECT COUNT(*) FROM job_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(jobs, 0, "the earlier job must be rolled back");
+        assert_eq!(events, 0, "the earlier discovery event must be rolled back");
+    }
+
+    #[test]
+    fn sync_fetch_error_commits_failure_bookkeeping() {
+        let connection = test_connection();
+        let company = create_company(&connection, "Source Co", None).unwrap();
+        let watch = insert_watch(&connection, &company.id, "greenhouse", "source-co").unwrap();
+
+        let result =
+            apply_watch_sync(&connection, &watch.id, Err("request timed out".into())).unwrap();
+
+        assert_eq!(result["ok"], false);
+        let (failures, error): (i64, Option<String>) = connection
+            .query_row(
+                "SELECT consecutive_sync_failures, last_sync_error FROM company_watches WHERE id = ?1",
+                params![watch.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(failures, 1);
+        assert_eq!(error.as_deref(), Some("request timed out"));
     }
 }
 
