@@ -309,10 +309,8 @@ pub fn handle_update(
 
     let description = if args.clear_description {
         Some(None)
-    } else if let Some(d) = args.description {
-        Some(Some(d))
     } else {
-        None
+        args.description.map(Some)
     };
 
     let location = args.location.map(Some);

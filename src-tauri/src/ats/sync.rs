@@ -165,7 +165,7 @@ fn apply_watch_sync_inner(
                 // (Req 9.5).
                 if included {
                     conn.execute(
-                        "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, posting_state='active', watch_filtered=?4, updated_at=?5 WHERE id=?6",
+                        "UPDATE jobs SET title=?1, url=?2, location=COALESCE(?3, location), missing_from_sync_count=0, posting_state='active', watch_filtered=?4, updated_at=?5 WHERE id=?6",
                         params![
                             remote.title,
                             remote.url,
@@ -178,7 +178,7 @@ fn apply_watch_sync_inner(
                     .map_err(map_sqlite)?;
                 } else {
                     conn.execute(
-                        "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, posting_state='active', updated_at=?4 WHERE id=?5",
+                        "UPDATE jobs SET title=?1, url=?2, location=COALESCE(?3, location), missing_from_sync_count=0, posting_state='active', updated_at=?4 WHERE id=?5",
                         params![
                             remote.title,
                             remote.url,
@@ -191,7 +191,7 @@ fn apply_watch_sync_inner(
                 }
             } else if included {
                 conn.execute(
-                    "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, watch_filtered=?4, updated_at=?5 WHERE id=?6",
+                    "UPDATE jobs SET title=?1, url=?2, location=COALESCE(?3, location), missing_from_sync_count=0, watch_filtered=?4, updated_at=?5 WHERE id=?6",
                     params![
                         remote.title,
                         remote.url,
@@ -204,7 +204,7 @@ fn apply_watch_sync_inner(
                 .map_err(map_sqlite)?;
             } else {
                 conn.execute(
-                    "UPDATE jobs SET title=?1, url=?2, location=?3, missing_from_sync_count=0, updated_at=?4 WHERE id=?5",
+                    "UPDATE jobs SET title=?1, url=?2, location=COALESCE(?3, location), missing_from_sync_count=0, updated_at=?4 WHERE id=?5",
                     params![
                         remote.title,
                         remote.url,
@@ -480,6 +480,35 @@ mod tests {
             .unwrap();
         assert_eq!(failures, 1);
         assert_eq!(error.as_deref(), Some("request timed out"));
+    }
+
+    #[test]
+    fn sync_preserves_known_location_when_refresh_omits_location() {
+        let connection = test_connection();
+        let company = create_company(&connection, "Source Co", None).unwrap();
+        let watch = insert_watch(&connection, &company.id, "greenhouse", "source-co").unwrap();
+        let first = AtsJob {
+            external_id: "role-123".into(),
+            title: "Platform Engineer".into(),
+            url: "https://boards.greenhouse.io/source-co/jobs/123".into(),
+            location: Some("San Francisco, CA".into()),
+        };
+        apply_watch_sync(&connection, &watch.id, Ok(vec![first.clone()])).unwrap();
+
+        let refresh_without_location = AtsJob {
+            location: None,
+            ..first
+        };
+        apply_watch_sync(&connection, &watch.id, Ok(vec![refresh_without_location])).unwrap();
+
+        let location: Option<String> = connection
+            .query_row(
+                "SELECT location FROM jobs WHERE source_external_id = ?1",
+                params!["role-123"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(location.as_deref(), Some("San Francisco, CA"));
     }
 }
 

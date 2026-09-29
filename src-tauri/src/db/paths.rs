@@ -55,7 +55,7 @@ pub fn resolve_data_dir(app_data_dir: Option<PathBuf>) -> DataPaths {
         }
     }
 
-    let dir = app_data_dir.unwrap_or_else(|| dirs_fallback());
+    let dir = app_data_dir.unwrap_or_else(dirs_fallback);
     DataPaths::from_data_dir(dir)
 }
 

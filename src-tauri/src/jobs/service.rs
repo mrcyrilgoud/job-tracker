@@ -393,7 +393,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         });
 
         if let Some(lim) = filters.limit {
-            out.truncate(lim as usize);
+            out.truncate(lim);
         }
     }
 

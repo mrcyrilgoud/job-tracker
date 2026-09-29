@@ -68,17 +68,12 @@ pub struct ExportResult {
     pub row_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImportMode {
+    #[default]
     Merge,
     OverwriteEditable,
-}
-
-impl Default for ImportMode {
-    fn default() -> Self {
-        Self::Merge
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -380,9 +375,9 @@ pub fn export_jobs_csv(
     let exported_at = fs::metadata(csv_path)?
         .modified()
         .ok()
-        .and_then(|t| {
+        .map(|t| {
             let dt: chrono::DateTime<chrono::Utc> = t.into();
-            Some(dt.to_rfc3339())
+            dt.to_rfc3339()
         })
         .unwrap_or_else(now_iso);
 
@@ -652,10 +647,8 @@ pub fn import_jobs_csv(
     }
 
     for job_id in sync.rows.keys() {
-        if !seen_job_ids.contains(job_id) {
-            if get_job_by_id(&conn, job_id)?.is_some() {
-                result.summary.missing_from_csv += 1;
-            }
+        if !seen_job_ids.contains(job_id) && get_job_by_id(&conn, job_id)?.is_some() {
+            result.summary.missing_from_csv += 1;
         }
     }
 

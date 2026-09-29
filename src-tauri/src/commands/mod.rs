@@ -587,10 +587,12 @@ pub async fn check_job_posting(
 ) -> AppResult<serde_json::Value> {
     let (url, previous) = state.with_db(|conn| load_job_check_context(conn, &id))?;
     let (posting_state, last_check_result) = fetch_posting_state(&url).await;
-    state.with_db(|conn| {
+    let result = state.with_db_tx(|conn| {
         let result = apply_posting_check(conn, &id, &previous, &posting_state, &last_check_result)?;
         Ok(serde_json::json!(result))
-    })
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
 }
 
 #[tauri::command]
@@ -674,7 +676,9 @@ pub async fn sync_watch(
     let remote = fetch_remote_jobs(&provider, &board_slug)
         .await
         .map_err(|e| e.to_string());
-    state.with_db(|conn| apply_watch_sync(conn, &watch_id, remote))
+    let result = state.with_db(|conn| apply_watch_sync(conn, &watch_id, remote))?;
+    state.csv_export.mark_dirty();
+    Ok(result)
 }
 
 #[tauri::command]
