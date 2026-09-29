@@ -1138,10 +1138,9 @@ mod tests {
         )
         .unwrap();
 
-        let expected_ids: HashSet<String> =
-            [job1.id.clone(), job2.id.clone(), job3.id.clone()]
-                .into_iter()
-                .collect();
+        let expected_ids: HashSet<String> = [job1.id.clone(), job2.id.clone(), job3.id.clone()]
+            .into_iter()
+            .collect();
 
         // Baseline: export under match-all / no global criteria.
         set_global_criteria(&conn, &FilterCriteria::match_all()).unwrap();

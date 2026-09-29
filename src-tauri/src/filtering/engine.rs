@@ -200,9 +200,10 @@ pub fn matches(criteria: &FilterCriteria, aliases: &AliasTable, job: JobView<'_>
     }
     // Include is any-of; empty include satisfies the title dimension (Req 2.4, 2.6).
     if !criteria.title.include.is_empty() {
-        let matched = criteria.title.include.iter().any(|term| {
-            term_matches(&title_tokens, &title_norm, term, criteria.title.match_mode)
-        });
+        let matched =
+            criteria.title.include.iter().any(|term| {
+                term_matches(&title_tokens, &title_norm, term, criteria.title.match_mode)
+            });
         if !matched {
             return MatchResult {
                 included: false,
@@ -272,9 +273,9 @@ pub fn matches(criteria: &FilterCriteria, aliases: &AliasTable, job: JobView<'_>
             };
         }
         // Location include is any-of (Req 2.5).
-        let matched = expanded_include.iter().any(|term| {
-            term_matches(&loc_tokens, &loc_norm, term, criteria.location.match_mode)
-        });
+        let matched = expanded_include
+            .iter()
+            .any(|term| term_matches(&loc_tokens, &loc_norm, term, criteria.location.match_mode));
         if !matched {
             return MatchResult {
                 included: false,
@@ -298,7 +299,10 @@ mod tests {
     fn normalize_lowercases_trims_and_collapses_whitespace() {
         assert_eq!(normalize("  Hello   World  "), "hello world");
         assert_eq!(normalize("San Jose,   CA"), "san jose, ca");
-        assert_eq!(normalize("Senior\tEngineer\n(Remote)"), "senior engineer (remote)");
+        assert_eq!(
+            normalize("Senior\tEngineer\n(Remote)"),
+            "senior engineer (remote)"
+        );
         assert_eq!(normalize("UPPER"), "upper");
     }
 
@@ -328,16 +332,22 @@ mod tests {
         let c = tokenize(&normalize("San Jose,CA"));
         assert_eq!(a, b);
         assert_eq!(a, c);
-        assert_eq!(a, vec!["san".to_string(), "jose".to_string(), "ca".to_string()]);
+        assert_eq!(
+            a,
+            vec!["san".to_string(), "jose".to_string(), "ca".to_string()]
+        );
     }
 
     #[test]
     fn tokenize_splits_on_whitespace() {
-        assert_eq!(tokenize("senior software engineer"), vec![
-            "senior".to_string(),
-            "software".to_string(),
-            "engineer".to_string(),
-        ]);
+        assert_eq!(
+            tokenize("senior software engineer"),
+            vec![
+                "senior".to_string(),
+                "software".to_string(),
+                "engineer".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -401,11 +411,26 @@ mod tests {
     fn word_multi_token_matches_ordered_contiguous_run() {
         let (tokens, norm) = hay("Senior Software Engineer, Backend");
         // Contiguous ordered run present.
-        assert!(term_matches(&tokens, &norm, "software engineer", MatchMode::Word));
+        assert!(term_matches(
+            &tokens,
+            &norm,
+            "software engineer",
+            MatchMode::Word
+        ));
         // Tokens present but not contiguous.
-        assert!(!term_matches(&tokens, &norm, "senior engineer", MatchMode::Word));
+        assert!(!term_matches(
+            &tokens,
+            &norm,
+            "senior engineer",
+            MatchMode::Word
+        ));
         // Right tokens, wrong order.
-        assert!(!term_matches(&tokens, &norm, "engineer software", MatchMode::Word));
+        assert!(!term_matches(
+            &tokens,
+            &norm,
+            "engineer software",
+            MatchMode::Word
+        ));
     }
 
     #[test]
@@ -425,10 +450,25 @@ mod tests {
         // "quality assurance" spelled contiguously would be false here, but a
         // genuine contiguous substring like "ware eng" matches.
         let (tokens, norm) = hay("Senior Software Engineer");
-        assert!(term_matches(&tokens, &norm, "ware eng", MatchMode::Substring));
-        assert!(term_matches(&tokens, &norm, "software", MatchMode::Substring));
+        assert!(term_matches(
+            &tokens,
+            &norm,
+            "ware eng",
+            MatchMode::Substring
+        ));
+        assert!(term_matches(
+            &tokens,
+            &norm,
+            "software",
+            MatchMode::Substring
+        ));
         // Not present as a contiguous substring.
-        assert!(!term_matches(&tokens, &norm, "backend", MatchMode::Substring));
+        assert!(!term_matches(
+            &tokens,
+            &norm,
+            "backend",
+            MatchMode::Substring
+        ));
     }
 
     #[test]
@@ -446,7 +486,12 @@ mod tests {
         let (tokens, norm) = hay("");
         assert!(tokens.is_empty());
         assert!(!term_matches(&tokens, &norm, "qa", MatchMode::Word));
-        assert!(!term_matches(&tokens, &norm, "software engineer", MatchMode::Word));
+        assert!(!term_matches(
+            &tokens,
+            &norm,
+            "software engineer",
+            MatchMode::Word
+        ));
     }
 
     // --- matches() tests ---
@@ -603,7 +648,11 @@ mod tests {
         }
 
         // A remote job that also names a non-matching place is still gated.
-        let gated = matches(&criteria, &aliases, view("Engineer", Some("Remote - New York")));
+        let gated = matches(
+            &criteria,
+            &aliases,
+            view("Engineer", Some("Remote - New York")),
+        );
         assert!(!gated.included);
         assert_eq!(gated.reason, "no location include matched");
     }
@@ -797,7 +846,14 @@ mod tests {
         // "QA Engineer".
         let aliases = AliasTable::default_seed();
         let criteria = title_include(&["qa"]);
-        assert!(!matches(&criteria, &aliases, view("Quality Assurance Engineer", None)).included);
+        assert!(
+            !matches(
+                &criteria,
+                &aliases,
+                view("Quality Assurance Engineer", None)
+            )
+            .included
+        );
         assert!(matches(&criteria, &aliases, view("QA Engineer", None)).included);
     }
 
@@ -997,7 +1053,10 @@ mod tests {
         let criteria = title_include(&["engineer"]);
         for empty in ["", "   ", "\t\n"] {
             let r = matches(&criteria, &aliases, view(empty, None));
-            assert!(!r.included, "empty title {empty:?} should not match include");
+            assert!(
+                !r.included,
+                "empty title {empty:?} should not match include"
+            );
             assert_eq!(r.reason, "no title include matched");
         }
     }
@@ -1011,7 +1070,11 @@ mod tests {
         // Contiguous ordered run present -> included.
         assert!(matches(&criteria, &aliases, view("Senior Software Engineer", None)).included);
         // Tokens present but separated -> excluded.
-        let split = matches(&criteria, &aliases, view("Software Platform Engineer", None));
+        let split = matches(
+            &criteria,
+            &aliases,
+            view("Software Platform Engineer", None),
+        );
         assert!(!split.included);
         assert_eq!(split.reason, "no title include matched");
     }
@@ -1051,7 +1114,11 @@ mod tests {
         assert!(bypass.included);
         assert_eq!(bypass.reason, "remote passes location gate");
 
-        let gated = matches(&criteria, &aliases, view("Engineer", Some("Remote - New York")));
+        let gated = matches(
+            &criteria,
+            &aliases,
+            view("Engineer", Some("Remote - New York")),
+        );
         assert!(!gated.included);
         assert_eq!(gated.reason, "no location include matched");
     }

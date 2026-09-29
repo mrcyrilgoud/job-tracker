@@ -1137,9 +1137,8 @@ pub fn set_watch_role_keywords(conn: &Connection, keywords: &str) -> AppResult<(
     // write-through fails, propagate the error so the legacy setter fails rather
     // than leaving the two surfaces inconsistent (Req 15.3).
     let mut criteria = crate::filtering::resolver::get_global_criteria(conn)?;
-    criteria.title.include = crate::filtering::model::normalize_tokens(
-        keywords.split([',', '\n']).collect::<Vec<_>>(),
-    );
+    criteria.title.include =
+        crate::filtering::model::normalize_tokens(keywords.split([',', '\n']).collect::<Vec<_>>());
     criteria.title.match_mode = crate::filtering::model::MatchMode::Word;
     crate::filtering::resolver::set_global_criteria(conn, &criteria)?;
 
@@ -1198,9 +1197,8 @@ pub fn set_location_settings(conn: &Connection, settings: &LocationSettings) -> 
     } else {
         Some(country_trimmed.to_string())
     };
-    criteria.location.include = crate::filtering::model::normalize_tokens(
-        settings.cities.split(',').collect::<Vec<_>>(),
-    );
+    criteria.location.include =
+        crate::filtering::model::normalize_tokens(settings.cities.split(',').collect::<Vec<_>>());
     crate::filtering::resolver::set_global_criteria(conn, &criteria)?;
 
     Ok(())
@@ -1592,7 +1590,10 @@ mod tests {
 
         // The structured global criteria were updated via write-through.
         let criteria = crate::filtering::resolver::get_global_criteria(&conn).unwrap();
-        assert_eq!(criteria.title.include, vec!["Software Engineer".to_string()]);
+        assert_eq!(
+            criteria.title.include,
+            vec!["Software Engineer".to_string()]
+        );
         assert_eq!(
             criteria.title.match_mode,
             crate::filtering::model::MatchMode::Word
@@ -2080,8 +2081,11 @@ mod tests {
 
         // Tighten to "Software Engineer": only that subset survives on the next
         // listing — no re-sync was performed, the same stored rows are re-read.
-        crate::filtering::resolver::set_global_criteria(&conn, &title_include(&["Software Engineer"]))
-            .unwrap();
+        crate::filtering::resolver::set_global_criteria(
+            &conn,
+            &title_include(&["Software Engineer"]),
+        )
+        .unwrap();
         let filtered = watch_inbox(&conn);
         let ids: Vec<_> = filtered.iter().map(|i| i.job.id.as_str()).collect();
         assert_eq!(ids, vec![se.as_str()]);
@@ -2160,8 +2164,11 @@ mod tests {
         set_updated_at(&conn, &n2, "2024-06-02T00:00:00Z");
         set_updated_at(&conn, &n3, "2024-06-03T00:00:00Z");
 
-        crate::filtering::resolver::set_global_criteria(&conn, &title_include(&["Software Engineer"]))
-            .unwrap();
+        crate::filtering::resolver::set_global_criteria(
+            &conn,
+            &title_include(&["Software Engineer"]),
+        )
+        .unwrap();
 
         const K: usize = 3;
         let out = list_jobs(
@@ -2177,8 +2184,7 @@ mod tests {
         // Exactly K matching rows returned — not fewer. Every returned row is a
         // matching (Software Engineer) row, none of the newer PM rows leaked in.
         assert_eq!(out.len(), K);
-        let matched: std::collections::HashSet<_> =
-            out.iter().map(|i| i.job.id.clone()).collect();
+        let matched: std::collections::HashSet<_> = out.iter().map(|i| i.job.id.clone()).collect();
         let expected: std::collections::HashSet<_> =
             [m1.clone(), m2.clone(), m3.clone()].into_iter().collect();
         assert_eq!(matched, expected);

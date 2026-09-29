@@ -145,10 +145,7 @@ fn normalize_token(token: &str) -> String {
 /// True when the (optional) country resolves to the United States.
 fn country_is_united_states(country: Option<&str>) -> bool {
     match country {
-        Some(c) => matches!(
-            normalize_token(c).as_str(),
-            "united states" | "usa" | "us"
-        ),
+        Some(c) => matches!(normalize_token(c).as_str(), "united states" | "usa" | "us"),
         None => false,
     }
 }
@@ -422,7 +419,10 @@ mod tests {
                 expanded.contains(&"california".to_string()),
                 "expected California expansion for country {country:?}, got {expanded:?}"
             );
-            assert!(expanded.len() > 1, "expected multiple CA tokens for {country:?}");
+            assert!(
+                expanded.len() > 1,
+                "expected multiple CA tokens for {country:?}"
+            );
         }
 
         // Req 5.5: Canada -> `ca` does NOT expand to California.

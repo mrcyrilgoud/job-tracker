@@ -613,8 +613,13 @@ mod filtering_sync_tests {
         ])
         .prop_map(String::from);
         let location = prop::option::of(
-            prop::sample::select(vec!["Remote", "San Francisco, CA", "New York, NY", "Austin, TX"])
-                .prop_map(String::from),
+            prop::sample::select(vec![
+                "Remote",
+                "San Francisco, CA",
+                "New York, NY",
+                "Austin, TX",
+            ])
+            .prop_map(String::from),
         );
         (title, location)
     }

@@ -174,12 +174,24 @@ mod tests {
         assert_eq!(criteria, round_tripped);
 
         // camelCase keys present, snake_case absent.
-        assert!(json.contains("\"matchMode\""), "expected camelCase key in {json}");
-        assert!(!json.contains("match_mode"), "unexpected snake_case key in {json}");
+        assert!(
+            json.contains("\"matchMode\""),
+            "expected camelCase key in {json}"
+        );
+        assert!(
+            !json.contains("match_mode"),
+            "unexpected snake_case key in {json}"
+        );
 
         // Enum values serialize as camelCase strings.
-        assert!(json.contains("\"substring\""), "expected MatchMode value in {json}");
-        assert!(json.contains("\"remoteOnly\""), "expected RemoteMode value in {json}");
+        assert!(
+            json.contains("\"substring\""),
+            "expected MatchMode value in {json}"
+        );
+        assert!(
+            json.contains("\"remoteOnly\""),
+            "expected RemoteMode value in {json}"
+        );
     }
 
     /// A criteria omitting "version" deserializes with version == 1 (serde default).

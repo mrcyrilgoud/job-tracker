@@ -393,9 +393,7 @@ fn migrate_global_criteria_if_absent(conn: &Connection) -> AppResult<()> {
     // Compute the serialized value fully before writing so a failure cannot
     // leave inconsistent state (Req 14.6).
     let value = serde_json::to_string(&criteria).map_err(|e| {
-        AppError::from(format!(
-            "failed to serialize migrated global criteria: {e}"
-        ))
+        AppError::from(format!("failed to serialize migrated global criteria: {e}"))
     })?;
     set_setting(conn, GLOBAL_CRITERIA_KEY, &value)
 }
@@ -760,7 +758,9 @@ mod tests {
         // A fresh cache reflects the new state, confirming the cache is the
         // only reason the value stayed stable.
         let mut fresh_cache = CriteriaCache::new();
-        let fresh = fresh_cache.resolve(&conn, &company_id, "greenhouse").unwrap();
+        let fresh = fresh_cache
+            .resolve(&conn, &company_id, "greenhouse")
+            .unwrap();
         assert_eq!(fresh, changed);
     }
 
@@ -818,7 +818,12 @@ mod tests {
     #[test]
     fn migration_maps_legacy_fields_into_structured_criteria() {
         let conn = settings_only_connection();
-        seed_legacy(&conn, "United States", "San Francisco, Seattle", "engineer, manager");
+        seed_legacy(
+            &conn,
+            "United States",
+            "San Francisco, Seattle",
+            "engineer, manager",
+        );
 
         migrate_legacy_settings(&conn).unwrap();
 
@@ -894,7 +899,12 @@ mod tests {
     #[test]
     fn migration_is_idempotent_and_stable() {
         let conn = settings_only_connection();
-        seed_legacy(&conn, "United States", "San Francisco, Seattle", "engineer, manager");
+        seed_legacy(
+            &conn,
+            "United States",
+            "San Francisco, Seattle",
+            "engineer, manager",
+        );
 
         migrate_legacy_settings(&conn).unwrap();
         let first = get_setting(&conn, GLOBAL_CRITERIA_KEY).unwrap();
