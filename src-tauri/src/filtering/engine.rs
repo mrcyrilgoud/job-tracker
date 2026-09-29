@@ -138,15 +138,19 @@ pub(crate) fn term_matches(
 /// True when the location text carries no specific, non-remote place name.
 ///
 /// Interpretation for Req 6.4's "no non-remote place present": after removing
-/// the recognized remote tokens from the tokenized location, if no place tokens
-/// remain (either the location is empty or every token is a remote token), the
-/// location has no non-remote place. Used to decide whether a remote job may
-/// bypass the location-name include gate (e.g. "Remote" or "Remote - US" should
-/// pass, but "Remote - New York" should still be gated on the location name).
+/// recognized remote tokens, the location has no specific place when nothing
+/// remains or the remainder is only a configured country name. Used to decide
+/// whether a remote job may bypass the location-name include gate (e.g.
+/// "Remote" or "Remote - US" should pass, but "Remote - New York" should still
+/// be gated on the location name).
 fn loc_has_no_place(loc_tokens: &[String], aliases: &AliasTable) -> bool {
-    loc_tokens
+    let remaining = loc_tokens
         .iter()
-        .all(|tok| aliases.is_remote(tok))
+        .filter(|tok| !aliases.is_remote(tok))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+
+    remaining.is_empty() || aliases.is_country_name(&remaining.join(" "))
 }
 
 /// Evaluate one [`FilterCriteria`] against one job (Req 2.x, 3.x, 5.x, 6.x).
@@ -590,10 +594,13 @@ mod tests {
             },
             ..FilterCriteria::match_all()
         };
-        // "Remote - US" has no non-remote place -> bypasses the location gate (Req 6.4).
-        let bypass = matches(&criteria, &aliases, view("Engineer", Some("Remote")));
-        assert!(bypass.included);
-        assert_eq!(bypass.reason, "remote passes location gate");
+        // Country qualifiers are not specific place names, so these remote
+        // locations bypass the city include gate (Req 6.4).
+        for location in ["Remote - US", "Remote - USA", "Remote - United States"] {
+            let bypass = matches(&criteria, &aliases, view("Engineer", Some(location)));
+            assert!(bypass.included, "expected {location:?} to bypass");
+            assert_eq!(bypass.reason, "remote passes location gate");
+        }
 
         // A remote job that also names a non-matching place is still gated.
         let gated = matches(&criteria, &aliases, view("Engineer", Some("Remote - New York")));

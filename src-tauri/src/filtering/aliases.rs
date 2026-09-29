@@ -114,6 +114,13 @@ impl AliasTable {
         self.countries.get(&key).cloned().unwrap_or_default()
     }
 
+    /// Return whether text names a configured country, including canonical
+    /// synonyms such as `us` and `usa` for `united states`.
+    pub fn is_country_name(&self, text: &str) -> bool {
+        let norm = normalize_token(text);
+        !norm.is_empty() && self.countries.contains_key(&canonical_country(&norm))
+    }
+
     /// Identify a location as remote (Req 6.5).
     ///
     /// Returns true iff the location text contains at least one configured
@@ -438,6 +445,17 @@ mod tests {
 
         assert!(!table.is_remote("San Francisco, CA"));
         assert!(!table.is_remote(""));
+    }
+
+    #[test]
+    fn is_country_name_recognizes_configured_country_synonyms() {
+        let table = AliasTable::default_seed();
+
+        for country in ["United States", "USA", "us"] {
+            assert!(table.is_country_name(country));
+        }
+        assert!(!table.is_country_name("New York"));
+        assert!(!table.is_country_name(""));
     }
 
     // --- Task 2.4: unit tests for alias expansion and remote detection ---
