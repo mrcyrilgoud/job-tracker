@@ -1,0 +1,668 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Scaffold the `runs` module and domain types": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731042840
+      },
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731204053
+      }
+    ],
+    "1.2 Implement the pure lifecycle transition function": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731219596
+      },
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731402080
+      }
+    ],
+    "1.4 Implement the pure `RunLedger`": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731220827
+      },
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731403484
+      }
+    ],
+    "1. Pure Rust run model, lifecycle, and ledger": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731403527
+      }
+    ],
+    "2.1 Implement contract types, bounds, and event sinks": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731405401
+      },
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731722081
+      }
+    ],
+    "2.2 Implement the Run_Summary builder": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731723218
+      },
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731742200
+      }
+    ],
+    "2. Progress contract v1 (Rust side)": [
+      {
+        "executionId": "248bf424-0ea4-4b69-91b0-5d4c1dd84ff1",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790731742303
+      }
+    ],
+    "3.1 Add migrations for `runs`, `run_postings`, and `posting_check_evidence`": [
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790734455036
+      },
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790734646745
+      }
+    ],
+    "4.1 Add redirect chain, error kinds, signal headers, and async DNS": [
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790734456325
+      },
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790734647498
+      }
+    ],
+    "4. safe_fetch hardening": [
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790734647559
+      }
+    ],
+    "3.3 Implement `runs::store`": [
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790734649502
+      },
+      {
+        "executionId": "c3d89618-668c-4ff5-86a3-33913f44a8a6",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790735168987
+      },
+      {
+        "executionId": "55cc085b-8a5a-4b5e-a822-3ea566861fcd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790740741858
+      },
+      {
+        "executionId": "55cc085b-8a5a-4b5e-a822-3ea566861fcd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741319275
+      }
+    ],
+    "4.2 Write unit tests for safe_fetch changes": [
+      {
+        "executionId": "55cc085b-8a5a-4b5e-a822-3ea566861fcd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790740742596
+      },
+      {
+        "executionId": "55cc085b-8a5a-4b5e-a822-3ea566861fcd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741319901
+      }
+    ],
+    "3. SQLite schema and RunStore": [
+      {
+        "executionId": "55cc085b-8a5a-4b5e-a822-3ea566861fcd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741319338
+      }
+    ],
+    "5.1 Implement `CheckEvidence` and URL sanitization": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741408925
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741420875
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741803574
+      }
+    ],
+    "5.3 Implement page signal extraction": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409003
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741809155
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742268514
+      }
+    ],
+    "5.5 Implement provider target resolution and listing lookup": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409049
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741810631
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742269791
+      }
+    ],
+    "5.7 Implement the pure classifier": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409098
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742291160
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742723734
+      }
+    ],
+    "5.9 Implement `PostingFetcher` and `evaluate`": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409140
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742729856
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743124955
+      }
+    ],
+    "5.11 Build the classification fixture corpus and fixture tests": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409181
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743126539
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743761536
+      }
+    ],
+    "5.12 Implement result persistence and the `check_job_posting` shim": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409233
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743127914
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743761579
+      }
+    ],
+    "6. Checkpoint: pure layers, store, and classifier": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409274
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743764608
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743889640
+      }
+    ],
+    "7.1 Implement accept with lock ownership and structured errors": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409307
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743129786
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743763181
+      }
+    ],
+    "7.2 Implement the dispatch loop, workers, and finalization": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409346
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743889688
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591587
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744598489
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745154020
+      }
+    ],
+    "7.3 Implement cancellation (in-process and cross-process)": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409379
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591638
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745200276
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745513809
+      }
+    ],
+    "7.4 Implement timeouts and supplementary late evidence": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409408
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591671
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745550190
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745937036
+      }
+    ],
+    "7.5 Implement run-level failure and orphan handling": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409443
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591719
+      }
+    ],
+    "8.1 Move the watches, careers, and CSV stages out of `runner.rs`": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409496
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591746
+      },
+      {
+        "executionId": "4ed5ce9c-5c2d-444c-aaa4-440bc6b732fd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790747727917
+      },
+      {
+        "executionId": "4ed5ce9c-5c2d-444c-aaa4-440bc6b732fd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790748323279
+      }
+    ],
+    "8.2 Wire stage sequencing and CSV behavior into the coordinator": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409557
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591779
+      },
+      {
+        "executionId": "4ed5ce9c-5c2d-444c-aaa4-440bc6b732fd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790748321963
+      },
+      {
+        "executionId": "4ed5ce9c-5c2d-444c-aaa4-440bc6b732fd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790748743828
+      }
+    ],
+    "9.1 Implement the legacy projections": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409597
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591811
+      }
+    ],
+    "9.2 Delegate `runner.rs` and the legacy Tauri commands to the coordinator": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409656
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591843
+      }
+    ],
+    "9.3 Route CLI sync through the coordinator and add structured JSON errors": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409683
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591876
+      }
+    ],
+    "9.4 Write golden JSON compatibility tests for the legacy surfaces": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409717
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591918
+      }
+    ],
+    "10.1 Implement and register `commands::runs`": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409763
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744591979
+      }
+    ],
+    "11. Checkpoint: backend complete": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409793
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592011
+      }
+    ],
+    "12.1 Implement the TS contract, validators, errors, and API wrappers": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409841
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742292438
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742723768
+      }
+    ],
+    "12.3 Implement the pure RunMonitor reducer and selectors": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409886
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790742731061
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743125009
+      }
+    ],
+    "13.1 Implement `RunMonitorProvider`": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409947
+      },
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743891205
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592055
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744600092
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745153108
+      }
+    ],
+    "13.2 Implement the posting list and evidence disclosure": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409973
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592094
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745221397
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745515198
+      }
+    ],
+    "13.3 Implement live regions and reduced motion": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741409999
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592138
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745238973
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745516148
+      }
+    ],
+    "13.4 Implement run controls, panel, and summary, and wire them into Layout": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741410026
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592186
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745551614
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790745938397
+      }
+    ],
+    "13.5 Refresh pages on settle and update posting-state presentation": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741410057
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592219
+      }
+    ],
+    "15. Final checkpoint: full verification": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790741410101
+      },
+      {
+        "executionId": "72b32a11-ecbb-4ef1-8500-7722b689cc78",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790744592251
+      }
+    ],
+    "12. Frontend contract, API, and RunMonitor state": [
+      {
+        "executionId": "0ee4e170-492e-41ef-9b3d-dcd6b25ff442",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790743125091
+      }
+    ],
+    "8. Jobs_Cycle stages": [
+      {
+        "executionId": "4ed5ce9c-5c2d-444c-aaa4-440bc6b732fd",
+        "chatSessionId": "sess_fa854583-7cac-4854-bd0a-26d46be835f9",
+        "timestamp": 1790748743869
+      }
+    ]
+  }
+}

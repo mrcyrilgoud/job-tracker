@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-log = "2"
-tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -46,5 +46,5 @@ comfy-table = "7"
 tempfile = "3"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 proptest = "1"

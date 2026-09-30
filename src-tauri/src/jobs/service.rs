@@ -747,6 +747,14 @@ pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
     )
     .map_err(map_sqlite)?;
 
+    // Posting-check evidence belongs to the job and goes with it. `run_postings`
+    // rows are intentionally kept as frozen run history (no FK to `jobs`).
+    conn.execute(
+        "DELETE FROM posting_check_evidence WHERE job_id = ?1",
+        params![job_id],
+    )
+    .map_err(map_sqlite)?;
+
     conn.execute("DELETE FROM jobs WHERE id = ?1", params![job_id])
         .map_err(map_sqlite)?;
 
@@ -1780,6 +1788,65 @@ mod tests {
 
         // Attempting to delete non-existent job errors
         assert!(delete_job(&conn, &job.id).is_err());
+    }
+
+    #[test]
+    fn delete_job_removes_evidence_but_keeps_run_postings_history() {
+        let conn = test_connection();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/evidence",
+            "Role With Evidence",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO runs (id, run_type, status, trigger, owner_pid, owns_runner_lock,
+                               started_at, stages_json, updated_at)
+             VALUES ('run-1', 'posting_check', 'completed', 'desktop', 1, 0,
+                     '2026-01-01T00:00:00Z', '[]', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO run_postings (run_id, job_id, ordinal, job_title, company_name,
+                                       posting_url, state_at_start, status, posting_state)
+             VALUES ('run-1', ?1, 0, 'Role With Evidence', 'Acme',
+                     'https://example.com/jobs/evidence', 'unknown', 'completed', 'active')",
+            params![job.id],
+        )
+        .unwrap();
+        for (id, run_id) in [("ev-1", Some("run-1")), ("ev-2", None)] {
+            conn.execute(
+                "INSERT INTO posting_check_evidence (id, run_id, job_id, kind, attempted_at,
+                     posting_state, reason_code, reason, evidence_version, evidence_json,
+                     created_at)
+                 VALUES (?1, ?2, ?3, 'authoritative', '2026-01-01T00:00:00Z', 'active',
+                         'provider_listed_open', 'Open', 1, '{}', '2026-01-01T00:00:00Z')",
+                params![id, run_id, job.id],
+            )
+            .unwrap();
+        }
+
+        delete_job(&conn, &job.id).unwrap();
+
+        let count =
+            |sql: &str| -> i64 { conn.query_row(sql, params![job.id], |r| r.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT COUNT(*) FROM posting_check_evidence WHERE job_id = ?1"),
+            0
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM run_postings WHERE job_id = ?1"),
+            1
+        );
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
     }
 
     #[test]

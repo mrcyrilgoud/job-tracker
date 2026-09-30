@@ -115,20 +115,6 @@ pub fn extension_for_mime(mime_type: &str, original_filename: &str) -> String {
     }
 }
 
-pub fn format_label(value: &str) -> String {
-    value
-        .split('_')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

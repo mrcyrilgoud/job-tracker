@@ -19,11 +19,18 @@ fn main() {
     // Attempt to parse CLI arguments
     match Cli::try_parse() {
         Ok(cli) => {
+            let json = cli.json;
+            let quiet = cli.quiet;
             // If explicit CLI command or --run-jobs flag was provided, run the CLI
             if cli.command.is_some() || cli.run_jobs {
                 let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
                 if let Err(e) = rt.block_on(job_tracker_lib::run_cli(cli)) {
-                    eprintln!("Error: {e}");
+                    if json {
+                        job_tracker_lib::cli::output::print_json_error(&e);
+                    }
+                    if !quiet {
+                        eprintln!("Error: {e}");
+                    }
                     std::process::exit(1);
                 }
                 return;

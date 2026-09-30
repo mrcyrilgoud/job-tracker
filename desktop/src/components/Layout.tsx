@@ -8,7 +8,8 @@ import {
   SettingsIcon,
   SunIcon,
 } from "@/components/icons";
-import { RunJobsButton } from "@/components/RunJobsButton";
+import { RunControls } from "@/components/runs/RunControls";
+import { RunPanel } from "@/components/runs/RunPanel";
 import { useTheme } from "@/lib/ThemeContext";
 
 const nav = [
@@ -64,10 +65,11 @@ export function Layout() {
           >
             {theme === "dark" ? <SunIcon size={18} /> : <MoonIcon size={18} />}
           </button>
-          <RunJobsButton />
+          <RunControls />
         </div>
       </header>
       <main className="flex-1">
+        <RunPanel />
         <Outlet />
       </main>
       <footer className="mt-12 text-center text-xs text-[var(--faint)]">

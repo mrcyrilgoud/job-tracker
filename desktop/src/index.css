@@ -300,6 +300,26 @@ button {
   background: currentColor;
 }
 
+/* Run panel progress bar (Req 12.7). The Run_Monitor components (RunPanel and
+   friends, task 13.4) use these class names so reduced-motion neutralization
+   below is stable:
+   - `.run-progress-bar`  the track wrapper
+   - `.run-progress-fill` the animated fill whose width reflects `current/total`
+   The numeric `n / total` text is rendered as plain text next to the bar, so
+   the bar itself is purely decorative and safe to freeze under reduced motion. */
+.run-progress-bar {
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--surface-muted);
+}
+
+.run-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition-duration: 0.001ms !important;
@@ -309,5 +329,17 @@ button {
      safe to hold it still rather than spin it. */
   .spinner {
     animation: none;
+  }
+
+  /* Run UI (Req 12.7): freeze the spinner and the progress bar, while the
+     static "n / total" text and the static fill width still render. Covers
+     Tailwind's `animate-spin` utility used by run components and the run
+     progress fill's width transition. */
+  .animate-spin {
+    animation: none !important;
+  }
+
+  .run-progress-fill {
+    transition: none !important;
   }
 }

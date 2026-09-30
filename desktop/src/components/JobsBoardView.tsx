@@ -95,7 +95,7 @@ export function JobsBoardView({
                 ) : (
                   visibleJobs.map(({ job, companyName }) => {
                     const postingInfo = postingStateMatters(job.status)
-                      ? postingStatePresentation(job.postingState)
+                      ? postingStatePresentation(job.postingState, job.lastCheckedAt)
                       : null;
                     const isPending = isPendingFavorite?.(job.id);
 

@@ -20,33 +20,37 @@ pub async fn validate_board(provider: &str, board_slug: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Public, unauthenticated board listing endpoint for `provider` (`greenhouse`,
+/// `lever`, `ashby`) and `board_slug`. `None` for an unsupported provider.
+/// Shared by [`list_jobs`] and the posting check's listing fetch.
+pub fn listing_url(provider: &str, board_slug: &str) -> Option<String> {
+    let slug = urlencoding::encode(board_slug);
+    match provider {
+        "greenhouse" => Some(format!(
+            "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        )),
+        "lever" => Some(format!("https://api.lever.co/v0/postings/{slug}?mode=json")),
+        "ashby" => Some(format!(
+            "https://api.ashbyhq.com/posting-api/job-board/{slug}"
+        )),
+        _ => None,
+    }
+}
+
+/// `Accept` header sent to the board listing endpoints.
+pub const LISTING_ACCEPT: &str = "application/json";
+
 pub async fn list_jobs(provider: &str, board_slug: &str) -> AppResult<Vec<AtsJob>> {
-    let (url, accept_err) = match provider {
-        "greenhouse" => (
-            format!(
-                "https://boards-api.greenhouse.io/v1/boards/{}/jobs",
-                urlencoding::encode(board_slug)
-            ),
-            "Greenhouse",
-        ),
-        "lever" => (
-            format!(
-                "https://api.lever.co/v0/postings/{}?mode=json",
-                urlencoding::encode(board_slug)
-            ),
-            "Lever",
-        ),
-        "ashby" => (
-            format!(
-                "https://api.ashbyhq.com/posting-api/job-board/{}",
-                urlencoding::encode(board_slug)
-            ),
-            "Ashby",
-        ),
+    let accept_err = match provider {
+        "greenhouse" => "Greenhouse",
+        "lever" => "Lever",
+        "ashby" => "Ashby",
         _ => return Err(AppError::from(format!("Unhandled provider: {provider}"))),
     };
+    let url = listing_url(provider, board_slug)
+        .ok_or_else(|| AppError::from(format!("Unhandled provider: {provider}")))?;
 
-    let result = safe_fetch(&url, Some("GET"), Some("application/json")).await;
+    let result = safe_fetch(&url, Some("GET"), Some(LISTING_ACCEPT)).await;
     if !result.ok {
         return Err(AppError::from(result.error.unwrap_or_else(|| {
             format!("{accept_err} board unavailable (HTTP {})", result.status)
@@ -190,6 +194,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(jobs[0].title, "PM");
+    }
+
+    #[test]
+    fn listing_urls_match_provider_endpoints() {
+        assert_eq!(
+            listing_url("greenhouse", "acme").as_deref(),
+            Some("https://boards-api.greenhouse.io/v1/boards/acme/jobs")
+        );
+        assert_eq!(
+            listing_url("lever", "acme").as_deref(),
+            Some("https://api.lever.co/v0/postings/acme?mode=json")
+        );
+        assert_eq!(
+            listing_url("ashby", "a b").as_deref(),
+            Some("https://api.ashbyhq.com/posting-api/job-board/a%20b")
+        );
+        assert_eq!(listing_url("workday", "acme"), None);
     }
 
     #[test]

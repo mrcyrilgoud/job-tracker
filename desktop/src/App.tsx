@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import { Layout } from "@/components/Layout";
 import { api } from "@/lib/api";
+import { RunMonitorProvider } from "@/lib/RunMonitorContext";
 import { isDesktopShell } from "@/lib/tauri";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { CompaniesPage } from "@/pages/CompaniesPage";
@@ -52,19 +53,22 @@ export function App() {
 
   return (
     <ThemeProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<JobsPage />} />
-            <Route path="jobs/new" element={<NewJobPage />} />
-            <Route path="jobs/:id" element={<JobDetailPage />} />
-            <Route path="documents" element={<DocumentsPage />} />
-            <Route path="companies" element={<CompaniesPage />} />
-            <Route path="companies/:id" element={<CompanyDetailPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      {/* Outside the router so run state survives route changes (Req 2.4, 12.1). */}
+      <RunMonitorProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route index element={<JobsPage />} />
+              <Route path="jobs/new" element={<NewJobPage />} />
+              <Route path="jobs/:id" element={<JobDetailPage />} />
+              <Route path="documents" element={<DocumentsPage />} />
+              <Route path="companies" element={<CompaniesPage />} />
+              <Route path="companies/:id" element={<CompanyDetailPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </RunMonitorProvider>
     </ThemeProvider>
   );
 }

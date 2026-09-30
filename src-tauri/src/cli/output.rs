@@ -4,6 +4,7 @@ use comfy_table::{Attribute, Cell, Color, ContentArrangement, Table};
 use serde_json::Value;
 use std::collections::HashMap;
 
+use crate::error::AppError;
 use crate::models::{JobDetail, JobListItem, WeeklyActivity};
 
 pub fn print_json<T: serde::Serialize>(data: &T) {
@@ -16,6 +17,18 @@ pub fn print_raw_json(data: &Value) {
     if let Ok(json) = serde_json::to_string_pretty(data) {
         println!("{json}");
     }
+}
+
+/// Print the one-object machine-readable error envelope used by `--json`.
+pub fn print_json_error(error: &AppError) {
+    let parts = error.code_parts();
+    let payload = serde_json::json!({
+        "ok": false,
+        "error": parts,
+    });
+    println!("{}", serde_json::to_string(&payload).unwrap_or_else(|_| {
+        "{\"ok\":false,\"error\":{\"code\":\"error\",\"category\":\"serialization\",\"message\":\"failed to serialize error\"}}".into()
+    }));
 }
 
 pub fn status_color(status: &str) -> Color {

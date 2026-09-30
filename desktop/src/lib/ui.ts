@@ -86,14 +86,14 @@ export function postingStateMatters(status: JobStatus): boolean {
   }
 }
 
-export function postingStatePresentation(state: PostingState): Presentation {
+export function postingStatePresentation(state: PostingState, lastCheckedAt: string | null = null): Presentation {
   switch (state) {
     case "active":
       return { label: "Open", tone: "green" };
     case "inactive":
       return { label: "Closed", tone: "stone" };
     case "unknown":
-      return { label: "Not checked yet", tone: "stone" };
+      return { label: lastCheckedAt ? "Couldn't confirm" : "Not checked yet", tone: "stone" };
     default: {
       const _exhaustive: never = state;
       return _exhaustive;

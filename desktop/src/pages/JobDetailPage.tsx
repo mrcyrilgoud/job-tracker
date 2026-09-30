@@ -8,6 +8,7 @@ import {
   type JobDetailUpdateMode,
 } from "@/components/JobDetailClient";
 import { api } from "@/lib/api";
+import { useRunMonitor } from "@/lib/RunMonitorContext";
 import type { DocumentListItem, JobDetail } from "@/lib/schema";
 import { formatLabel } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ export function JobDetailPage() {
   const sequenceRef = useRef(0);
   const idRef = useRef(id);
   idRef.current = id;
+  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
 
   const loadDetail = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!id) return;
@@ -41,14 +43,16 @@ export function JobDetailPage() {
       setDetail(jobResult.detail);
     } catch (err) {
       if (sequence !== sequenceRef.current || idRef.current !== requestId) return;
-      setError(err instanceof Error ? err.message : "Failed to load job");
+      const message = err instanceof Error ? err.message : "Failed to load job";
+      setError(message);
+      if (quiet) reportRefreshFailed(message);
     } finally {
       if (sequence === sequenceRef.current) {
         setInitialLoading(false);
         setRefreshing(false);
       }
     }
-  }, [id]);
+  }, [id, reportRefreshFailed]);
 
   const loadLibrary = useCallback(async () => {
     if (!id) return;
@@ -80,6 +84,11 @@ export function JobDetailPage() {
     void loadLibrary();
     void loadCompanyNames();
   }, [loadDetail, loadLibrary, loadCompanyNames]);
+
+  useEffect(
+    () => onRunSettled(() => { void loadDetail({ quiet: true }); }),
+    [loadDetail, onRunSettled],
+  );
 
   const onUpdated = useCallback(
     (payload: { detail?: JobDetail; mode: JobDetailUpdateMode }) => {

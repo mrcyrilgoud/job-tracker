@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   Company,
@@ -15,9 +16,26 @@ import type {
   WeeklyActivity,
   WatchProvider,
 } from "@/lib/schema";
+import {
+  parseRunAccepted,
+  parseRunEvent,
+  parseRunSnapshot,
+  RUN_PROGRESS_EVENT,
+  unwrapContract,
+  type ParseResult,
+  type RunAccepted,
+  type RunProgressEvent,
+  type RunSnapshot,
+  type RunType,
+} from "@/lib/run-contract";
 import { DESKTOP_SHELL_REQUIRED, isDesktopShell } from "@/lib/tauri";
 
 export type { FilterCriteria, MatchMode, RemoteMode } from "@/lib/schema";
+
+export type RetryRunInput = {
+  sourceRunId: string;
+  jobIds: string[];
+};
 
 export type FilterPreviewSample = {
   title: string;
@@ -105,18 +123,34 @@ export type CsvPathStatus = {
   defaultPath: string;
 };
 
-export type JobsRunnerProgress = {
-  phase: string;
-  message: string;
-  current?: number;
-  total?: number;
-};
-
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!isDesktopShell()) {
     throw new Error(DESKTOP_SHELL_REQUIRED);
   }
   return invoke<T>(command, args);
+}
+
+/** Invoke a run command and validate its response against Progress_Contract v1. */
+async function callValidated<T>(
+  command: string,
+  parse: (input: unknown) => ParseResult<T>,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  return unwrapContract(parse(await call<unknown>(command, args)));
+}
+
+/**
+ * Subscribe to `jobs-runner-progress`. Every payload is validated with
+ * `parseRunEvent`; the handler receives the parse result so the caller can keep
+ * its last valid state on `invalid` or `unsupported_version` (Req 11.8, 11.9).
+ */
+async function listenRunProgress(
+  handler: (result: ParseResult<RunProgressEvent>) => void,
+): Promise<UnlistenFn> {
+  if (!isDesktopShell()) {
+    throw new Error(DESKTOP_SHELL_REQUIRED);
+  }
+  return listen<unknown>(RUN_PROGRESS_EVENT, (event) => handler(parseRunEvent(event.payload)));
 }
 
 export const api = {
@@ -221,6 +255,34 @@ export const api = {
   runJobsCycle: () => call<Record<string, unknown>>("run_jobs_cycle_cmd"),
 
   checkAllPostings: () => call<Record<string, unknown>>("check_all_postings_cmd"),
+
+  // Run model (Progress_Contract v1). Responses are validated; a contract
+  // violation rejects with `RunContractError`. Backend rejections keep their
+  // `code:category[:detail]` strings (see `parseAppError`).
+
+  /** Accept a run and return immediately; progress arrives on `listenRunProgress`. */
+  startRun: (runType: RunType) =>
+    callValidated<RunAccepted>("start_run_cmd", parseRunAccepted, { input: { runType } }),
+
+  retryRun: (input: RetryRunInput) =>
+    callValidated<RunAccepted>("retry_run_cmd", parseRunAccepted, {
+      input: { sourceRunId: input.sourceRunId, jobIds: input.jobIds },
+    }),
+
+  cancelRun: (runId: string) =>
+    callValidated<RunSnapshot>("cancel_run_cmd", parseRunSnapshot, { runId }),
+
+  getRun: (runId: string) => callValidated<RunSnapshot>("get_run_cmd", parseRunSnapshot, { runId }),
+
+  /** The non-terminal run, else the latest undismissed terminal run, else `null`. */
+  getCurrentRun: async (): Promise<RunSnapshot | null> => {
+    const raw = await call<unknown>("get_current_run_cmd");
+    return raw === null || raw === undefined ? null : unwrapContract(parseRunSnapshot(raw));
+  },
+
+  dismissRun: (runId: string) => call<{ ok: boolean }>("dismiss_run_cmd", { runId }),
+
+  listenRunProgress,
 
   getWatchRoleKeywords: () => call<string>("get_watch_role_keywords"),
 

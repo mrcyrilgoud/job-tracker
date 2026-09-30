@@ -193,6 +193,81 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // Job check run visibility: persisted runs, per-run posting ledger, and
+    // posting-check evidence history. New tables only, so `IF NOT EXISTS`
+    // keeps this additive and idempotent.
+    // - `runs_single_lock_owner_uidx` allows at most one lock-owning run (Req 4.8).
+    // - `run_postings(run_id, job_id)` is the primary key, so each job appears
+    //   once per run (Req 9.2). `job_id` deliberately has no FK to `jobs` so
+    //   run history survives job deletion.
+    // - `posting_check_evidence` holds authoritative and supplementary
+    //   evidence (Req 7.1, 7.7); at most one authoritative row per run and job.
+    conn.execute_batch(
+        r#"
+    CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY NOT NULL,
+      run_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      source_run_id TEXT REFERENCES runs(id),
+      owner_pid INTEGER NOT NULL,
+      owns_runner_lock INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      activated_at TEXT,
+      cancel_requested_at TEXT,
+      finished_at TEXT,
+      duration_ms INTEGER,
+      error_reason TEXT,
+      stages_json TEXT NOT NULL,
+      summary_json TEXT,
+      last_seq INTEGER NOT NULL DEFAULT 0,
+      dismissed_at TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS runs_single_lock_owner_uidx
+      ON runs(owns_runner_lock) WHERE owns_runner_lock = 1;
+    CREATE INDEX IF NOT EXISTS runs_status_started_idx ON runs(status, started_at);
+
+    CREATE TABLE IF NOT EXISTS run_postings (
+      run_id TEXT NOT NULL REFERENCES runs(id),
+      job_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      job_title TEXT NOT NULL,
+      company_name TEXT NOT NULL,
+      posting_url TEXT NOT NULL,
+      state_at_start TEXT NOT NULL,
+      status TEXT NOT NULL,
+      posting_state TEXT,
+      reason_code TEXT,
+      reason TEXT,
+      failure_category TEXT,
+      attempted_at TEXT,
+      finished_at TEXT,
+      PRIMARY KEY (run_id, job_id)
+    );
+    CREATE INDEX IF NOT EXISTS run_postings_run_status_idx ON run_postings(run_id, status);
+
+    CREATE TABLE IF NOT EXISTS posting_check_evidence (
+      id TEXT PRIMARY KEY NOT NULL,
+      run_id TEXT,
+      job_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      attempted_at TEXT NOT NULL,
+      posting_state TEXT NOT NULL,
+      reason_code TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      evidence_version INTEGER NOT NULL,
+      evidence_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS pce_one_authoritative_uidx
+      ON posting_check_evidence(run_id, job_id)
+      WHERE kind = 'authoritative' AND run_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS pce_job_attempted_idx
+      ON posting_check_evidence(job_id, attempted_at);
+    "#,
+    )?;
+
     // Existing watch jobs used an event plus `is_new_from_watch` to represent
     // triage. Preserve that history in the explicit state introduced above.
     conn.execute_batch(
@@ -334,5 +409,105 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    fn schema_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",
+            rusqlite::params![kind, name],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn run_tables_and_indexes_exist_once_after_repeated_migrate() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+
+        for table in ["runs", "run_postings", "posting_check_evidence"] {
+            assert_eq!(schema_object_count(&conn, "table", table), 1, "{table}");
+        }
+        for index in [
+            "runs_single_lock_owner_uidx",
+            "runs_status_started_idx",
+            "run_postings_run_status_idx",
+            "pce_one_authoritative_uidx",
+            "pce_job_attempted_idx",
+        ] {
+            assert_eq!(schema_object_count(&conn, "index", index), 1, "{index}");
+        }
+    }
+
+    #[test]
+    fn run_tables_are_added_to_legacy_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE companies (
+              id TEXT PRIMARY KEY NOT NULL,
+              name TEXT NOT NULL,
+              careers_url TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        for table in ["runs", "run_postings", "posting_check_evidence"] {
+            assert_eq!(schema_object_count(&conn, "table", table), 1, "{table}");
+        }
+    }
+
+    fn insert_run(conn: &Connection, id: &str, owns_lock: i64) -> rusqlite::Result<usize> {
+        conn.execute(
+            "INSERT INTO runs (id, run_type, status, trigger, owner_pid, owns_runner_lock,
+                               started_at, stages_json, updated_at)
+             VALUES (?1, 'posting_check', 'queued', 'desktop', 1, ?2,
+                     '2026-01-01T00:00:00Z', '[]', '2026-01-01T00:00:00Z')",
+            rusqlite::params![id, owns_lock],
+        )
+    }
+
+    #[test]
+    fn second_lock_owning_run_is_rejected() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+
+        insert_run(&conn, "run-a", 1).unwrap();
+        assert!(insert_run(&conn, "run-b", 1).is_err());
+        // Non-owning runs are unconstrained.
+        insert_run(&conn, "run-c", 0).unwrap();
+        insert_run(&conn, "run-d", 0).unwrap();
+
+        // Once the owner releases, another run may take the lock.
+        conn.execute(
+            "UPDATE runs SET owns_runner_lock = 0 WHERE id = 'run-a'",
+            [],
+        )
+        .unwrap();
+        insert_run(&conn, "run-b", 1).unwrap();
+    }
+
+    #[test]
+    fn one_authoritative_evidence_row_per_run_and_job() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let insert = |id: &str, run_id: Option<&str>, kind: &str| {
+            conn.execute(
+                "INSERT INTO posting_check_evidence (id, run_id, job_id, kind, attempted_at,
+                     posting_state, reason_code, reason, evidence_version, evidence_json, created_at)
+                 VALUES (?1, ?2, 'job-1', ?3, 't', 'unknown', 'timeout', 'r', 1, '{}', 't')",
+                rusqlite::params![id, run_id, kind],
+            )
+        };
+        insert("e1", Some("run-1"), "authoritative").unwrap();
+        assert!(insert("e2", Some("run-1"), "authoritative").is_err());
+        insert("e3", Some("run-1"), "supplementary").unwrap();
+        // check_job_posting rows have no run id and are unconstrained.
+        insert("e4", None, "authoritative").unwrap();
+        insert("e5", None, "authoritative").unwrap();
     }
 }

@@ -355,7 +355,7 @@ export function createFixtureBackend() {
   };
 
   async function invoke(cmd: string, args?: Record<string, unknown>) {
-    // Event plugin calls (used by RunJobsButton) resolve to a no-op listener id.
+    // Event plugin calls (run progress listener) resolve to a no-op listener id.
     if (cmd.startsWith("plugin:")) return 0;
 
     const handler = handlers[cmd];

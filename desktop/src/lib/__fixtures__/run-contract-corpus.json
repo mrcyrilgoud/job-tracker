@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "bounds": {
+    "MAX_ID_BYTES": 64,
+    "MAX_TITLE_BYTES": 300,
+    "MAX_COMPANY_BYTES": 200,
+    "MAX_URL_BYTES": 2048,
+    "MAX_MESSAGE_BYTES": 500,
+    "MAX_REASON_BYTES": 500,
+    "MAX_CATEGORY_BYTES": 64,
+    "MAX_COUNT": 9007199254740991
+  },
+  "events": [
+    {
+      "version": 1,
+      "runId": "run-1",
+      "runType": "postingCheck",
+      "runStatus": "active",
+      "seq": 2,
+      "emittedAt": "2026-01-01T00:00:01Z",
+      "stage": "postings",
+      "message": "Checking job postings",
+      "current": 1,
+      "total": 3,
+      "done": false,
+      "startedAt": "2026-01-01T00:00:00Z",
+      "elapsedMs": 1000,
+      "postingCounts": {"queued": 1, "active": 1, "completed": 1, "error": 0, "canceled": 0},
+      "postingTotal": 3
+    },
+    {
+      "version": 1,
+      "runId": "cycle-1",
+      "runType": "jobsCycle",
+      "runStatus": "completed",
+      "previousRunStatus": "active",
+      "seq": 4,
+      "emittedAt": "2026-01-01T00:00:05Z",
+      "stage": "cycle",
+      "message": "Jobs cycle complete",
+      "current": 1,
+      "total": 1,
+      "done": true,
+      "startedAt": "2026-01-01T00:00:00Z",
+      "elapsedMs": 5000,
+      "stages": [
+        {"name": "postings", "outcome": "succeeded", "current": 1, "total": 1},
+        {"name": "watches", "outcome": "skipped", "current": 0, "total": 0},
+        {"name": "careers", "outcome": "not_started", "current": 0, "total": 0},
+        {"name": "csv", "outcome": "succeeded", "current": 1, "total": 1}
+      ],
+      "postingCounts": {"queued": 0, "active": 0, "completed": 1, "error": 0, "canceled": 0},
+      "postingTotal": 1,
+      "summary": {
+        "runId": "cycle-1",
+        "runType": "jobsCycle",
+        "status": "completed",
+        "startedAt": "2026-01-01T00:00:00Z",
+        "finishedAt": "2026-01-01T00:00:05Z",
+        "durationMs": 5000,
+        "postingOutcomes": {"active": 1, "closed": 0, "unknown": 0, "error": 0, "canceled": 0},
+        "stateChanges": 1
+      }
+    }
+  ],
+  "snapshots": [
+    {
+      "version": 1,
+      "runId": "run-1",
+      "runType": "postingCheck",
+      "runStatus": "active",
+      "seq": 2,
+      "stage": "postings",
+      "message": "Checking job postings",
+      "current": 1,
+      "total": 3,
+      "done": false,
+      "startedAt": "2026-01-01T00:00:00Z",
+      "elapsedMs": 1000,
+      "postingCounts": {"queued": 1, "active": 1, "completed": 1, "error": 0, "canceled": 0},
+      "postingTotal": 3,
+      "postings": [],
+      "live": false,
+      "dismissed": false
+    }
+  ],
+  "eligibility": [
+    {"status": "queued", "retry": false, "attention": false},
+    {"status": "active", "retry": false, "attention": false},
+    {"status": "completed", "postingState": "active", "retry": false, "attention": false},
+    {"status": "completed", "postingState": "inactive", "retry": false, "attention": false},
+    {"status": "completed", "postingState": "unknown", "retry": true, "attention": true},
+    {"status": "error", "retry": true, "attention": true},
+    {"status": "canceled", "retry": true, "attention": false}
+  ]
+}

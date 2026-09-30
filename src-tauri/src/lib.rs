@@ -9,7 +9,11 @@ pub mod filtering;
 mod jobs;
 mod models;
 mod runner;
+mod runs;
 mod util;
+
+#[cfg(test)]
+mod surface_tests;
 
 use std::path::PathBuf;
 
@@ -20,7 +24,7 @@ use crate::db::{migrate_legacy_data, resolve_data_dir, AppState};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -105,6 +109,12 @@ pub fn run() {
             commands::csv_reset_config,
             commands::run_jobs_cycle_cmd,
             commands::check_all_postings_cmd,
+            commands::runs::start_run_cmd,
+            commands::runs::retry_run_cmd,
+            commands::runs::cancel_run_cmd,
+            commands::runs::get_run_cmd,
+            commands::runs::get_current_run_cmd,
+            commands::runs::dismiss_run_cmd,
             commands::get_data_dir,
             commands::get_watch_role_keywords,
             commands::set_watch_role_keywords,

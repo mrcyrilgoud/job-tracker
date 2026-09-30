@@ -136,11 +136,6 @@ pub fn finalize_staged_document(
     Ok(())
 }
 
-pub fn discard_staged_document(documents_dir: &Path, document: &Document) {
-    let tmp_path = documents_dir.join(".tmp").join(&document.stored_filename);
-    let _ = fs::remove_file(tmp_path);
-}
-
 fn map_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     Ok(Document {
         id: row.get(0)?,

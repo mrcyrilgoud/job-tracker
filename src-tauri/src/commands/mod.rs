@@ -6,7 +6,6 @@ use std::pin::Pin;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State, WebviewWindow};
-use tauri_plugin_shell::ShellExt;
 
 use crate::ats;
 use crate::ats::careers::{apply_careers_check, company_careers_url, fetch_careers_hash};
@@ -22,7 +21,9 @@ use crate::filtering::resolver::{
     set_watch_criteria, FILTER_CRITERIA_VERSION,
 };
 use crate::jobs::board_discovery::discover_from_url;
-use crate::jobs::check_active::{apply_posting_check, fetch_posting_state, load_job_check_context};
+use crate::jobs::check_active::{
+    apply_posting_evidence, evaluate_posting, load_posting_check_input,
+};
 use crate::jobs::csv::{export_jobs_csv, get_jobs_csv_status, import_jobs_csv, ImportMode};
 use crate::jobs::csv_config::{
     active_csv_path, clear_custom_csv_path, csv_lock_path, get_csv_config, set_custom_csv_path,
@@ -30,6 +31,7 @@ use crate::jobs::csv_config::{
 };
 use crate::jobs::csv_export::with_csv_file_lock;
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
+use crate::jobs::posting_check::fetch::HttpPostingFetcher;
 use crate::jobs::service::{
     approve_watch_job, archive_job, create_job_from_url_with_careers,
     delete_job as delete_job_service, dismiss_watch_job, get_job_detail, get_location_settings,
@@ -39,7 +41,14 @@ use crate::jobs::service::{
     set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
     update_job, JobFilters, LocationSettings, UpdateJobInput,
 };
-use crate::runner::{check_all_postings, run_jobs_cycle, try_lock_runner};
+use crate::runner::try_lock_runner;
+use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
+use crate::runs::legacy::execute_legacy;
+use crate::runs::model::Trigger;
+use crate::runs::progress::TauriSink;
+use crate::runs::RunRegistry;
+
+pub mod runs;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -585,10 +594,12 @@ pub async fn check_job_posting(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<serde_json::Value> {
-    let (url, previous) = state.with_db(|conn| load_job_check_context(conn, &id))?;
-    let (posting_state, last_check_result) = fetch_posting_state(&url).await;
+    // Single-posting check: not a Run, no runner lock. The DB mutex is not held
+    // across the network evaluation.
+    let input = state.with_db(|conn| load_posting_check_input(conn, &id))?;
+    let evidence = evaluate_posting(&input, &HttpPostingFetcher).await;
     let result = state.with_db_tx(|conn| {
-        let result = apply_posting_check(conn, &id, &previous, &posting_state, &last_check_result)?;
+        let result = apply_posting_evidence(conn, &id, &evidence)?;
         Ok(serde_json::json!(result))
     })?;
     state.csv_export.mark_dirty();
@@ -861,18 +872,13 @@ pub async fn detach_document(state: State<'_, AppState>, attachment_id: String) 
 }
 
 #[tauri::command]
-pub async fn open_document(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    document_id: String,
-) -> AppResult<()> {
+pub async fn open_document(state: State<'_, AppState>, document_id: String) -> AppResult<()> {
     let path = state.with_db(|conn| {
         let (_doc, path) =
             documents::get_document_file_path(conn, &state.paths.documents_dir, &document_id)?;
         Ok(path)
     })?;
-    app.shell()
-        .open(path.to_string_lossy().to_string(), None)
+    tauri_plugin_opener::open_path(path, None::<&str>)
         .map_err(|e| crate::error::AppError::from(e.to_string()))?;
     Ok(())
 }
@@ -1060,12 +1066,26 @@ pub async fn run_jobs_cycle_cmd(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<serde_json::Value> {
-    let _runner_guard = state
-        .runner_lock
-        .try_lock()
-        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
-    let paths = state.paths.clone();
-    run_jobs_cycle(&paths, Some(app)).await
+    let hook = {
+        let csv = state.csv_export.clone();
+        std::sync::Arc::new(move || csv.mark_dirty())
+    };
+    let coordinator = RunCoordinator::new(
+        state.paths.clone(),
+        state.runner_lock.clone(),
+        std::sync::Arc::new(crate::jobs::posting_check::fetch::HttpPostingFetcher),
+        std::sync::Arc::new(TauriSink::new(app)),
+        SystemClock,
+        RunRegistry::new(),
+    )
+    .with_csv_dirty_hook(hook);
+    execute_legacy(
+        &coordinator,
+        RunRequest::JobsCycle {
+            trigger: Trigger::LegacyCommand,
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1073,12 +1093,26 @@ pub async fn check_all_postings_cmd(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<serde_json::Value> {
-    let _runner_guard = state
-        .runner_lock
-        .try_lock()
-        .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
-    let paths = state.paths.clone();
-    check_all_postings(&paths, Some(app)).await
+    let hook = {
+        let csv = state.csv_export.clone();
+        std::sync::Arc::new(move || csv.mark_dirty())
+    };
+    let coordinator = RunCoordinator::new(
+        state.paths.clone(),
+        state.runner_lock.clone(),
+        std::sync::Arc::new(crate::jobs::posting_check::fetch::HttpPostingFetcher),
+        std::sync::Arc::new(TauriSink::new(app)),
+        SystemClock,
+        RunRegistry::new(),
+    )
+    .with_csv_dirty_hook(hook);
+    execute_legacy(
+        &coordinator,
+        RunRequest::PostingCheck {
+            trigger: Trigger::LegacyCommand,
+        },
+    )
+    .await
 }
 
 #[tauri::command]

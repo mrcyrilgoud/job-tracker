@@ -115,9 +115,20 @@ export function JobDetailClient({
   const [justSaved, setJustSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A background run can refresh the parent detail while this editor remains
+  // mounted. Keep the read-only posting status in sync without overwriting any
+  // unsaved draft fields.
+  useEffect(() => {
+    setPosting({
+      state: initial.postingState,
+      lastCheckedAt: initial.lastCheckedAt,
+      lastCheckResult: initial.lastCheckResult,
+    });
+  }, [initial.postingState, initial.lastCheckedAt, initial.lastCheckResult]);
+
   const isDirty = !draftsMatch(draft, saved);
   const postingInfo = postingStateMatters(draft.status)
-    ? postingStatePresentation(posting.state)
+    ? postingStatePresentation(posting.state, posting.lastCheckedAt)
     : null;
   const checkNote = checkResultNote(posting.lastCheckResult);
 

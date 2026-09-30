@@ -1,4 +1,3 @@
-import { listen } from "@tauri-apps/api/event";
 import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -18,11 +17,11 @@ import {
 } from "@/components/icons";
 import { JobsBoardView } from "@/components/JobsBoardView";
 import { NewRolesList } from "@/components/companies/NewRolesList";
-import { api, type JobsRunnerProgress } from "@/lib/api";
+import { api } from "@/lib/api";
 import { watchPreviewCountLabel } from "@/lib/companies-ui";
 import { filterCompaniesBySearch, filterDraftFromUrl } from "@/lib/job-filters";
 import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
-import { isDesktopShell } from "@/lib/tauri";
+import { useRunMonitor } from "@/lib/RunMonitorContext";
 import {
   jobSourceLabel,
   jobStatusPresentation,
@@ -52,17 +51,14 @@ export function JobsPage() {
   const [companySidebarSearch, setCompanySidebarSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [checkingPostings, setCheckingPostings] = useState(false);
-  const [checkProgress, setCheckProgress] = useState<JobsRunnerProgress | null>(null);
-  const [checkError, setCheckError] = useState<string | null>(null);
   const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null));
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
   const [jobToDelete, setJobToDelete] = useState<{ id: string; title: string; companyName: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const checkingPostingsRef = useRef(false);
   const loadSequenceRef = useRef(0);
+  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
 
   useEffect(() => {
     setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null));
@@ -120,63 +116,21 @@ export function JobsPage() {
       setNewFromWatch(watchResult.jobs);
     } catch (err) {
       if (sequence !== loadSequenceRef.current) return;
-      setError(err instanceof Error ? err.message : "Failed to load jobs");
+      const message = err instanceof Error ? err.message : "Failed to load jobs";
+      setError(message);
+      if (opts?.quiet) reportRefreshFailed(message);
     } finally {
       if (sequence === loadSequenceRef.current && !opts?.quiet) {
         setLoading(false);
       }
     }
-  }, [status, companyId, postingState, search, isFavoriteFilter, isArchivedFilter]);
+  }, [status, companyId, postingState, search, isFavoriteFilter, isArchivedFilter, reportRefreshFailed]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!isDesktopShell()) {
-      return;
-    }
-
-    let unlisten: (() => void) | undefined;
-
-    void listen<JobsRunnerProgress>("jobs-runner-progress", (event) => {
-      if (checkingPostingsRef.current) {
-        setCheckProgress(event.payload);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!checkProgress || checkProgress.phase !== "done" || checkingPostings) {
-      return;
-    }
-    const timer = window.setTimeout(() => setCheckProgress(null), 3000);
-    return () => window.clearTimeout(timer);
-  }, [checkProgress, checkingPostings]);
-
-  async function checkAllPostings() {
-    checkingPostingsRef.current = true;
-    setCheckingPostings(true);
-    setCheckError(null);
-    setCheckProgress({ phase: "starting", message: "Checking job postings…" });
-    try {
-      await api.checkAllPostings();
-      setCheckProgress({ phase: "done", message: "Posting check complete" });
-      await load({ quiet: true });
-    } catch (err) {
-      setCheckError(err instanceof Error ? err.message : "Posting check failed");
-      setCheckProgress(null);
-    } finally {
-      checkingPostingsRef.current = false;
-      setCheckingPostings(false);
-    }
-  }
+  useEffect(() => onRunSettled(() => { void load({ quiet: true }); }), [load, onRunSettled]);
 
   async function triageWatchJob(jobId: string, action: "approve" | "dismiss") {
     setTriagingId(jobId);
@@ -488,37 +442,7 @@ export function JobsPage() {
               ) : null}
             </form>
 
-            <button
-              type="button"
-              onClick={() => void checkAllPostings()}
-              disabled={checkingPostings}
-              className="btn btn-secondary"
-            >
-              {checkingPostings ? <span className="spinner" /> : null}
-              {checkingPostings ? "Checking…" : "Check postings"}
-            </button>
           </div>
-
-          {checkProgress && (checkingPostings || checkProgress.phase === "done") ? (
-            <div
-              role="status"
-              aria-live="polite"
-              className="flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-[var(--muted)] shadow-[var(--shadow-sm)]"
-            >
-              <span>{checkProgress.message}</span>
-              {checkProgress.total && checkProgress.total > 0 ? (
-                <span className="font-display font-medium text-[var(--foreground)]">
-                  {checkProgress.current ?? 0} / {checkProgress.total}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-
-          {checkError ? (
-            <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
-              {checkError}
-            </p>
-          ) : null}
 
           {!isFiltered ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -680,7 +604,7 @@ export function JobsPage() {
               {jobs.map(({ job, companyName }) => {
                 const statusInfo = jobStatusPresentation(job.status);
                 const postingInfo = postingStateMatters(job.status)
-                  ? postingStatePresentation(job.postingState)
+                      ? postingStatePresentation(job.postingState, job.lastCheckedAt)
                   : null;
                 const source = jobSourceLabel(job.source);
                 const StageIcon = statusIcons[job.status];

@@ -1,5 +1,4 @@
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
 
 use crate::ats::{list_jobs, AtsJob};
 use crate::companies::get_watch;
@@ -9,25 +8,6 @@ use crate::filtering::model::FilterCriteria;
 use crate::filtering::resolver::{load_alias_table, resolve_effective_criteria};
 use crate::models::Job;
 use crate::util::{create_id, normalize_canonical_url, now_iso};
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncOk {
-    pub ok: bool,
-    pub created: usize,
-    pub reactivated: usize,
-    pub deactivated: usize,
-    pub total_remote: usize,
-    pub synced_at: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncErr {
-    pub ok: bool,
-    pub error: String,
-    pub synced_at: String,
-}
 
 fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {

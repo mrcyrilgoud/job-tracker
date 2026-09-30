@@ -24,7 +24,8 @@ use crate::jobs::service::{
     unarchive_job, update_job, JobFilters, UpdateJobInput,
 };
 use crate::models::{is_job_status, JobListItem};
-use crate::runner::run_jobs_cycle;
+use crate::runner::run_jobs_cycle_trigger;
+use crate::runs::model::Trigger;
 use crate::util::normalize_canonical_url;
 
 /// Resolve a user-supplied target (UUID, prefix, or URL) to a job ID.
@@ -719,7 +720,7 @@ pub async fn handle_watches(
             if !quiet && !json {
                 println!("Starting ATS & background jobs sync...");
             }
-            let summary = run_jobs_cycle(paths, None).await?;
+            let summary = run_jobs_cycle_trigger(paths, None, Trigger::Cli).await?;
             if json {
                 print_raw_json(&summary);
             } else if !quiet {
@@ -734,7 +735,7 @@ pub async fn handle_sync(paths: &DataPaths, json: bool, quiet: bool) -> AppResul
     if !quiet && !json {
         println!("Starting full jobs cycle...");
     }
-    let summary = run_jobs_cycle(paths, None).await?;
+    let summary = run_jobs_cycle_trigger(paths, None, Trigger::Cli).await?;
     if json {
         print_raw_json(&summary);
     } else if !quiet {

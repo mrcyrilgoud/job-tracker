@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { CompaniesClient } from "@/components/CompaniesClient";
 import { api } from "@/lib/api";
+import { useRunMonitor } from "@/lib/RunMonitorContext";
 import type { CompanyRow, JobListItem } from "@/lib/schema";
 
 export function CompaniesPage() {
@@ -9,8 +10,9 @@ export function CompaniesPage() {
   const [newRoles, setNewRoles] = useState<JobListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
     setError(null);
     try {
       // Roles a watch found but the user hasn't triaged live in `jobs` behind
@@ -23,15 +25,22 @@ export function CompaniesPage() {
       setCompanies(companyResult.companies);
       setNewRoles(roleResult.jobs);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load companies");
+      const message = err instanceof Error ? err.message : "Failed to load companies";
+      setError(message);
+      if (opts?.quiet) reportRefreshFailed(message);
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [reportRefreshFailed]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(
+    () => onRunSettled(() => { void load({ quiet: true }); }),
+    [load, onRunSettled],
+  );
 
   return (
     <div className="mx-auto max-w-4xl">
