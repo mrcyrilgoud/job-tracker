@@ -542,7 +542,7 @@ fn summary_from_rows(
         duration_ms: BoundedCount::new(duration_ms),
         posting_outcomes: outcomes,
         state_changes: BoundedCount::new(state_changes),
-        stages: (run.run_type == RunType::JobsCycle).then(|| stages.to_vec()),
+        stages: run.run_type.has_stages().then(|| stages.to_vec()),
         source_run_id: run.source_run_id.clone(),
     };
     summary.enforce_bounds();
@@ -557,6 +557,7 @@ fn run_label(run_type: RunType) -> &'static str {
     match run_type {
         RunType::JobsCycle => "Jobs cycle",
         RunType::PostingCheck => "Posting check",
+        RunType::CareerCheck => "Career sources check",
     }
 }
 
@@ -580,27 +581,44 @@ pub fn legacy_progress(
     let posting_total = counts.total();
     let label = run_label(run_type);
 
-    let (stage, current, total) = if run_type == RunType::JobsCycle && status.is_terminal() {
-        (LegacyStage::Cycle, 1, 1)
-    } else if run_type == RunType::PostingCheck {
-        (LegacyStage::Postings, settled, posting_total)
-    } else {
-        let current_stage = stages
-            .iter()
-            .find(|s| s.outcome == StageOutcome::InProgress)
-            .or_else(|| {
-                stages
-                    .iter()
-                    .rev()
-                    .find(|s| matches!(s.outcome, StageOutcome::Succeeded | StageOutcome::Failed))
-            });
-        match current_stage {
-            Some(s) if s.name != StageName::Postings => {
-                (s.name.into(), s.current.get(), s.total.get())
+    let (stage, current, total) =
+        if run_type == RunType::JobsCycle && status.is_terminal() {
+            (LegacyStage::Cycle, 1, 1)
+        } else if run_type == RunType::PostingCheck {
+            (LegacyStage::Postings, settled, posting_total)
+        } else if run_type == RunType::CareerCheck {
+            // CareerCheck has no postings and its persisted stage order is
+            // watches -> careers. Keep the legacy projection on one of those
+            // actual stages, including the initial queued snapshot.
+            let current_stage = stages
+                .iter()
+                .find(|s| s.outcome == StageOutcome::InProgress)
+                .or_else(|| {
+                    stages.iter().rev().find(|s| {
+                        matches!(s.outcome, StageOutcome::Succeeded | StageOutcome::Failed)
+                    })
+                })
+                .or_else(|| stages.first());
+            match current_stage {
+                Some(s) => (s.name.into(), s.current.get(), s.total.get()),
+                None => (LegacyStage::Careers, 0, 0),
             }
-            _ => (LegacyStage::Postings, settled, posting_total),
-        }
-    };
+        } else {
+            let current_stage = stages
+                .iter()
+                .find(|s| s.outcome == StageOutcome::InProgress)
+                .or_else(|| {
+                    stages.iter().rev().find(|s| {
+                        matches!(s.outcome, StageOutcome::Succeeded | StageOutcome::Failed)
+                    })
+                });
+            match current_stage {
+                Some(s) if s.name != StageName::Postings => {
+                    (s.name.into(), s.current.get(), s.total.get())
+                }
+                _ => (LegacyStage::Postings, settled, posting_total),
+            }
+        };
 
     let progress_text = || match stage {
         LegacyStage::Postings => format!("Checked {current} of {total} postings"),
@@ -1306,7 +1324,7 @@ fn build_snapshot(
         done,
         started_at: run.started_at.clone(),
         elapsed_ms: BoundedCount::new(elapsed_ms),
-        stages: (run.run_type == RunType::JobsCycle).then(|| run.stages.clone()),
+        stages: run.run_type.has_stages().then(|| run.stages.clone()),
         posting_counts: counts,
         posting_total: BoundedCount::new(counts.total()),
         error_reason,
@@ -1632,13 +1650,12 @@ mod tests {
     }
 
     fn new_run(id: &str, run_type: RunType, at: &str) -> NewRun {
-        let stages = match run_type {
-            RunType::JobsCycle => StageName::ORDER
-                .into_iter()
-                .map(StageProgress::not_started)
-                .collect(),
-            RunType::PostingCheck => vec![],
-        };
+        let stages = run_type
+            .stage_order()
+            .iter()
+            .copied()
+            .map(StageProgress::not_started)
+            .collect();
         NewRun {
             id: RunId::from_existing(id),
             run_type,
@@ -1880,6 +1897,63 @@ mod tests {
             s.summary.as_ref().unwrap().stages.is_some(),
             "fallback summary carries stages"
         );
+    }
+
+    #[test]
+    fn career_check_snapshot_uses_career_stages_for_queued_and_active_progress() {
+        let conn = db();
+        let run = new_run("career", RunType::CareerCheck, T0);
+        insert_accepted_run(&conn, &run, &[]).unwrap();
+
+        let queued = load_snapshot(&conn, "career", true, T0).unwrap().unwrap();
+        assert_eq!(
+            (queued.stage, queued.current.get(), queued.total.get()),
+            (LegacyStage::Watches, 0, 0)
+        );
+        assert_eq!(queued.message, "Career sources check queued");
+
+        let mut stages = run.stages.clone();
+        stages[0] = StageProgress {
+            outcome: StageOutcome::InProgress,
+            current: BoundedCount::new(2),
+            total: BoundedCount::new(5),
+            ..stages[0].clone()
+        };
+        update_run_progress(&conn, "career", 2, Some(&stages), T1).unwrap();
+        cas_run_status(&conn, "career", &[RunStatus::Queued], RunStatus::Active, T1).unwrap();
+
+        let active = load_snapshot(&conn, "career", true, T1).unwrap().unwrap();
+        assert_eq!(
+            (active.stage, active.current.get(), active.total.get()),
+            (LegacyStage::Watches, 2, 5)
+        );
+        assert_eq!(active.message, "Syncing company watches (2/5)");
+
+        stages[0].outcome = StageOutcome::Succeeded;
+        stages[1] = StageProgress {
+            outcome: StageOutcome::Succeeded,
+            current: BoundedCount::new(3),
+            total: BoundedCount::new(3),
+            ..stages[1].clone()
+        };
+        finalize_run(
+            &conn,
+            "career",
+            &TerminalRecord {
+                status: RunStatus::Completed,
+                finished_at: T2.into(),
+                error_reason: None,
+                stages: stages.clone(),
+                summary: None,
+                seq: 3,
+            },
+        )
+        .unwrap();
+        let completed = load_snapshot(&conn, "career", false, T3).unwrap().unwrap();
+        assert!(completed.done);
+        assert_eq!(completed.stages.as_ref().unwrap(), &stages);
+        assert_eq!(completed.stage, LegacyStage::Careers);
+        assert_eq!(completed.message, "Career sources check completed");
     }
 
     #[test]

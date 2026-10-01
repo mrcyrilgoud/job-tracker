@@ -1,7 +1,7 @@
 //! Run domain types shared by the coordinator, store, progress contract, and commands.
 //!
 //! Serde casing follows the Progress_Contract v1 (design.md): `RunType` is
-//! camelCase on the wire (`jobsCycle`, `postingCheck`); status/state/stage/trigger
+//! camelCase on the wire (`jobsCycle`, `postingCheck`, `careerCheck`); status/state/stage/trigger
 //! enums are snake_case; structs use camelCase field names. `as_str`/`parse`
 //! give the canonical persisted SQLite text for each enum.
 
@@ -59,16 +59,34 @@ impl AsRef<str> for RunId {
 pub enum RunType {
     JobsCycle,
     PostingCheck,
+    CareerCheck,
 }
 
 impl RunType {
-    pub const ALL: [RunType; 2] = [RunType::JobsCycle, RunType::PostingCheck];
+    pub const ALL: [RunType; 3] = [
+        RunType::JobsCycle,
+        RunType::PostingCheck,
+        RunType::CareerCheck,
+    ];
+
+    pub fn has_stages(self) -> bool {
+        matches!(self, Self::JobsCycle | Self::CareerCheck)
+    }
+
+    pub fn stage_order(self) -> &'static [StageName] {
+        match self {
+            Self::JobsCycle => &StageName::ORDER,
+            Self::CareerCheck => &StageName::CAREER_CHECK_ORDER,
+            Self::PostingCheck => &[],
+        }
+    }
 
     /// Persisted `runs.run_type` value.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::JobsCycle => "jobs_cycle",
             Self::PostingCheck => "posting_check",
+            Self::CareerCheck => "career_check",
         }
     }
 
@@ -215,6 +233,8 @@ impl StageName {
         StageName::Csv,
     ];
 
+    pub const CAREER_CHECK_ORDER: [StageName; 2] = [StageName::Watches, StageName::Careers];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Postings => "postings",
@@ -336,8 +356,10 @@ mod tests {
     fn run_type_wire_is_camel_case_and_db_is_snake_case() {
         assert_eq!(wire(RunType::JobsCycle), "jobsCycle");
         assert_eq!(wire(RunType::PostingCheck), "postingCheck");
+        assert_eq!(wire(RunType::CareerCheck), "careerCheck");
         assert_eq!(RunType::JobsCycle.as_str(), "jobs_cycle");
         assert_eq!(RunType::PostingCheck.as_str(), "posting_check");
+        assert_eq!(RunType::CareerCheck.as_str(), "career_check");
         for t in RunType::ALL {
             assert_eq!(RunType::parse(t.as_str()), Some(t));
         }

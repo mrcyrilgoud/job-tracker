@@ -233,6 +233,9 @@ pub enum RunRequest {
     PostingCheck {
         trigger: Trigger,
     },
+    CareerCheck {
+        trigger: Trigger,
+    },
     /// Retry_Run: a Posting_Check_Run over selected entries of a terminal run.
     Retry {
         source_run_id: String,
@@ -247,6 +250,7 @@ impl RunRequest {
         match self {
             Self::JobsCycle { .. } => RunType::JobsCycle,
             Self::PostingCheck { .. } | Self::Retry { .. } => RunType::PostingCheck,
+            Self::CareerCheck { .. } => RunType::CareerCheck,
         }
     }
 
@@ -254,6 +258,7 @@ impl RunRequest {
         match self {
             Self::JobsCycle { trigger }
             | Self::PostingCheck { trigger }
+            | Self::CareerCheck { trigger }
             | Self::Retry { trigger, .. } => *trigger,
         }
     }
@@ -642,13 +647,12 @@ where
             _ => None,
         };
         let started_at = self.clock.now();
-        let stages: Vec<StageProgress> = match run_type {
-            RunType::JobsCycle => StageName::ORDER
-                .into_iter()
-                .map(StageProgress::not_started)
-                .collect(),
-            RunType::PostingCheck => Vec::new(),
-        };
+        let stages: Vec<StageProgress> = run_type
+            .stage_order()
+            .iter()
+            .copied()
+            .map(StageProgress::not_started)
+            .collect();
         let new_run = NewRun {
             id: RunId::new(),
             run_type,
@@ -950,6 +954,12 @@ where
     /// transition once. In-flight postings keep running until they finish
     /// (Req 5.5); the run then drains and finalize derives Canceled.
     async fn run_postings_stage(&mut self) {
+        if self.run_type == RunType::CareerCheck {
+            if *self.cancel_rx.borrow() || self.persisted_status_is_canceling() {
+                self.observe_cancel();
+            }
+            return;
+        }
         if self.run_type == RunType::JobsCycle {
             self.set_stage(StageName::Postings, StageOutcome::InProgress, None);
         }
@@ -1124,7 +1134,7 @@ where
     /// - Item-level fetch failures are already inside each stage's `items` and
     ///   are not stage failures.
     async fn run_stages(&mut self) {
-        if self.run_type != RunType::JobsCycle {
+        if !self.run_type.has_stages() {
             return;
         }
 
@@ -1138,10 +1148,12 @@ where
         }
         self.run_careers_stage().await;
 
-        if self.canceling {
-            return;
+        if self.run_type == RunType::JobsCycle {
+            if self.canceling {
+                return;
+            }
+            self.run_csv_stage().await;
         }
-        self.run_csv_stage().await;
     }
 
     /// Run the watches stage against the driver's connection, collecting its
@@ -1149,9 +1161,45 @@ where
     async fn run_watches_stage(&mut self) {
         self.begin_stage(StageName::Watches);
         let mut snapshots: Vec<StageProgress> = Vec::new();
-        let result =
-            watches_stage::run_watches_stage(&mut self.conn, |p| snapshots.push(p), |_watch_id| {})
-                .await;
+        let paths = self.coordinator.paths().clone();
+        let run_id = self.run_id.clone();
+        let mut poll = tokio::time::interval(self.config().cancel_poll);
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        poll.tick().await;
+        let mut stage = Box::pin(watches_stage::run_watches_stage(
+            &mut self.conn,
+            |p| snapshots.push(p),
+            |_watch_id| {},
+        ));
+        let mut canceled = false;
+        let result = loop {
+            tokio::select! {
+                result = &mut stage => break Some(result),
+                changed = self.cancel_rx.changed() => {
+                    if matches!(changed, Ok(())) && *self.cancel_rx.borrow() {
+                        canceled = true;
+                        break None;
+                    }
+                }
+                _ = poll.tick() => {
+                    let persisted_canceled = open_runner_conn(&paths)
+                        .ok()
+                        .and_then(|conn| store::run_status(&conn, &run_id).ok().flatten())
+                        == Some(RunStatus::Canceling);
+                    if persisted_canceled {
+                        canceled = true;
+                        break None;
+                    }
+                }
+            }
+        };
+        drop(stage);
+        if canceled {
+            self.observe_cancel();
+        }
+        let Some(result) = result else {
+            return;
+        };
         match result {
             Ok(result) => {
                 self.stage_items.watches = result.items;
@@ -1166,9 +1214,45 @@ where
     async fn run_careers_stage(&mut self) {
         self.begin_stage(StageName::Careers);
         let mut snapshots: Vec<StageProgress> = Vec::new();
-        let result =
-            careers_stage::run_careers_stage(&mut self.conn, |p| snapshots.push(p), |_name| {})
-                .await;
+        let paths = self.coordinator.paths().clone();
+        let run_id = self.run_id.clone();
+        let mut poll = tokio::time::interval(self.config().cancel_poll);
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        poll.tick().await;
+        let mut stage = Box::pin(careers_stage::run_careers_stage(
+            &mut self.conn,
+            |p| snapshots.push(p),
+            |_name| {},
+        ));
+        let mut canceled = false;
+        let result = loop {
+            tokio::select! {
+                result = &mut stage => break Some(result),
+                changed = self.cancel_rx.changed() => {
+                    if matches!(changed, Ok(())) && *self.cancel_rx.borrow() {
+                        canceled = true;
+                        break None;
+                    }
+                }
+                _ = poll.tick() => {
+                    let persisted_canceled = open_runner_conn(&paths)
+                        .ok()
+                        .and_then(|conn| store::run_status(&conn, &run_id).ok().flatten())
+                        == Some(RunStatus::Canceling);
+                    if persisted_canceled {
+                        canceled = true;
+                        break None;
+                    }
+                }
+            }
+        };
+        drop(stage);
+        if canceled {
+            self.observe_cancel();
+        }
+        let Some(result) = result else {
+            return;
+        };
         match result {
             Ok(result) => {
                 self.stage_items.careers = result.items;
@@ -1607,7 +1691,7 @@ where
         let emitted_at = self.now();
         let elapsed_ms = self.elapsed_ms();
         let counts = self.ledger.counts();
-        let stages_opt = (self.run_type == RunType::JobsCycle).then(|| self.stages.clone());
+        let stages_opt = self.run_type.has_stages().then(|| self.stages.clone());
         let legacy =
             store::legacy_progress(self.run_type, self.run_status, &self.stages, &counts, None);
 
@@ -1728,7 +1812,7 @@ where
                 source_run_id: self.source_run_id.clone(),
             },
             &self.ledger,
-            (self.run_type == RunType::JobsCycle).then_some(self.stages.as_slice()),
+            self.run_type.has_stages().then_some(self.stages.as_slice()),
             &self.states_at_start,
             &RunTiming {
                 started_at: self.started_at.clone(),
@@ -1810,6 +1894,7 @@ where
             let should_mark = match run_type {
                 RunType::JobsCycle => terminal == RunStatus::Canceled,
                 RunType::PostingCheck => state_changes > 0,
+                RunType::CareerCheck => true,
             };
             if should_mark {
                 hook();
@@ -1865,7 +1950,7 @@ where
             done: true,
             started_at: self.started_at.clone(),
             elapsed_ms: BoundedCount::new(duration_ms),
-            stages: (self.run_type == RunType::JobsCycle).then(|| self.stages.clone()),
+            stages: self.run_type.has_stages().then(|| self.stages.clone()),
             posting_counts: counts,
             posting_total: BoundedCount::new(counts.total()),
             error_reason: (terminal == RunStatus::Error).then(|| {
@@ -2012,6 +2097,7 @@ fn plan_postings(
 ) -> Result<Vec<PlannedPosting>, RunRejection> {
     let rows = match request {
         RunRequest::JobsCycle { .. } | RunRequest::PostingCheck { .. } => load_all_jobs(conn)?,
+        RunRequest::CareerCheck { .. } => Vec::new(),
         RunRequest::Retry {
             source_run_id,
             job_ids,
@@ -2194,7 +2280,7 @@ fn initial_snapshot(
         done: false,
         started_at: started_at.to_string(),
         elapsed_ms: BoundedCount::ZERO,
-        stages: (run_type == RunType::JobsCycle).then(|| stages.to_vec()),
+        stages: run_type.has_stages().then(|| stages.to_vec()),
         posting_counts: counts,
         posting_total: BoundedCount::new(counts.total()),
         error_reason: None,
@@ -4394,6 +4480,63 @@ mod stages_tests {
         assert!(execution.stage_items.csv_exported.is_none());
         // No CSV mirror is written for a posting check.
         assert!(!env.paths.jobs_csv_path.exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn career_check_run_has_watches_and_careers_but_no_postings_or_csv() {
+        let url_a = "https://acme.example/jobs/a";
+        let env = Env::new(&[("a", "Engineer A", url_a, "unknown")]);
+        let fetcher = FakeFetcher::new(scripts(vec![]));
+        let sink = Arc::new(RecordingSink::new());
+        let coord = env.coordinator(fetcher, sink, config(4));
+
+        let run = coord
+            .accept(RunRequest::CareerCheck {
+                trigger: Trigger::Desktop,
+            })
+            .unwrap();
+        let execution = coord.execute_run(run).await;
+
+        assert_eq!(execution.snapshot.run_status, RunStatus::Completed);
+        let stages = execution
+            .snapshot
+            .stages
+            .as_ref()
+            .expect("career check has career-source stages");
+        assert_eq!(
+            stages.iter().map(|stage| stage.name).collect::<Vec<_>>(),
+            vec![StageName::Watches, StageName::Careers]
+        );
+        assert!(execution.snapshot.postings.is_empty());
+        assert!(execution.stage_items.csv_imported.is_none());
+        assert!(execution.stage_items.csv_exported.is_none());
+        assert!(!env.paths.jobs_csv_path.exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn canceled_career_check_skips_async_stages_and_finalizes_canceled() {
+        let env = Env::new(&[]);
+        let fetcher = FakeFetcher::new(scripts(vec![]));
+        let sink = Arc::new(RecordingSink::new());
+        let coord = env.coordinator(fetcher, sink, config(4));
+
+        let run = coord
+            .accept(RunRequest::CareerCheck {
+                trigger: Trigger::Desktop,
+            })
+            .unwrap();
+        let run_id = run.run_id().to_string();
+        coord.cancel(&run_id).unwrap();
+
+        let execution = coord.execute_run(run).await;
+
+        assert_eq!(execution.snapshot.run_status, RunStatus::Canceled);
+        let stages = execution.snapshot.stages.as_ref().unwrap();
+        assert!(stages
+            .iter()
+            .all(|stage| stage.outcome == StageOutcome::Skipped));
+        assert!(execution.stage_items.watches.is_empty());
+        assert!(execution.stage_items.careers.is_empty());
     }
 
     #[tokio::test(start_paused = true)]

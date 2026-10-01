@@ -123,6 +123,10 @@ export function RunMonitorProvider({ children }: { children: ReactNode }): React
   // Reconcile backoff, reset on every success.
   const reconcileBackoffRef = useRef(RECONCILE_MIN_BACKOFF_MS);
 
+  // The reducer state drives rendering; this ref closes the gap between two
+  // rapid clicks before React commits the pending state update.
+  const startPendingRef = useRef(false);
+
   const desktop = isDesktopShell();
 
   // ---- Announcements: recompute on every state transition ----
@@ -285,11 +289,18 @@ export function RunMonitorProvider({ children }: { children: ReactNode }): React
   }, [reconcile]);
 
   const start = useCallback(
-    (runType: RunType) =>
-      runAction(async () => {
+    (runType: RunType) => {
+      if (startPendingRef.current) return Promise.resolve();
+      startPendingRef.current = true;
+      dispatch({ type: "startPending" });
+      return runAction(async () => {
         const accepted = await api.startRun(runType);
         return { type: "accepted", accepted };
-      }),
+      }).finally(() => {
+        startPendingRef.current = false;
+        dispatch({ type: "startSettled" });
+      });
+    },
     [runAction],
   );
 

@@ -705,7 +705,16 @@ pub async fn check_careers(
     };
     match fetch_careers_hash(&url).await {
         Ok((hash, text)) => {
-            state.with_db(|conn| apply_careers_check(conn, &company_id, &name, &hash, &text))
+            let result = state
+                .with_db(|conn| apply_careers_check(conn, &company_id, &name, &hash, &text))?;
+            if result
+                .get("changed")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                state.csv_export.mark_dirty();
+            }
+            Ok(result)
         }
         Err(e) => Ok(serde_json::json!({
             "changed": false,

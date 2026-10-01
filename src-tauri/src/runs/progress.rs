@@ -553,8 +553,9 @@ fn outcome_slot<'a>(
 ///   event. `stateChanges` counts Completed entries whose `PostingState::as_str()`
 ///   differs from that text; a missing key counts as a change. Queued, Active,
 ///   Error, and Canceled entries never count (Req 9.8).
-/// - `stages` is `Some` for Jobs_Cycle and passed through unchanged apart from
-///   bound enforcement (Req 9.3, 9.4); Posting_Check_Run passes `None`.
+/// - `stages` is `Some` for staged runs (Jobs_Cycle and CareerCheck) and passed
+///   through unchanged apart from bound enforcement (Req 9.3, 9.4);
+///   Posting_Check_Run passes `None`.
 ///
 /// Rejects a non-terminal `header.status` and a ledger that still has Queued or
 /// Active entries, since neither can produce a consistent summary.

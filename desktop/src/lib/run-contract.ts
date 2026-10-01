@@ -45,7 +45,7 @@ export const CONTRACT_BOUNDS = {
   MAX_CATEGORY_BYTES,
 } as const;
 
-export const RUN_TYPES = ["jobsCycle", "postingCheck"] as const;
+export const RUN_TYPES = ["jobsCycle", "postingCheck", "careerCheck"] as const;
 export const RUN_STATUSES = [
   "queued",
   "active",
@@ -203,7 +203,7 @@ export type RunProgressEvent = {
   done: boolean;
   startedAt: string;
   elapsedMs: number;
-  /** Jobs_Cycle only. */
+  /** Runs with stage progress, including Jobs_Cycle and Career_Check. */
   stages?: StageProgress[];
   postingCounts: PostingCounts;
   postingTotal: number;

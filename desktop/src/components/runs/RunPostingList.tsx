@@ -49,7 +49,7 @@ export function RunPostingList() {
   const { state, setFilter, toggleRetry, selectAllNeedingAttention } = useRunMonitor();
 
   const snapshot = state.displayed;
-  if (snapshot === null) return null;
+  if (snapshot === null || snapshot.runType === "careerCheck") return null;
 
   const rows = visiblePostings(state);
   const attentionCount = attentionPostings(snapshot).length;

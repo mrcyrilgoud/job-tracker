@@ -2,10 +2,11 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const label = "com.jobtracker.local.jobs";
 const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
-const projectRoot = process.cwd();
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Prefer the packaged Tauri binary with `--run-jobs`. Fall back to the debug
@@ -19,7 +20,7 @@ function resolveRunner(): {
 } {
   const dataDir = process.env.JOB_TRACKER_DATA_DIR
     ? path.resolve(process.env.JOB_TRACKER_DATA_DIR)
-    : path.join(projectRoot, "data");
+    : path.join(os.homedir(), "Library", "Application Support", "com.jobtracker.local");
   const logPath = path.join(dataDir, "jobs-worker.log");
 
   const releaseApp = path.join(

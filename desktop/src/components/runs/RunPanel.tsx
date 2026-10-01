@@ -18,10 +18,11 @@ import {
  * It renders the displayed run's identity and progress from `runViewModel`:
  * run id, type label, status text, current stage, completed/total counts, a
  * decorative progress bar with an always-visible `n / total` text (Req 12.7),
- * and elapsed time. For a Jobs_Cycle it also lists each stage's outcome as
- * text. It hosts the Cancel button (enabled only for queued/active — Req 5.1,
- * 5.2), the Retry action for a terminal run with a selection, transient
- * notices, the posting list, the summary card, and the live regions.
+ * and elapsed time. For runs with stage progress (Jobs_Cycle and Career_Check)
+ * it also lists each stage's outcome as text. It hosts the Cancel button
+ * (enabled only for queued/active — Req 5.1, 5.2), the Retry action for a
+ * terminal run with a selection, transient notices, posting-run details, and
+ * the live regions.
  *
  * The elapsed clock ticks once a second for a live, non-terminal run so the
  * duration advances between events; terminal runs freeze on the summary
@@ -43,10 +44,11 @@ export function RunPanel() {
   if (snapshot === null) return null;
 
   const vm = runViewModel(snapshot, terminal ? undefined : now);
+  const isPostingRun = snapshot.runType !== "careerCheck";
   const total = vm.total > 0 ? vm.total : 0;
   const pct = total > 0 ? Math.min(100, Math.round((vm.completed / total) * 100)) : 0;
   const notice = state.notice;
-  const showRetry = canRetry(state);
+  const showRetry = isPostingRun && canRetry(state);
 
   return (
     <section className="card mb-6 space-y-4 p-4" aria-label="Run status">
@@ -123,9 +125,9 @@ export function RunPanel() {
         </ul>
       ) : null}
 
-      <RunSummaryCard />
+      {isPostingRun ? <RunSummaryCard /> : null}
 
-      <RunPostingList />
+      {isPostingRun ? <RunPostingList /> : null}
 
       <RunLiveRegions />
     </section>

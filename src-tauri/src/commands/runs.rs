@@ -25,10 +25,11 @@ fn parse_run_type(value: &str) -> AppResult<RunType> {
     match value {
         "jobsCycle" | "jobs_cycle" => Ok(RunType::JobsCycle),
         "postingCheck" | "posting_check" => Ok(RunType::PostingCheck),
+        "careerCheck" | "career_check" => Ok(RunType::CareerCheck),
         _ => Err(AppError::coded(
             "invalid_run_type",
             "run",
-            "runType must be jobsCycle or postingCheck",
+            "runType must be jobsCycle, postingCheck, or careerCheck",
         )),
     }
 }
@@ -86,6 +87,9 @@ pub async fn start_run_cmd(
             trigger: Trigger::Desktop,
         },
         RunType::PostingCheck => RunRequest::PostingCheck {
+            trigger: Trigger::Desktop,
+        },
+        RunType::CareerCheck => RunRequest::CareerCheck {
             trigger: Trigger::Desktop,
         },
     };

@@ -22,6 +22,7 @@ use crate::jobs::csv_config::{active_csv_path, csv_lock_path};
 use crate::util::now_iso;
 
 const EXPORT_DEBOUNCE_MS: u64 = 500;
+const EXPORT_RETRY_DELAYS_MS: [u64; 3] = [0, 250, 1_000];
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,10 +75,17 @@ impl CsvExportCoordinator {
 
     async fn export_if_current(&self, _requested_gen: u64) {
         let _guard = self.export_lock.lock().await;
+        let mut retry_attempt = 0usize;
         loop {
             let export_gen = self.generation.load(Ordering::SeqCst);
             if self.last_exported.load(Ordering::SeqCst) >= export_gen {
                 return;
+            }
+
+            if let Some(delay_ms) = EXPORT_RETRY_DELAYS_MS.get(retry_attempt) {
+                if *delay_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(*delay_ms)).await;
+                }
             }
 
             let db_path = self.db_path.clone();
@@ -89,6 +97,7 @@ impl CsvExportCoordinator {
 
             match result {
                 Ok(Ok(_)) => {
+                    retry_attempt = 0;
                     self.last_exported.store(export_gen, Ordering::SeqCst);
                     let mut status = self.status.lock();
                     status.dirty = self.generation.load(Ordering::SeqCst) > export_gen;
@@ -99,16 +108,25 @@ impl CsvExportCoordinator {
                     let mut status = self.status.lock();
                     status.last_error = Some(err.to_string());
                     log::error!("[csv-sync] export failed: {err}");
-                    return;
+                    if retry_attempt + 1 >= EXPORT_RETRY_DELAYS_MS.len() {
+                        return;
+                    }
+                    retry_attempt += 1;
                 }
                 Err(err) => {
                     let mut status = self.status.lock();
                     status.last_error = Some(err.to_string());
                     log::error!("[csv-sync] export task join failed: {err}");
-                    return;
+                    if retry_attempt + 1 >= EXPORT_RETRY_DELAYS_MS.len() {
+                        return;
+                    }
+                    retry_attempt += 1;
                 }
             }
 
+            if retry_attempt > 0 {
+                continue;
+            }
             if self.generation.load(Ordering::SeqCst) <= export_gen {
                 return;
             }

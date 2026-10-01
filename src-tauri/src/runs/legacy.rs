@@ -71,6 +71,41 @@ fn project_execution(execution: &RunExecution) -> AppResult<Value> {
             jobs_cycle_summary(snapshot, &execution.stage_items)
         }
         crate::runs::model::RunType::PostingCheck => postings_summary(snapshot),
+        crate::runs::model::RunType::CareerCheck => {
+            career_check_summary(snapshot, &execution.stage_items)
+        }
+    }
+}
+
+/// Project a terminal CareerCheck onto the compact payload used by the
+/// career-source command. CareerCheck runs only watches and careers; it does
+/// not produce posting or CSV results.
+pub fn career_check_summary(snapshot: &RunSnapshot, items: &StageItems) -> AppResult<Value> {
+    match snapshot.run_status {
+        RunStatus::Canceled => Err(AppError::coded(
+            "run_canceled",
+            snapshot.run_id.clone(),
+            format!("Run {} was canceled", snapshot.run_id),
+        )),
+        RunStatus::Error => Err(AppError::coded(
+            "run_failed",
+            snapshot
+                .error_reason
+                .clone()
+                .unwrap_or_else(|| "internal".into()),
+            "Run failed",
+        )),
+        RunStatus::Completed | RunStatus::CompletedWithErrors => Ok(json!({
+            "watches": items.watches.clone(),
+            "careers": items.careers.clone(),
+            "runId": snapshot.run_id.clone(),
+            "runStatus": snapshot.run_status,
+        })),
+        status => Err(AppError::coded(
+            "run_failed",
+            "not_terminal",
+            format!("Run ended in unexpected status {}", status.as_str()),
+        )),
     }
 }
 
@@ -219,6 +254,25 @@ mod tests {
             assert!(object.contains_key(key), "missing posting key {key}");
         }
         assert_eq!(object["runStatus"], "completed_with_errors");
+    }
+
+    #[test]
+    fn career_check_projection_contains_only_its_stage_results() {
+        let value = career_check_summary(
+            &snapshot("careerCheck", "completed"),
+            &StageItems {
+                watches: vec![json!({"watchId": "w1"})],
+                careers: vec![json!({"companyId": "c1"})],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(value["watches"], json!([{"watchId": "w1"}]));
+        assert_eq!(value["careers"], json!([{"companyId": "c1"}]));
+        assert_eq!(value["runId"], "r");
+        assert_eq!(value["runStatus"], "completed");
+        assert!(value.get("postings").is_none());
+        assert!(value.get("csv").is_none());
     }
 
     #[test]

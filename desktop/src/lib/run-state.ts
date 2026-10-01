@@ -54,6 +54,8 @@ export type RunFilter = "all" | "attention";
 export type RunViewState = {
   /** Last valid displayed run. */
   displayed: RunSnapshot | null;
+  /** True while a start command is awaiting the backend response. */
+  startPending: boolean;
   lastSeq: number;
   needsReconcile: boolean;
   notice?: RunNotice;
@@ -71,6 +73,7 @@ export const IN_PROGRESS_MESSAGE = "Another run is in progress";
 
 export const initialRunViewState: RunViewState = {
   displayed: null,
+  startPending: false,
   lastSeq: 0,
   needsReconcile: false,
   announcedErrors: new Set(),
@@ -82,6 +85,8 @@ export const initialRunViewState: RunViewState = {
 
 export type RunAction =
   | { type: "accepted"; accepted: RunAccepted }
+  | { type: "startPending" }
+  | { type: "startSettled" }
   | { type: "event"; event: RunProgressEvent }
   /** `null` means the backend has no current run to display. */
   | { type: "snapshotLoaded"; snapshot: RunSnapshot | null }
@@ -133,7 +138,7 @@ export function needsAttention(row: RowStatus): boolean {
 
 /** A non-terminal displayed run blocks both start controls (Req 12.2). */
 export function isRunBusy(state: RunViewState): boolean {
-  return state.displayed !== null && !isTerminalRunStatus(state.displayed.runStatus);
+  return state.startPending || (state.displayed !== null && !isTerminalRunStatus(state.displayed.runStatus));
 }
 
 // ---- Reducer ----
@@ -312,6 +317,12 @@ function withNotice(state: RunViewState, kind: NoticeKind, message: string, now:
 
 export function reduceRun(state: RunViewState, action: RunAction): RunViewState {
   switch (action.type) {
+    case "startPending":
+      return state.startPending ? state : { ...state, startPending: true };
+
+    case "startSettled":
+      return state.startPending ? { ...state, startPending: false } : state;
+
     case "accepted":
       return reduceAccepted(state, action.accepted);
 
@@ -479,6 +490,7 @@ export const POSTING_STATE_LABELS: Record<PostingStateValue, string> = {
 export const RUN_TYPE_LABELS: Record<RunType, string> = {
   jobsCycle: "Run jobs",
   postingCheck: "Check postings",
+  careerCheck: "Check career sources",
 };
 
 export const STAGE_LABELS: Record<LegacyStage, string> = {
@@ -666,7 +678,7 @@ function statusText(s: RunSnapshot): string {
   const type = RUN_TYPE_LABELS[s.runType];
   const status = RUN_STATUS_LABELS[s.runStatus].toLowerCase();
   const summary = s.summary;
-  if (summary !== undefined) {
+  if (summary !== undefined && s.runType !== "careerCheck") {
     const o = summary.postingOutcomes;
     return (
       `${type} ${status}. ${o.active} open, ${o.closed} closed, ${o.unknown} couldn't confirm, ` +
