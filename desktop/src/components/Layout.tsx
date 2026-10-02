@@ -1,4 +1,5 @@
-import { NavLink, Outlet, Link } from "react-router-dom";
+import { useLayoutEffect, useRef, useState, type MouseEvent } from "react";
+import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
 
 import {
   BriefcaseIcon,
@@ -9,7 +10,9 @@ import {
   SunIcon,
 } from "@/components/icons";
 import { RunControls } from "@/components/runs/RunControls";
+import { RunLiveRegions } from "@/components/runs/RunLiveRegions";
 import { RunPanel } from "@/components/runs/RunPanel";
+import { useRunMonitor } from "@/lib/RunMonitorContext";
 import { useTheme } from "@/lib/ThemeContext";
 
 const nav = [
@@ -21,11 +24,36 @@ const nav = [
 
 export function Layout() {
   const { theme, toggleTheme } = useTheme();
+  const { state } = useRunMonitor();
+  const { pathname } = useLocation();
+  const previousPathname = useRef(pathname);
+  const [hiddenRunId, setHiddenRunId] = useState<string | null>(null);
+  const runId = state.displayed?.runId ?? null;
+  // Hiding details is local navigation state: monitoring and the saved run
+  // remain intact. A new run opens automatically; updates to this run do not.
+  const panelVisible = runId !== null && runId !== hiddenRunId;
+  const showRun = () => setHiddenRunId(null);
+
+  useLayoutEffect(() => {
+    if (previousPathname.current === pathname) return;
+    previousPathname.current = pathname;
+    setHiddenRunId(runId);
+  }, [pathname, runId]);
+
+  const navigateToPage = (event: MouseEvent<HTMLAnchorElement>) => {
+    // Modified clicks open another tab/window and leave this view untouched.
+    if (
+      event.defaultPrevented || event.button !== 0 ||
+      event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+    ) return;
+    // Also handle the active page link, where pathname does not change.
+    setHiddenRunId(runId);
+  };
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 md:px-8">
       <header className="mb-8 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-        <Link to="/" className="flex items-center gap-3">
+        <Link to="/" onClick={navigateToPage} className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent)] font-display text-lg font-semibold text-white shadow-[var(--shadow-sm)]">
             J
           </span>
@@ -44,6 +72,7 @@ export function Layout() {
               <NavLink
                 key={href}
                 to={href}
+                onClick={navigateToPage}
                 end={href === "/"}
                 className={({ isActive }) =>
                   `flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition-colors ${
@@ -65,11 +94,12 @@ export function Layout() {
           >
             {theme === "dark" ? <SunIcon size={18} /> : <MoonIcon size={18} />}
           </button>
-          <RunControls />
+          <RunControls panelVisible={panelVisible} onShowRun={showRun} />
         </div>
       </header>
       <main className="flex-1">
-        <RunPanel />
+        <RunLiveRegions />
+        {panelVisible ? <RunPanel /> : null}
         <Outlet />
       </main>
       <footer className="mt-12 text-center text-xs text-[var(--faint)]">

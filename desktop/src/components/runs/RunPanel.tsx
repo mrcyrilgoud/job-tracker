@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import { RunLiveRegions } from "@/components/runs/RunLiveRegions";
 import { RunPostingList } from "@/components/runs/RunPostingList";
 import { RunSummaryCard } from "@/components/runs/RunSummaryCard";
 import { useRunMonitor } from "@/lib/RunMonitorContext";
@@ -21,8 +20,8 @@ import {
  * and elapsed time. For runs with stage progress (Jobs_Cycle and Career_Check)
  * it also lists each stage's outcome as text. It hosts the Cancel button
  * (enabled only for queued/active — Req 5.1, 5.2), the Retry action for a
- * terminal run with a selection, transient notices, posting-run details, and
- * the live regions.
+ * terminal run with a selection, transient notices, and posting-run details.
+ * Live announcements stay mounted in Layout while this panel is hidden.
  *
  * The elapsed clock ticks once a second for a live, non-terminal run so the
  * duration advances between events; terminal runs freeze on the summary
@@ -129,7 +128,6 @@ export function RunPanel() {
 
       {isPostingRun ? <RunPostingList /> : null}
 
-      <RunLiveRegions />
     </section>
   );
 }

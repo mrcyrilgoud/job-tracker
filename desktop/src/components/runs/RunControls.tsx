@@ -15,19 +15,24 @@ import { IN_PROGRESS_MESSAGE, isRunBusy, runStatusLabel } from "@/lib/run-state"
  * `RunMonitorProvider` maps it to an `inProgress` notice; this component shows
  * the "Another run is in progress" text (Req 4.5).
  */
-export function RunControls() {
+export function RunControls({
+  panelVisible = true,
+  onShowRun,
+}: {
+  panelVisible?: boolean;
+  onShowRun?: () => void;
+}) {
   const { state, start } = useRunMonitor();
   const busy = isRunBusy(state);
   const status = state.displayed !== null ? runStatusLabel(state.displayed.runStatus) : null;
-  // RunPanel owns notices while a snapshot is displayed. The header is the
-  // only visible surface for start/action failures when there is no snapshot.
-  const notice = state.displayed === null ? state.notice : undefined;
+  // Keep notices accessible when navigation hides the detailed run panel.
+  const notice = state.displayed === null || !panelVisible ? state.notice : undefined;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {busy && status !== null ? (
+      {(busy || !panelVisible) && status !== null ? (
         <span className="text-xs font-medium text-[var(--muted)]" aria-live="off">
-          {status}…
+          {status}{busy ? "…" : ""}
         </span>
       ) : null}
       {notice !== undefined ? (
@@ -40,9 +45,17 @@ export function RunControls() {
           {notice.message || (notice.kind === "inProgress" ? IN_PROGRESS_MESSAGE : "")}
         </span>
       ) : null}
+      {state.displayed !== null && !panelVisible && onShowRun !== undefined ? (
+        <button type="button" onClick={onShowRun} className="btn btn-secondary text-xs">
+          Show run status
+        </button>
+      ) : null}
       <button
         type="button"
-        onClick={() => void start("postingCheck")}
+        onClick={() => {
+          onShowRun?.();
+          void start("postingCheck");
+        }}
         disabled={busy}
         className="btn btn-secondary text-xs"
         title="Check every saved posting's open/closed state"
@@ -51,7 +64,10 @@ export function RunControls() {
       </button>
       <button
         type="button"
-        onClick={() => void start("careerCheck")}
+        onClick={() => {
+          onShowRun?.();
+          void start("careerCheck");
+        }}
         disabled={busy}
         className="btn btn-secondary text-xs"
         title="Check connected job boards and configured careers pages for changes"
