@@ -88,9 +88,10 @@ describe("RunControls", () => {
     const onShowRun = vi.fn();
     act(() => root?.render(<RunControls panelVisible={false} onShowRun={onShowRun} />));
     const actions = container.querySelector(".run-actions")!;
-    const checks = [...actions.querySelectorAll("button")];
+    const checks = [...actions.querySelectorAll("button")].slice(0, 2);
     checks[0]!.focus();
     const slot = actions.lastElementChild;
+    expect(slot?.querySelector("button")?.disabled).toBe(true);
 
     mock.state = {
       displayed: { runStatus: "completed" },
@@ -108,7 +109,7 @@ describe("RunControls", () => {
     act(() => root?.render(<RunControls panelVisible onShowRun={onShowRun} />));
     expect([...actions.children].slice(0, 2)).toEqual(checks);
     expect(actions.lastElementChild).toBe(slot);
-    expect(slot?.childElementCount).toBe(0);
+    expect(slot?.querySelector("button")?.disabled).toBe(false);
   });
 
 });

@@ -38,7 +38,7 @@ export function RunControls({
             void start("postingCheck");
           }}
           disabled={busy}
-          className="btn btn-secondary"
+          className="btn btn-secondary btn-sm"
           title="Check every saved posting's open/closed state"
         >
           Check postings
@@ -50,14 +50,14 @@ export function RunControls({
             void start("careerCheck");
           }}
           disabled={busy}
-          className="btn btn-secondary"
+          className="btn btn-secondary btn-sm"
           title="Check connected job boards and configured careers pages for changes"
         >
           Check career sources
         </button>
         <div className="run-status-slot">
-          {state.displayed !== null && !panelVisible && onShowRun !== undefined ? (
-            <button type="button" onClick={onShowRun} className="btn btn-secondary">
+          {onShowRun !== undefined ? (
+            <button type="button" onClick={onShowRun} disabled={state.displayed === null} className="btn btn-secondary btn-sm">
               Show run status
             </button>
           ) : null}

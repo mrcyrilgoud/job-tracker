@@ -9,7 +9,7 @@ import {
   SettingsIcon,
   SunIcon,
 } from "@/components/icons";
-import { RunControls } from "@/components/runs/RunControls";
+import { ChecksTab } from "@/components/runs/ChecksTab";
 import { RunLiveRegions } from "@/components/runs/RunLiveRegions";
 import { RunPanel } from "@/components/runs/RunPanel";
 import { useRunMonitor } from "@/lib/RunMonitorContext";
@@ -95,7 +95,7 @@ export function Layout() {
             {theme === "dark" ? <SunIcon size={18} /> : <MoonIcon size={18} />}
           </button>
         </div>
-        <RunControls panelVisible={panelVisible} onShowRun={showRun} />
+        <ChecksTab panelVisible={panelVisible} onShowRun={showRun} />
       </header>
       <main className="flex-1">
         <RunLiveRegions />

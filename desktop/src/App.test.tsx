@@ -77,6 +77,9 @@ afterEach(() => {
 async function mount() { await act(async () => root.render(<App />)); }
 async function click(element: Element | null) {
   expect(element).not.toBeNull();
+  if (element?.closest(".checks-panel[hidden]")) {
+    await act(async () => { button("Checks")?.click(); });
+  }
   await act(async () => { (element as HTMLElement).click(); });
 }
 function button(label: string) {
@@ -85,6 +88,34 @@ function button(label: string) {
 function panel() { return container.querySelector('section[aria-label="Run status"]'); }
 
 describe("top navigation while a posting run is displayed", () => {
+  it("keeps checks collapsed until requested and restores focus on Escape", async () => {
+    await mount();
+    const toggle = button("Checks")!;
+    const drawer = container.querySelector(".checks-panel") as HTMLElement;
+    expect(drawer.hidden).toBe(true);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await click(toggle);
+    expect(drawer.hidden).toBe(false);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    (button("Check postings") as HTMLButtonElement).focus();
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(drawer.hidden).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    expect(mockApi.startRun).not.toHaveBeenCalled();
+  });
+
+  it("closes checks on outside clicks and page navigation", async () => {
+    await mount();
+    const drawer = container.querySelector(".checks-panel") as HTMLElement;
+    await click(button("Checks"));
+    await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    expect(drawer.hidden).toBe(true);
+    await click(button("Checks"));
+    await click(container.querySelector('nav a[href="/documents"]'));
+    expect(drawer.hidden).toBe(true);
+    expect(container.querySelector("main h1")?.textContent).toBe("Documents destination");
+  });
+
   it.each([
     ["Jobs", "/"], ["Documents", "/documents"], ["Companies", "/companies"], ["Settings", "/settings"],
   ])("shows %s immediately and retains the completed run for reopening", async (label, path) => {
@@ -145,7 +176,7 @@ describe("top navigation while a posting run is displayed", () => {
     await click(button("Dismiss"));
     expect(mockApi.dismissRun).toHaveBeenCalledExactlyOnceWith("navigation-run");
     expect(panel()).toBeNull();
-    expect(button("Show run status")).toBeNull();
+    expect((button("Show run status") as HTMLButtonElement).disabled).toBe(true);
     expect(container.querySelector("main h1")?.textContent).toBe("Documents destination");
   });
   it("receives completion while hidden without blocking the destination or losing announcements", async () => {
