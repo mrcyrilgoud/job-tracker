@@ -29,51 +29,57 @@ export function RunControls({
   const notice = state.displayed === null || !panelVisible ? state.notice : undefined;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {(busy || !panelVisible) && status !== null ? (
-        <span className="text-xs font-medium text-[var(--muted)]" aria-live="off">
-          {status}{busy ? "…" : ""}
-        </span>
-      ) : null}
-      {notice !== undefined ? (
-        <span
-          className={`text-xs font-medium ${
-            notice.kind === "inProgress" ? "text-[var(--amber-ink)]" : "text-[var(--muted)]"
-          }`}
-          role="status"
+    <div className="run-controls">
+      <div className="run-actions">
+        <button
+          type="button"
+          onClick={() => {
+            onShowRun?.();
+            void start("postingCheck");
+          }}
+          disabled={busy}
+          className="btn btn-secondary"
+          title="Check every saved posting's open/closed state"
         >
-          {notice.message || (notice.kind === "inProgress" ? IN_PROGRESS_MESSAGE : "")}
-        </span>
-      ) : null}
-      {state.displayed !== null && !panelVisible && onShowRun !== undefined ? (
-        <button type="button" onClick={onShowRun} className="btn btn-secondary text-xs">
-          Show run status
+          Check postings
         </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => {
-          onShowRun?.();
-          void start("postingCheck");
-        }}
-        disabled={busy}
-        className="btn btn-secondary text-xs"
-        title="Check every saved posting's open/closed state"
-      >
-        Check postings
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onShowRun?.();
-          void start("careerCheck");
-        }}
-        disabled={busy}
-        className="btn btn-secondary text-xs"
-        title="Check connected job boards and configured careers pages for changes"
-      >
-        Check career sources
-      </button>
+        <button
+          type="button"
+          onClick={() => {
+            onShowRun?.();
+            void start("careerCheck");
+          }}
+          disabled={busy}
+          className="btn btn-secondary"
+          title="Check connected job boards and configured careers pages for changes"
+        >
+          Check career sources
+        </button>
+        <div className="run-status-slot">
+          {state.displayed !== null && !panelVisible && onShowRun !== undefined ? (
+            <button type="button" onClick={onShowRun} className="btn btn-secondary">
+              Show run status
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="run-control-messages">
+        {(busy || !panelVisible) && status !== null ? (
+          <span className="text-xs font-medium text-[var(--muted)]" aria-live="off">
+            {status}{busy ? "…" : ""}
+          </span>
+        ) : null}
+        {notice !== undefined ? (
+          <span
+            className={`text-xs font-medium ${
+              notice.kind === "inProgress" ? "text-[var(--amber-ink)]" : "text-[var(--muted)]"
+            }`}
+            role="status"
+          >
+            {notice.message || (notice.kind === "inProgress" ? IN_PROGRESS_MESSAGE : "")}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

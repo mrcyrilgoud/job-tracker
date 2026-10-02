@@ -105,7 +105,7 @@ describe("top navigation while a posting run is displayed", () => {
 
   it("returns to Jobs through the app title without discarding the run", async () => {
     await mount();
-    await click(container.querySelector('header > a[href="/"]'));
+    await click(container.querySelector('header a[href="/"]'));
     expect(window.location.pathname).toBe("/");
     expect(panel()).toBeNull();
     await click(button("Show run status"));

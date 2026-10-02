@@ -52,9 +52,9 @@ export function Layout() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-4 py-8 md:px-8">
-      <header className="mb-8 flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-        <Link to="/" onClick={navigateToPage} className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[var(--accent)] font-display text-lg font-semibold text-white shadow-[var(--shadow-sm)]">
+      <header className="app-header">
+        <Link to="/" onClick={navigateToPage} className="app-brand">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent)] font-display text-lg font-semibold text-white shadow-[var(--shadow-sm)]">
             J
           </span>
           <span>
@@ -66,8 +66,8 @@ export function Layout() {
             </span>
           </span>
         </Link>
-        <div className="flex flex-wrap items-center gap-2">
-          <nav className="flex flex-wrap gap-1">
+        <div className="app-navigation">
+          <nav aria-label="Main navigation" className="app-nav-links">
             {nav.map(({ href, label, Icon }) => (
               <NavLink
                 key={href}
@@ -75,7 +75,7 @@ export function Layout() {
                 onClick={navigateToPage}
                 end={href === "/"}
                 className={({ isActive }) =>
-                  `flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition-colors ${
+                  `app-nav-link ${
                     isActive
                       ? "bg-[var(--accent-soft)] text-[var(--accent-ink)]"
                       : "text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
@@ -89,13 +89,13 @@ export function Layout() {
           </nav>
           <button
             onClick={toggleTheme}
-            className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+            className="app-theme-toggle text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
             aria-label="Toggle theme"
           >
             {theme === "dark" ? <SunIcon size={18} /> : <MoonIcon size={18} />}
           </button>
-          <RunControls panelVisible={panelVisible} onShowRun={showRun} />
         </div>
+        <RunControls panelVisible={panelVisible} onShowRun={showRun} />
       </header>
       <main className="flex-1">
         <RunLiveRegions />

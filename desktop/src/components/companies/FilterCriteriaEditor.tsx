@@ -209,7 +209,7 @@ function ChipInput({ label, testId, placeholder, tokens, onChange }: ChipInputPr
     <label className="block space-y-1.5 text-sm">
       <span className="font-medium">{label}</span>
       <div
-        className="flex flex-wrap items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 focus-within:border-[var(--accent)]"
+        className="field-token-group flex flex-wrap items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 focus-within:border-[var(--accent)]"
         data-testid={`${testId}-chips`}
       >
         {tokens.map((token, index) => (

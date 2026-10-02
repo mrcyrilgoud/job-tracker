@@ -79,4 +79,36 @@ describe("RunControls", () => {
     buttons[0]?.click();
     expect(mock.start).not.toHaveBeenCalled();
   });
+
+  it("preserves check buttons and keyboard focus when run status controls appear", () => {
+    mock.state = { displayed: null, startPending: false } as RunViewState;
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const onShowRun = vi.fn();
+    act(() => root?.render(<RunControls panelVisible={false} onShowRun={onShowRun} />));
+    const actions = container.querySelector(".run-actions")!;
+    const checks = [...actions.querySelectorAll("button")];
+    checks[0]!.focus();
+    const slot = actions.lastElementChild;
+
+    mock.state = {
+      displayed: { runStatus: "completed" },
+      notice: { kind: "action", message: "A notice with a long message", expiresAt: 1_000 },
+    } as RunViewState;
+    act(() => root?.render(<RunControls panelVisible={false} onShowRun={onShowRun} />));
+    expect([...actions.children].slice(0, 2)).toEqual(checks);
+    expect(actions.lastElementChild).toBe(slot);
+    expect(document.activeElement).toBe(checks[0]);
+    expect(slot?.textContent).toBe("Show run status");
+    expect(actions.textContent).not.toContain("A notice with a long message");
+    act(() => (slot?.querySelector("button") as HTMLButtonElement).click());
+    expect(onShowRun).toHaveBeenCalledOnce();
+
+    act(() => root?.render(<RunControls panelVisible onShowRun={onShowRun} />));
+    expect([...actions.children].slice(0, 2)).toEqual(checks);
+    expect(actions.lastElementChild).toBe(slot);
+    expect(slot?.childElementCount).toBe(0);
+  });
+
 });
