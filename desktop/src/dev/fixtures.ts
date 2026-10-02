@@ -66,6 +66,7 @@ function job(
     source?: Job["source"];
     watchDisposition?: WatchDisposition;
     description?: string | null;
+    appeal?: number | null;
   } = {},
 ): Job {
   jobSeq += 1;
@@ -93,6 +94,7 @@ function job(
     isFavorite: false,
     createdAt: ago(5 * days),
     updatedAt: ago(1 * hours),
+    appeal: opts.appeal ?? null,
   };
 }
 
@@ -137,8 +139,12 @@ export function createFixtureBackend() {
     // Tracked roles already on the user's board.
     job("c-anthropic", "Senior Product Engineer", "San Francisco, CA", {
       status: "applied",
+      appeal: 5,
     }),
-    job("c-stripe", "Staff Frontend Engineer", "Remote (US)", { status: "interviewing" }),
+    job("c-stripe", "Staff Frontend Engineer", "Remote (US)", {
+      status: "interviewing",
+      appeal: 2,
+    }),
     job("c-anthropic", "Research Engineer, Safety", "Remote (US)", {
       status: "closed",
       watchDisposition: "dismissed",
@@ -352,7 +358,60 @@ export function createFixtureBackend() {
     run_jobs_cycle_cmd: () => ({ ok: true }),
     check_all_postings_cmd: () => ({ ok: true }),
     list_documents: () => ({ documents: [] }),
+
+    get_job: (args) => {
+      const found = jobs.find((job) => job.id === args?.id);
+      if (!found) throw new Error("Job not found");
+      return { detail: jobDetail(found) };
+    },
+
+    update_job_cmd: (args) => {
+      const found = jobs.find((job) => job.id === args?.id);
+      if (!found) throw new Error("Job not found");
+      const updates = (args?.updates ?? {}) as {
+        title?: string;
+        companyName?: string;
+        status?: Job["status"];
+        notes?: string | null;
+        description?: string | null;
+        isFavorite?: boolean;
+        appeal?: number | null;
+      };
+      if (typeof updates.title === "string") found.title = updates.title;
+      if (typeof updates.companyName === "string") {
+        const match = companies.find((company) => company.name === updates.companyName);
+        if (match) found.companyId = match.id;
+      }
+      if (typeof updates.status === "string") found.status = updates.status;
+      if ("notes" in updates) found.notes = updates.notes ?? null;
+      if ("description" in updates) found.description = updates.description ?? null;
+      if (typeof updates.isFavorite === "boolean") found.isFavorite = updates.isFavorite;
+      if ("appeal" in updates) {
+        const appeal = updates.appeal;
+        if (appeal == null) {
+          found.appeal = null;
+        } else if (appeal >= 1 && appeal <= 5) {
+          found.appeal = appeal;
+        } else {
+          throw new Error("Appeal must be an integer from 1 to 5 (5 = most appealing)");
+        }
+      }
+      found.updatedAt = new Date().toISOString();
+      return { detail: jobDetail(found) };
+    },
   };
+
+  function jobDetail(found: Job) {
+    const matched =
+      companies.find((item) => item.id === found.companyId) ??
+      company(found.companyId, "Unknown company", null);
+    return {
+      job: found,
+      company: matched,
+      events: [],
+      attached: [],
+    };
+  }
 
   async function invoke(cmd: string, args?: Record<string, unknown>) {
     // Event plugin calls (run progress listener) resolve to a no-op listener id.

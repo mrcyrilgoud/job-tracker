@@ -49,6 +49,7 @@ function role(overrides: Partial<Job> & Pick<Job, "id">, companyName = "Acme"): 
       watchDisposition: "new",
       missingFromSyncCount: 0,
       isFavorite: false,
+      appeal: null,
       createdAt: "2026-07-01T00:00:00.000Z",
       updatedAt: "2026-07-02T00:00:00.000Z",
       ...overrides,

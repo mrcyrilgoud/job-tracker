@@ -1,6 +1,7 @@
 import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useState } from "react";
 
+import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { AlertIcon, ArchiveIcon, ArrowUpRightIcon, CheckIcon, TrashIcon } from "@/components/icons";
 import { api } from "@/lib/api";
@@ -26,6 +27,7 @@ type Initial = {
   url: string;
   isNewFromWatch: boolean;
   isFavorite: boolean;
+  appeal: number | null;
 };
 
 /** The editable subset of a job. Compared against the last persisted copy to
@@ -38,6 +40,7 @@ type Draft = {
   notes: string;
   description: string;
   isFavorite: boolean;
+  appeal: number | null;
 };
 
 export type JobDetailUpdateMode = "save" | "check" | "attachment" | "full";
@@ -53,6 +56,7 @@ function toDraft(initial: Initial): Draft {
     notes: initial.notes ?? "",
     description: initial.description ?? "",
     isFavorite: initial.isFavorite,
+    appeal: initial.appeal,
   };
 }
 
@@ -64,7 +68,8 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.appliedAt === b.appliedAt &&
     a.notes === b.notes &&
     a.description === b.description &&
-    a.isFavorite === b.isFavorite
+    a.isFavorite === b.isFavorite &&
+    a.appeal === b.appeal
   );
 }
 
@@ -176,6 +181,7 @@ export function JobDetailClient({
         description: attempted.description,
         isNewFromWatch: false,
         isFavorite: attempted.isFavorite,
+        appeal: attempted.appeal,
       });
       const detail = result.detail;
       if (attempted.status === "closed") {
@@ -190,6 +196,7 @@ export function JobDetailClient({
         notes: detail.job.notes ?? "",
         description: detail.job.description ?? "",
         isFavorite: detail.job.isFavorite,
+        appeal: detail.job.appeal,
       };
       setSaved(baseline);
       // If the user typed more while save was in flight, keep the newer draft.
@@ -260,6 +267,7 @@ export function JobDetailClient({
           appliedAt: detail.job.appliedAt,
           notes: detail.job.notes,
           isFavorite: detail.job.isFavorite,
+          appeal: detail.job.appeal,
         });
         setSaved(baseline);
         setDraft(baseline);
@@ -276,6 +284,7 @@ export function JobDetailClient({
           appliedAt: detail.job.appliedAt,
           notes: detail.job.notes,
           isFavorite: detail.job.isFavorite,
+          appeal: detail.job.appeal,
         });
         setSaved(baseline);
         setDraft(baseline);
@@ -387,7 +396,7 @@ export function JobDetailClient({
         </div>
 
         <div className="space-y-5 border-t border-[var(--border)] p-6">
-          <div className="grid max-w-lg gap-4 sm:grid-cols-2">
+          <div className="grid max-w-3xl gap-4 sm:grid-cols-3">
             <div>
               <label htmlFor="job-stage" className="field-label">
                 Stage
@@ -431,6 +440,20 @@ export function JobDetailClient({
                   No date set yet
                 </p>
               )}
+            </div>
+
+            <div>
+              <label htmlFor="job-appeal" className="field-label" title={APPEAL_SCALE_LABEL}>
+                {APPEAL_SCALE_LABEL}
+              </label>
+              <AppealSelect
+                id="job-appeal"
+                value={draft.appeal}
+                onChange={(appeal) => update("appeal", appeal)}
+              />
+              <p className="mt-1.5 text-xs text-[var(--faint)]">
+                One overall score for salary, growth, industry, and role fit. Leave unscored until you decide.
+              </p>
             </div>
           </div>
 

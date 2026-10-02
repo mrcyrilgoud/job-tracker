@@ -25,6 +25,7 @@ function mockJob(id: string, isFavorite: boolean, status: JobListItem["job"]["st
       watchDisposition: null,
       missingFromSyncCount: 0,
       isFavorite,
+      appeal: null,
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-01T00:00:00.000Z",
     },

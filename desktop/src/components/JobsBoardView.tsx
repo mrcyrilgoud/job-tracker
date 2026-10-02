@@ -166,6 +166,11 @@ export function JobsBoardView({
                                 {job.location}
                               </span>
                             ) : null}
+                            {job.appeal != null ? (
+                              <span className="text-xs text-[var(--muted)]" title="Appeal (1–5, 5=best)">
+                                Appeal {job.appeal}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
 
@@ -255,6 +260,7 @@ export function JobsBoardView({
                   </Link>
                   <p className="text-xs text-[var(--muted)]">
                     {companyName} · {jobStatusPresentation(job.status).label}
+                    {job.appeal != null ? ` · Appeal ${job.appeal}` : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

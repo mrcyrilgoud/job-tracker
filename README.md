@@ -69,7 +69,7 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 
 ## Features
 
-1. **Jobs** — paste a posting URL, set status/applied date/notes, check whether the posting is still active
+1. **Jobs** — paste a posting URL, set status/applied date/notes, rate overall appeal, check whether the posting is still active
 2. **Jobs CSV** — `jobs.csv` mirrors editable fields; rewritten after changes and by the jobs runner
 3. **Documents** — import PDF/DOCX/TXT; open with the system viewer (`shell.open`), not raw web paths
 4. **Companies / watches** — Greenhouse, Lever, Ashby board sync; careers pages produce review items
@@ -77,7 +77,8 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 
 ### Jobs CSV
 
-- Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`
+- Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`, `appeal`
+- `appeal` is one overall score from 1 to 5 (**5 = most appealing**, 1 = least), covering salary, career growth, industry, role fit, and anything else that matters. Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
 - Conflicts (merge mode): DB wins when both sides changed since last export
 - Blank `id` + url/title/company creates a job; missing CSV rows do not delete jobs
 - By default, the mirror is `<data directory>/jobs.csv`. In **Settings**, choose another local
@@ -163,6 +164,10 @@ jt add "https://boards.greenhouse.io/stripe/jobs/12345" --status wishlist --note
 # Update status or log notes
 jt update <job_id> --status applied --applied-at today --json
 jt note <job_id> "Recruiter phone screen scheduled for Friday" --json
+
+# Overall appeal: 1 = least appealing, 5 = most. Blank means unscored.
+jt update <job_id> --appeal 5 --json
+jt update <job_id> --clear-appeal --json
 
 # ATS Watch triage
 jt watches list --new-only --json

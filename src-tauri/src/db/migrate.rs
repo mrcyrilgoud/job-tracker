@@ -35,7 +35,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       missing_from_sync_count INTEGER NOT NULL DEFAULT 0,
       is_favorite BOOLEAN NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5))
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS jobs_canonical_url_uidx ON jobs(canonical_url);
@@ -169,6 +170,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     let has_description = table_columns.iter().any(|name| name == "description");
     if !has_description {
         conn.execute("ALTER TABLE jobs ADD COLUMN description TEXT", [])?;
+    }
+
+    // Overall appeal is one nullable 1–5 score (5 = most appealing). Existing
+    // rows stay unscored (NULL); there is no default of 3. The CHECK rejects
+    // values outside 1–5 and still allows NULL. Idempotent for older DBs.
+    let has_appeal = table_columns.iter().any(|name| name == "appeal");
+    if !has_appeal {
+        conn.execute(
+            "ALTER TABLE jobs ADD COLUMN appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5))",
+            [],
+        )?;
     }
 
     // Watchlist job filtering: nullable hint recording the sync-time filter
@@ -364,6 +376,7 @@ mod tests {
         assert!(cols.contains(&"watch_disposition".to_string()));
         assert!(cols.contains(&"description".to_string()));
         assert!(cols.contains(&"watch_filtered".to_string()));
+        assert!(cols.contains(&"appeal".to_string()));
 
         let watch_cols = conn
             .prepare("PRAGMA table_info(company_watches)")
@@ -394,6 +407,7 @@ mod tests {
             cols.iter().filter(|name| *name == "watch_filtered").count(),
             1
         );
+        assert_eq!(cols.iter().filter(|name| *name == "appeal").count(), 1);
 
         let watch_cols = conn
             .prepare("PRAGMA table_info(company_watches)")
@@ -409,6 +423,83 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn adds_nullable_appeal_without_scoring_existing_jobs() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE companies (
+              id TEXT PRIMARY KEY NOT NULL,
+              name TEXT NOT NULL,
+              careers_url TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE jobs (
+              id TEXT PRIMARY KEY NOT NULL,
+              company_id TEXT NOT NULL,
+              title TEXT NOT NULL,
+              url TEXT NOT NULL,
+              canonical_url TEXT NOT NULL,
+              source_external_id TEXT,
+              status TEXT NOT NULL DEFAULT 'wishlist',
+              posting_state TEXT NOT NULL DEFAULT 'unknown',
+              source TEXT NOT NULL DEFAULT 'manual',
+              is_new_from_watch INTEGER NOT NULL DEFAULT 0,
+              missing_from_sync_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            INSERT INTO companies (id, name, created_at, updated_at)
+              VALUES ('c1', 'Acme', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+            INSERT INTO jobs (
+              id, company_id, title, url, canonical_url, status, posting_state, source,
+              is_new_from_watch, missing_from_sync_count, created_at, updated_at
+            ) VALUES (
+              'j1', 'c1', 'Engineer', 'https://example.com/j1', 'https://example.com/j1',
+              'wishlist', 'unknown', 'manual', 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+            );
+            "#,
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let appeal: Option<i64> = conn
+            .query_row("SELECT appeal FROM jobs WHERE id = 'j1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(appeal, None);
+
+        conn.execute("UPDATE jobs SET appeal = 5 WHERE id = 'j1'", [])
+            .unwrap();
+        assert!(conn
+            .execute("UPDATE jobs SET appeal = 0 WHERE id = 'j1'", [])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE jobs SET appeal = 6 WHERE id = 'j1'", [])
+            .is_err());
+        conn.execute("UPDATE jobs SET appeal = NULL WHERE id = 'j1'", [])
+            .unwrap();
+        let cleared: Option<i64> = conn
+            .query_row("SELECT appeal FROM jobs WHERE id = 'j1'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cleared, None);
+
+        migrate(&conn).unwrap();
+        let cols = conn
+            .prepare("PRAGMA table_info(jobs)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(cols.iter().filter(|name| *name == "appeal").count(), 1);
     }
 
     fn schema_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {

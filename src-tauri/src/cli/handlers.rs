@@ -19,9 +19,9 @@ use crate::jobs::csv_config::active_csv_path;
 use crate::jobs::metadata::resolve_job_metadata;
 use crate::jobs::service::{
     add_job_event, archive_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_by_id,
-    get_job_detail, get_pipeline_counts, get_weekly_activity, list_jobs, map_job,
+    get_job_detail, get_pipeline_counts, get_weekly_activity, job_cols, list_jobs, map_job,
     reset_dismissed_watch_job, resolve_title_from_url, save_open_watch_job, set_job_favorite,
-    unarchive_job, update_job, JobFilters, UpdateJobInput,
+    unarchive_job, update_job, JobFilters, UpdateJobInput, JOB_COL_COUNT,
 };
 use crate::models::{is_job_status, JobListItem};
 use crate::runner::run_jobs_cycle_trigger;
@@ -333,6 +333,11 @@ pub fn handle_update(
         } else {
             None
         },
+        appeal: if args.clear_appeal {
+            Some(None)
+        } else {
+            args.appeal.map(Some)
+        },
     };
 
     let updated = update_job(conn, &job_id, input)?;
@@ -349,6 +354,13 @@ pub fn handle_update(
                 "Yes ★"
             } else {
                 "No"
+            }
+        );
+        println!(
+            "  Appeal:   {}",
+            match updated.job.appeal {
+                Some(score) => format!("{score} (1-5, 5 = most appealing)"),
+                None => "— (1-5, 5 = most appealing)".to_string(),
             }
         );
     }
@@ -393,6 +405,7 @@ pub fn handle_note(
             url: None,
             is_new_from_watch: None,
             is_favorite: None,
+            appeal: None,
         },
     )?;
 
@@ -581,11 +594,12 @@ pub fn handle_stats(conn: &Connection, json: bool) -> AppResult<()> {
 }
 
 fn load_watch_positions(conn: &Connection, args: WatchListArgs) -> AppResult<Vec<JobListItem>> {
-    let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+    let mut sql = format!(
+        "SELECT {}, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.posting_state = 'active'
-           AND j.source IN ('greenhouse', 'lever', 'ashby')"
+           AND j.source IN ('greenhouse', 'lever', 'ashby')",
+        job_cols(Some("j"))
     );
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -616,7 +630,7 @@ fn load_watch_positions(conn: &Connection, args: WatchListArgs) -> AppResult<Vec
     let rows = stmt.query_map(params_ref.as_slice(), |row| {
         Ok(JobListItem {
             job: map_job(row)?,
-            company_name: row.get(21)?,
+            company_name: row.get(JOB_COL_COUNT)?,
         })
     })?;
 

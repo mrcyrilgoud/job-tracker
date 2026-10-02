@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::service::{
-    add_job_event, create_job_from_url, delete_closed_jobs, delete_job, get_job_by_id, update_job,
-    UpdateJobInput,
+    add_job_event, create_job_from_url, delete_closed_jobs, delete_job, get_job_by_id, job_cols,
+    map_job, update_job, UpdateJobInput, JOB_COL_COUNT,
 };
 use crate::models::{is_job_status, Job};
 use crate::util::{normalize_canonical_url, now_iso};
@@ -29,6 +29,7 @@ pub const CSV_HEADERS: &[&str] = &[
     "source",
     "posting_state",
     "updated_at",
+    "appeal",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,6 +43,13 @@ pub struct EditableFields {
     pub notes: Option<String>,
     pub location: Option<String>,
     pub latest_note: Option<String>,
+    /// Overall appeal, 1–5 (5 = most appealing). `None` is unscored.
+    #[serde(default)]
+    pub appeal: Option<i64>,
+    /// True when the CSV file has an `appeal` column. Absent columns must not
+    /// clear a score that was set in the app. Not stored in the sync sidecar.
+    #[serde(skip)]
+    pub appeal_in_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,40 +269,16 @@ fn load_job_rows(conn: &Connection) -> AppResult<Vec<(Job, String)>> {
     //
     // Pending watch discoveries and dismissed watch roles stay out of jobs.csv —
     // only pipeline jobs the user is tracking are exported.
-    let mut stmt = conn.prepare(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {}, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.is_new_from_watch = 0
            AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed')",
-    )?;
+        job_cols(Some("j"))
+    ))?;
     let rows = stmt
         .query_map([], |row| {
-            Ok((
-                Job {
-                    id: row.get(0)?,
-                    company_id: row.get(1)?,
-                    title: row.get(2)?,
-                    url: row.get(3)?,
-                    canonical_url: row.get(4)?,
-                    source_external_id: row.get(5)?,
-                    status: row.get(6)?,
-                    applied_at: row.get(7)?,
-                    posting_state: row.get(8)?,
-                    last_checked_at: row.get(9)?,
-                    last_check_result: row.get(10)?,
-                    source: row.get(11)?,
-                    notes: row.get(12)?,
-                    description: row.get(13)?,
-                    location: row.get(14)?,
-                    is_new_from_watch: row.get::<_, i64>(15)? != 0,
-                    watch_disposition: row.get(16)?,
-                    missing_from_sync_count: row.get(17)?,
-                    is_favorite: row.get::<_, i64>(18)? != 0,
-                    created_at: row.get(19)?,
-                    updated_at: row.get(20)?,
-                },
-                row.get::<_, String>(21)?,
-            ))
+            Ok((map_job(row)?, row.get::<_, String>(JOB_COL_COUNT)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
@@ -310,6 +294,8 @@ fn editable_from_db(job: &Job, company_name: &str, latest_note: Option<String>) 
         notes: job.notes.clone(),
         location: job.location.clone(),
         latest_note,
+        appeal: job.appeal,
+        appeal_in_file: false,
     }
 }
 
@@ -362,6 +348,10 @@ pub fn export_jobs_csv(
             job.source.clone(),
             job.posting_state.clone(),
             job.updated_at.clone(),
+            fields
+                .appeal
+                .map(|score| score.to_string())
+                .unwrap_or_default(),
         ]);
     }
 
@@ -462,33 +452,12 @@ fn find_job_by_id_or_canonical(
     let canonical = normalize_canonical_url(url).map_err(AppError::from)?;
     let job = conn
         .query_row(
-            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, description, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at FROM jobs WHERE canonical_url = ?1",
+            &format!(
+                "SELECT {} FROM jobs WHERE canonical_url = ?1",
+                job_cols(None)
+            ),
             params![canonical],
-            |row| {
-                Ok(Job {
-                    id: row.get(0)?,
-                    company_id: row.get(1)?,
-                    title: row.get(2)?,
-                    url: row.get(3)?,
-                    canonical_url: row.get(4)?,
-                    source_external_id: row.get(5)?,
-                    status: row.get(6)?,
-                    applied_at: row.get(7)?,
-                    posting_state: row.get(8)?,
-                    last_checked_at: row.get(9)?,
-                    last_check_result: row.get(10)?,
-                    source: row.get(11)?,
-                    notes: row.get(12)?,
-                    description: row.get(13)?,
-                    location: row.get(14)?,
-                    is_new_from_watch: row.get::<_, i64>(15)? != 0,
-                    watch_disposition: row.get(16)?,
-                    missing_from_sync_count: row.get(17)?,
-                    is_favorite: row.get::<_, i64>(18)? != 0,
-                    created_at: row.get(19)?,
-                    updated_at: row.get(20)?,
-                })
-            },
+            map_job,
         )
         .optional()
         .map_err(map_sqlite)?;
@@ -504,10 +473,24 @@ const EDITABLE_KEYS: &[&str] = &[
     "notes",
     "location",
     "latestNote",
+    "appeal",
 ];
 
-fn field_get<'a>(fields: &'a EditableFields, key: &str) -> Option<&'a str> {
-    match key {
+fn parse_appeal_cell(raw: &str) -> Result<Option<i64>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    match trimmed.parse::<i64>() {
+        Ok(score) if (1..=5).contains(&score) => Ok(Some(score)),
+        _ => Err(format!(
+            "Invalid appeal '{trimmed}'. Use an integer from 1 to 5 (5 = most appealing), or leave blank"
+        )),
+    }
+}
+
+fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
+    let raw = match key {
         "url" => Some(fields.url.as_str()),
         "title" => Some(fields.title.as_str()),
         "company" => Some(fields.company.as_str()),
@@ -516,8 +499,10 @@ fn field_get<'a>(fields: &'a EditableFields, key: &str) -> Option<&'a str> {
         "notes" => fields.notes.as_deref(),
         "location" => fields.location.as_deref(),
         "latestNote" => fields.latest_note.as_deref(),
+        "appeal" => return fields.appeal.map(|score| score.to_string()),
         _ => None,
-    }
+    };
+    normalize_nullable(raw)
 }
 
 fn open_csv_conn(db_path: &Path) -> AppResult<Connection> {
@@ -603,6 +588,22 @@ pub fn import_jobs_csv(
                 .cloned()
                 .unwrap_or_default()
         };
+        let appeal_in_file = header_map.contains_key("appeal");
+        let appeal = if appeal_in_file {
+            match parse_appeal_cell(&get("appeal")) {
+                Ok(value) => value,
+                Err(message) => {
+                    result.summary.skipped += 1;
+                    result.errors.push(serde_json::json!({
+                        "row": row_number,
+                        "message": message
+                    }));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let csv_fields = EditableFields {
             url: get("url").trim().to_string(),
             title: get("title").trim().to_string(),
@@ -612,6 +613,8 @@ pub fn import_jobs_csv(
             notes: normalize_nullable(Some(&get("notes"))),
             location: normalize_nullable(Some(&get("location"))),
             latest_note: normalize_nullable(Some(&get("latest_note"))),
+            appeal,
+            appeal_in_file,
         };
         let id = normalize_nullable(Some(&get("id")));
         let key = id.clone().unwrap_or_else(|| {
@@ -722,6 +725,16 @@ fn process_row(
                     "fields": ["latestNote"]
                 }));
             }
+            if csv_fields.appeal.is_some() {
+                update_job(
+                    conn,
+                    &created.0.id,
+                    UpdateJobInput {
+                        appeal: Some(csv_fields.appeal),
+                        ..UpdateJobInput::default()
+                    },
+                )?;
+            }
             seen_job_ids.insert(created.0.id.clone());
             result.changes.push(serde_json::json!({
                 "action": "create",
@@ -772,11 +785,14 @@ fn process_row(
         if *field == "latestNote" {
             continue;
         }
-        let csv_changed = !values_equal(field_get(csv_fields, field), field_get(&baseline, field));
-        let db_changed = !values_equal(field_get(&db_fields, field), field_get(&baseline, field));
+        if *field == "appeal" && !csv_fields.appeal_in_file {
+            continue;
+        }
+        let csv_changed = field_norm(csv_fields, field) != field_norm(&baseline, field);
+        let db_changed = field_norm(&db_fields, field) != field_norm(&baseline, field);
         match mode {
             ImportMode::OverwriteEditable => {
-                if !values_equal(field_get(csv_fields, field), field_get(&db_fields, field)) {
+                if field_norm(csv_fields, field) != field_norm(&db_fields, field) {
                     apply_fields.push((*field).to_string());
                 }
             }
@@ -871,6 +887,9 @@ fn process_row(
             }
             if apply_fields.iter().any(|f| f == "location") {
                 updates.location = Some(csv_fields.location.clone());
+            }
+            if apply_fields.iter().any(|f| f == "appeal") {
+                updates.appeal = Some(csv_fields.appeal);
             }
             update_job(conn, &existing.id, updates)?;
         }
@@ -1190,5 +1209,117 @@ mod tests {
         let rows = load_job_rows(&conn).unwrap();
         let load_ids: HashSet<String> = rows.into_iter().map(|(job, _)| job.id).collect();
         assert_eq!(load_ids, expected_ids);
+    }
+
+    #[test]
+    fn appeal_csv_round_trip_preserves_blank_and_favorite() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("job-tracker.db");
+        let csv_path = dir.path().join("jobs.csv");
+        let job_id = {
+            let conn = Connection::open(&db_path).unwrap();
+            migrate(&conn).unwrap();
+            let (job, _) = create_job_from_url(
+                &conn,
+                "https://example.com/job/appeal",
+                "Appealing role",
+                Some("Acme"),
+                Some("wishlist"),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(job.appeal, None);
+            crate::jobs::service::set_job_favorite(&conn, &job.id, true).unwrap();
+            export_jobs_csv(&conn, &csv_path, None).unwrap();
+            job.id
+        };
+
+        let old_sync = r#"{"url":"https://example.com/job/appeal","title":"Appealing role","company":"Acme","status":"wishlist","appliedAt":null,"notes":null,"location":null,"latestNote":null}"#;
+        let legacy: EditableFields = serde_json::from_str(old_sync).unwrap();
+        assert_eq!(legacy.appeal, None);
+        assert!(!legacy.appeal_in_file);
+
+        let parsed = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        assert_eq!(parsed[0].last().map(String::as_str), Some("appeal"));
+        assert_eq!(parsed[0].len(), parsed[1].len());
+        assert_eq!(parsed[1].last().map(String::as_str), Some(""));
+        let appeal_idx = parsed[0].len() - 1;
+
+        let mut scored = parsed.clone();
+        scored[1][appeal_idx] = "5".to_string();
+        fs::write(&csv_path, serialize_csv(&scored)).unwrap();
+        let imported =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(imported.summary.updated, 1);
+        assert!(imported.errors.is_empty());
+
+        let conn = Connection::open(&db_path).unwrap();
+        let job = get_job_by_id(&conn, &job_id).unwrap().unwrap();
+        assert_eq!(job.appeal, Some(5));
+        assert!(job.is_favorite);
+        drop(conn);
+
+        let without_column = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let mut stripped = without_column.clone();
+        for row in &mut stripped {
+            row.pop();
+        }
+        assert!(!stripped[0].iter().any(|header| header == "appeal"));
+        fs::write(&csv_path, serialize_csv(&stripped)).unwrap();
+        let kept = import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(kept.summary.updated, 0);
+        let conn = Connection::open(&db_path).unwrap();
+        let job = get_job_by_id(&conn, &job_id).unwrap().unwrap();
+        assert_eq!(job.appeal, Some(5));
+        assert!(job.is_favorite);
+        drop(conn);
+
+        let mut cleared = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let clear_idx = cleared[0]
+            .iter()
+            .position(|header| header == "appeal")
+            .unwrap();
+        cleared[1][clear_idx].clear();
+        fs::write(&csv_path, serialize_csv(&cleared)).unwrap();
+        import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        assert_eq!(get_job_by_id(&conn, &job_id).unwrap().unwrap().appeal, None);
+        drop(conn);
+
+        let mut invalid = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        invalid[1][clear_idx] = "9".to_string();
+        fs::write(&csv_path, serialize_csv(&invalid)).unwrap();
+        let rejected =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(rejected.summary.skipped, 1);
+        assert!(rejected.errors[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid appeal"));
+        let conn = Connection::open(&db_path).unwrap();
+        assert_eq!(get_job_by_id(&conn, &job_id).unwrap().unwrap().appeal, None);
+
+        let create_csv = "\
+url,title,company,status,appeal
+https://example.com/job/new-appeal,New role,Globex,wishlist,2
+";
+        let created = import_jobs_csv(
+            &db_path,
+            &csv_path,
+            Some(create_csv),
+            false,
+            ImportMode::Merge,
+        )
+        .unwrap();
+        assert_eq!(created.summary.created, 1);
+        let jobs = load_job_rows(&conn).unwrap();
+        let new_job = jobs
+            .iter()
+            .find(|(job, _)| job.url.contains("new-appeal"))
+            .unwrap();
+        assert_eq!(new_job.0.appeal, Some(2));
+        assert!(!new_job.0.is_favorite);
     }
 }

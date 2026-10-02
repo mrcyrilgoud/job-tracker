@@ -101,6 +101,8 @@ export type UpdateJobInput = {
   url?: string;
   isNewFromWatch?: boolean;
   isFavorite?: boolean;
+  /** 1–5, where 5 is most appealing. Null clears the score. */
+  appeal?: number | null;
 };
 
 export type ImportDocumentInput = {
