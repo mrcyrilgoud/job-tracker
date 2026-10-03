@@ -1,5 +1,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { useSearchParams } from "react-router-dom";
 
 import { FilterCriteriaEditor } from "@/components/companies/FilterCriteriaEditor";
 import { api, type CsvConfig, type CsvPathStatus, type FilterCriteria } from "@/lib/api";
@@ -18,6 +20,13 @@ type SaveStatus =
   | { kind: "saving" }
   | { kind: "saved" }
   | { kind: "error"; message: string };
+
+const SETTINGS_TABS = [
+  { value: "data-storage", label: "Data and Storage" },
+  { value: "search-filters", label: "Search Filters" },
+] as const;
+
+type SettingsTab = (typeof SETTINGS_TABS)[number]["value"];
 
 const IDLE: SaveStatus = { kind: "idle" };
 
@@ -131,6 +140,34 @@ function Hint({ summary, children }: { summary: string; children: React.ReactNod
 }
 
 export function SettingsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab: SettingsTab =
+    searchParams.get("tab") === "search-filters" ? "search-filters" : "data-storage";
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  function selectTab(tab: SettingsTab) {
+    if (tab === activeTab) return;
+    setSearchParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.set("tab", tab);
+      return next;
+    });
+  }
+
+  function navigateTabs(event: React.KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number;
+    switch (event.key) {
+      case "ArrowRight": nextIndex = (index + 1) % SETTINGS_TABS.length; break;
+      case "ArrowLeft": nextIndex = (index + SETTINGS_TABS.length - 1) % SETTINGS_TABS.length; break;
+      case "Home": nextIndex = 0; break;
+      case "End": nextIndex = SETTINGS_TABS.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    selectTab(SETTINGS_TABS[nextIndex].value);
+    tabRefs.current[nextIndex]?.focus();
+  }
+
   const [config, setConfig] = useState<CsvConfig | null>(null);
   const [pendingPath, setPendingPath] = useState<CsvPathStatus | null>(null);
   const [criteria, setCriteria] = useState<FilterCriteria>(MATCH_ALL_CRITERIA);
@@ -229,6 +266,26 @@ export function SettingsPage() {
         </p>
       </div>
 
+      <div role="tablist" aria-label="Settings sections" className="grid grid-cols-2 gap-1 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] p-1">
+        {SETTINGS_TABS.map((tab, index) => (
+          <button
+            key={tab.value}
+            ref={(element) => { tabRefs.current[index] = element; }}
+            id={`settings-tab-${tab.value}`}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.value}
+            aria-controls={`settings-panel-${tab.value}`}
+            tabIndex={activeTab === tab.value ? 0 : -1}
+            className={`rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] ${activeTab === tab.value ? "bg-[var(--accent)] text-white shadow-[var(--shadow-sm)]" : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--foreground)]"}`}
+            onClick={() => selectTab(tab.value)}
+            onKeyDown={(event) => navigateTabs(event, index)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {loading ? <p className="text-sm text-[var(--muted)]">Loading settings…</p> : null}
       {loadError ? (
         <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
@@ -238,76 +295,91 @@ export function SettingsPage() {
 
       {!loading && !loadError ? (
         <>
-          <SettingsGroup
-            id="group-search-filters"
-            title="Search filters"
-            description="Control which new roles surface from your watches."
+          <div
+            id="settings-panel-data-storage"
+            role="tabpanel"
+            aria-labelledby="settings-tab-data-storage"
+            tabIndex={0}
+            hidden={activeTab !== "data-storage"}
           >
-            <SettingCard
-              id="filter-heading"
-              title="Filter new roles"
-              description="Choose which new roles surface from your watches by title, location, and remote preference. Leave everything empty to show all."
-              error={filterStatus.kind === "error" ? filterStatus.message : null}
-              footer={
-                <>
-                  <button
-                    type="button"
-                    className="btn-primary btn-sm"
-                    disabled={filterStatus.kind === "saving"}
-                    onClick={() => void saveFilter()}
-                  >
-                    {filterStatus.kind === "saving" ? "Saving…" : "Save"}
-                  </button>
-                  <SaveState status={filterStatus} />
-                </>
-              }
-            >
-              <div className="mt-4">
-                <FilterCriteriaEditor value={criteria} onChange={setCriteria} />
-              </div>
-            </SettingCard>
-          </SettingsGroup>
-
-          {config ? (
+            {config ? (
+              <SettingsGroup
+                id="group-data-storage"
+                title="Data and Storage"
+                description="Where your editable data is kept on disk."
+              >
+                <SettingCard
+                  id="csv-location-heading"
+                  title="Jobs CSV location"
+                  description="Job Tracker synchronizes this file after edits and scheduled jobs."
+                  badge={
+                    <span className="rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--muted)]">
+                      {config.isCustom ? "Custom location" : "Default location"}
+                    </span>
+                  }
+                  error={csvStatus.kind === "error" ? csvStatus.message : null}
+                  footer={
+                    <>
+                      <button type="button" className="btn-primary btn-sm" disabled={csvBusy} onClick={() => void choosePath()}>
+                        {csvBusy ? "Updating…" : "Choose CSV…"}
+                      </button>
+                      {config.isCustom ? (
+                        <button type="button" className="btn-secondary btn-sm" disabled={csvBusy} onClick={() => void useDefault()}>
+                          Use default location
+                        </button>
+                      ) : null}
+                      <SaveState status={csvStatus} />
+                    </>
+                  }
+                >
+                  <code className="mt-4 block overflow-x-auto rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-xs text-[var(--foreground)]">
+                    {config.path}
+                  </code>
+                  <Hint summary="Using a cloud-synced folder?">
+                    Cloud-synced folders are supported, but avoid editing the file at the same time on
+                    multiple devices.
+                  </Hint>
+                </SettingCard>
+              </SettingsGroup>
+            ) : null}
+          </div>
+          <div
+            id="settings-panel-search-filters"
+            role="tabpanel"
+            aria-labelledby="settings-tab-search-filters"
+            tabIndex={0}
+            hidden={activeTab !== "search-filters"}
+          >
             <SettingsGroup
-              id="group-data-storage"
-              title="Data & storage"
-              description="Where your editable data is kept on disk."
+              id="group-search-filters"
+              title="Search Filters"
+              description="Control which new roles surface from your watches."
             >
               <SettingCard
-                id="csv-location-heading"
-                title="Jobs CSV location"
-                description="Job Tracker synchronizes this file after edits and scheduled jobs."
-                badge={
-                  <span className="rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--muted)]">
-                    {config.isCustom ? "Custom location" : "Default location"}
-                  </span>
-                }
-                error={csvStatus.kind === "error" ? csvStatus.message : null}
+                id="filter-heading"
+                title="Filter new roles"
+                description="Choose which new roles surface from your watches by title, location, and remote preference. Leave everything empty to show all."
+                error={filterStatus.kind === "error" ? filterStatus.message : null}
                 footer={
                   <>
-                    <button type="button" className="btn-primary btn-sm" disabled={csvBusy} onClick={() => void choosePath()}>
-                      {csvBusy ? "Updating…" : "Choose CSV…"}
+                    <button
+                      type="button"
+                      className="btn-primary btn-sm"
+                      disabled={filterStatus.kind === "saving"}
+                      onClick={() => void saveFilter()}
+                    >
+                      {filterStatus.kind === "saving" ? "Saving…" : "Save"}
                     </button>
-                    {config.isCustom ? (
-                      <button type="button" className="btn-secondary btn-sm" disabled={csvBusy} onClick={() => void useDefault()}>
-                        Use default location
-                      </button>
-                    ) : null}
-                    <SaveState status={csvStatus} />
+                    <SaveState status={filterStatus} />
                   </>
                 }
               >
-                <code className="mt-4 block overflow-x-auto rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-xs text-[var(--foreground)]">
-                  {config.path}
-                </code>
-                <Hint summary="Using a cloud-synced folder?">
-                  Cloud-synced folders are supported, but avoid editing the file at the same time on
-                  multiple devices.
-                </Hint>
+                <div className="mt-4">
+                  <FilterCriteriaEditor value={criteria} onChange={setCriteria} />
+                </div>
               </SettingCard>
             </SettingsGroup>
-          ) : null}
+          </div>
         </>
       ) : null}
 
