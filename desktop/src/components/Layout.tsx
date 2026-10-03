@@ -27,18 +27,18 @@ export function Layout() {
   const { state } = useRunMonitor();
   const { pathname } = useLocation();
   const previousPathname = useRef(pathname);
-  const [hiddenRunId, setHiddenRunId] = useState<string | null>(null);
+  const [runDetailsOpen, setRunDetailsOpen] = useState(false);
   const runId = state.displayed?.runId ?? null;
   // Hiding details is local navigation state: monitoring and the saved run
-  // remain intact. A new run opens automatically; updates to this run do not.
-  const panelVisible = runId !== null && runId !== hiddenRunId;
-  const showRun = () => setHiddenRunId(null);
+  // remain intact. Restored and background runs never replace the main page.
+  const panelVisible = runId !== null && runDetailsOpen;
+  const showRun = () => setRunDetailsOpen(true);
 
   useLayoutEffect(() => {
     if (previousPathname.current === pathname) return;
     previousPathname.current = pathname;
-    setHiddenRunId(runId);
-  }, [pathname, runId]);
+    setRunDetailsOpen(false);
+  }, [pathname]);
 
   const navigateToPage = (event: MouseEvent<HTMLAnchorElement>) => {
     // Modified clicks open another tab/window and leave this view untouched.
@@ -47,7 +47,7 @@ export function Layout() {
       event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
     ) return;
     // Also handle the active page link, where pathname does not change.
-    setHiddenRunId(runId);
+    setRunDetailsOpen(false);
   };
 
   return (

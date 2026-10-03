@@ -48,7 +48,11 @@ export function ChecksTab({ panelVisible, onShowRun }: {
       </button>
       <section id={panelId} className="checks-panel" aria-label="Checks" hidden={!open}>
         <h2 className="mb-3 text-base font-semibold">Checks</h2>
-        <RunControls panelVisible={panelVisible} onShowRun={onShowRun} />
+        <RunControls panelVisible={panelVisible} onShowRun={() => {
+          setOpen(false);
+          toggle.current?.focus();
+          onShowRun();
+        }} />
       </section>
       {!open && state.notice ? (
         <p className="checks-notice text-xs text-[var(--amber-ink)]" role="status">

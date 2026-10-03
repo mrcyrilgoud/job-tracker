@@ -190,7 +190,10 @@ button {
   transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
-.btn:disabled {
+.btn:disabled,
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -484,4 +487,10 @@ select.field {
   border-radius: 0.75rem;
   background: var(--surface);
   overflow-wrap: anywhere;
+}
+
+/* Keyboard focus stays visible without changing control geometry. */
+:is(.btn, .btn-primary, .btn-secondary, .btn-ghost, .app-nav-link, .app-brand, .app-theme-toggle):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }

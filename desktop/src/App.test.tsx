@@ -74,7 +74,10 @@ afterEach(() => {
   container.remove();
   vi.unstubAllGlobals();
 });
-async function mount() { await act(async () => root.render(<App />)); }
+async function mount(showStatus = true) {
+  await act(async () => root.render(<App />));
+  if (showStatus) await click(button("Show run status"));
+}
 async function click(element: Element | null) {
   expect(element).not.toBeNull();
   if (element?.closest(".checks-panel[hidden]")) {
@@ -88,8 +91,25 @@ function button(label: string) {
 function panel() { return container.querySelector('section[aria-label="Run status"]'); }
 
 describe("top navigation while a posting run is displayed", () => {
+  it.each(["active", "completed"] as const)("starts on Jobs with a restored %s run hidden", async (status) => {
+    window.history.replaceState(null, "", "/");
+    mockApi.getCurrentRun.mockResolvedValue(snapshot(status));
+    await mount(false);
+    expect(container.querySelector("main h1")?.textContent).toBe("Jobs destination");
+    expect(panel()).toBeNull();
+    const completed = snapshot();
+    await act(async () => progress({ ok: true, value: {
+      ...completed, seq: 3, emittedAt: "2026-10-01T00:00:01Z",
+    } }));
+    expect(panel()).toBeNull();
+    await click(button("Show run status"));
+    expect(panel()?.textContent).toContain("Saved posting");
+    expect((container.querySelector(".checks-panel") as HTMLElement).hidden).toBe(true);
+    expect(document.activeElement).toBe(button("Checks"));
+  });
+
   it("keeps checks collapsed until requested and restores focus on Escape", async () => {
-    await mount();
+    await mount(false);
     const toggle = button("Checks")!;
     const drawer = container.querySelector(".checks-panel") as HTMLElement;
     expect(drawer.hidden).toBe(true);
