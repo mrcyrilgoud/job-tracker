@@ -60,6 +60,7 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             Cell::new("STATUS").add_attribute(Attribute::Bold),
             Cell::new("APPLIED").add_attribute(Attribute::Bold),
             Cell::new("LOCATION").add_attribute(Attribute::Bold),
+            Cell::new("APPEAL").add_attribute(Attribute::Bold),
             Cell::new("FAV").add_attribute(Attribute::Bold),
         ]);
 
@@ -74,6 +75,10 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
         let fav = if job.is_favorite { "★" } else { "" };
         let applied = job.applied_at.as_deref().unwrap_or("-");
         let location = job.location.as_deref().unwrap_or("-");
+        let appeal = job
+            .appeal
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "—".to_string());
 
         table.add_row(vec![
             Cell::new(id_short).fg(Color::DarkGrey),
@@ -84,6 +89,7 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
                 .add_attribute(Attribute::Bold),
             Cell::new(applied),
             Cell::new(location),
+            Cell::new(appeal),
             Cell::new(fav).fg(Color::Yellow),
         ]);
     }
@@ -112,6 +118,13 @@ pub fn format_job_detail(detail: &JobDetail) {
     if let Some(location) = &job.location {
         println!("  Location:    {}", location);
     }
+    println!(
+        "  Appeal:      {}",
+        match job.appeal {
+            Some(score) => format!("{score} (1-5, 5 = most appealing)"),
+            None => "— (1-5, 5 = most appealing)".to_string(),
+        }
+    );
     println!("  Posting URL: {}", job.url);
     if let Some(careers) = &company.careers_url {
         println!("  Careers:     {}", careers);

@@ -172,9 +172,50 @@ mod tests {
                 assert_eq!(args.description.as_deref(), Some("Updated role scope"));
                 assert!(args.favorite);
                 assert!(!args.unfavorite);
+                assert_eq!(args.appeal, None);
+                assert!(!args.clear_appeal);
             }
             _ => panic!("Expected Update command"),
         }
+    }
+
+    #[test]
+    fn parses_appeal_bounds() {
+        let cli =
+            Cli::try_parse_from(["job-tracker", "update", "job_123", "--appeal", "5"]).unwrap();
+        match cli.command {
+            Some(Commands::Update(args)) => {
+                assert_eq!(args.appeal, Some(5));
+                assert!(!args.clear_appeal);
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        let cleared =
+            Cli::try_parse_from(["job-tracker", "update", "job_123", "--clear-appeal"]).unwrap();
+        match cleared.command {
+            Some(Commands::Update(args)) => {
+                assert_eq!(args.appeal, None);
+                assert!(args.clear_appeal);
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        assert!(
+            Cli::try_parse_from(["job-tracker", "update", "job_123", "--appeal", "0"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["job-tracker", "update", "job_123", "--appeal", "6"]).is_err()
+        );
+        assert!(Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_123",
+            "--appeal",
+            "5",
+            "--clear-appeal"
+        ])
+        .is_err());
     }
 
     #[test]
@@ -252,6 +293,8 @@ mod tests {
             unfavorite: false,
             archive: false,
             unarchive: false,
+            appeal: None,
+            clear_appeal: false,
         };
         handlers::handle_update(&conn, &paths, update_args, true, true).unwrap();
 
@@ -353,5 +396,67 @@ mod tests {
 
         // 9. Stats
         handlers::handle_stats(&conn, true).unwrap();
+
+        // 10. Set, export, and clear overall appeal without touching favorite.
+        let set_appeal = UpdateArgs {
+            target: job_id.clone(),
+            status: None,
+            applied_at: None,
+            notes: None,
+            append_note: None,
+            description: None,
+            clear_description: false,
+            title: None,
+            company: None,
+            location: None,
+            favorite: false,
+            unfavorite: false,
+            archive: false,
+            unarchive: false,
+            appeal: Some(4),
+            clear_appeal: false,
+        };
+        handlers::handle_update(&conn, &paths, set_appeal, true, true).unwrap();
+        let scored = crate::jobs::service::get_job_detail(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(scored.job.appeal, Some(4));
+        assert!(scored.job.is_favorite);
+        let csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
+        let parsed = crate::jobs::csv::parse_csv(&csv);
+        let appeal_idx = parsed[0]
+            .iter()
+            .position(|header| header == "appeal")
+            .unwrap();
+        assert_eq!(parsed[0].last().map(String::as_str), Some("appeal"));
+        assert_eq!(parsed[1][appeal_idx], "4");
+
+        let clear_appeal = UpdateArgs {
+            target: job_id.clone(),
+            status: None,
+            applied_at: None,
+            notes: None,
+            append_note: None,
+            description: None,
+            clear_description: false,
+            title: None,
+            company: None,
+            location: None,
+            favorite: false,
+            unfavorite: false,
+            archive: false,
+            unarchive: false,
+            appeal: None,
+            clear_appeal: true,
+        };
+        handlers::handle_update(&conn, &paths, clear_appeal, true, true).unwrap();
+        let cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(cleared.job.appeal, None);
+        assert!(cleared.job.is_favorite);
+        let cleared_csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
+        let cleared_rows = crate::jobs::csv::parse_csv(&cleared_csv);
+        assert_eq!(cleared_rows[1][appeal_idx], "");
     }
 }

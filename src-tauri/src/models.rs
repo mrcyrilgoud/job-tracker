@@ -34,6 +34,9 @@ pub struct Job {
     pub is_favorite: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// Overall appeal from 1 (least appealing) to 5 (most appealing).
+    /// `None` means the job has not been scored.
+    pub appeal: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,4 +159,14 @@ pub const JOB_STATUSES: &[&str] = &[
 
 pub fn is_job_status(value: &str) -> bool {
     JOB_STATUSES.contains(&value)
+}
+
+pub const APPEAL_RANGE_MESSAGE: &str = "Appeal must be an integer from 1 to 5 (5 = most appealing)";
+
+pub fn checked_appeal(score: i64) -> Result<i64, &'static str> {
+    if (1..=5).contains(&score) {
+        Ok(score)
+    } else {
+        Err(APPEAL_RANGE_MESSAGE)
+    }
 }

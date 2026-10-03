@@ -6,34 +6,8 @@ use crate::error::{map_sqlite, AppError, AppResult};
 use crate::filtering::engine::{matches, JobView};
 use crate::filtering::model::FilterCriteria;
 use crate::filtering::resolver::{load_alias_table, resolve_effective_criteria};
-use crate::models::Job;
+use crate::jobs::service::{job_cols, map_job};
 use crate::util::{create_id, normalize_canonical_url, now_iso};
-
-fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
-    Ok(Job {
-        id: row.get(0)?,
-        company_id: row.get(1)?,
-        title: row.get(2)?,
-        url: row.get(3)?,
-        canonical_url: row.get(4)?,
-        source_external_id: row.get(5)?,
-        status: row.get(6)?,
-        applied_at: row.get(7)?,
-        posting_state: row.get(8)?,
-        last_checked_at: row.get(9)?,
-        last_check_result: row.get(10)?,
-        source: row.get(11)?,
-        notes: row.get(12)?,
-        description: row.get(13)?,
-        location: row.get(14)?,
-        is_new_from_watch: row.get::<_, i64>(15)? != 0,
-        watch_disposition: row.get(16)?,
-        missing_from_sync_count: row.get(17)?,
-        is_favorite: row.get::<_, i64>(18)? != 0,
-        created_at: row.get(19)?,
-        updated_at: row.get(20)?,
-    })
-}
 
 /// Fetch remote jobs without holding a DB lock.
 pub async fn fetch_remote_jobs(provider: &str, board_slug: &str) -> AppResult<Vec<AtsJob>> {
@@ -86,9 +60,10 @@ fn apply_watch_sync_inner(
         remote_jobs.iter().map(|j| j.external_id.clone()).collect();
 
     let mut stmt = conn
-        .prepare(
-            "SELECT id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, description, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at FROM jobs WHERE company_id = ?1 AND source = ?2",
-        )
+        .prepare(&format!(
+            "SELECT {} FROM jobs WHERE company_id = ?1 AND source = ?2",
+            job_cols(None)
+        ))
         .map_err(map_sqlite)?;
     let existing = stmt
         .query_map(params![watch.company_id, watch.provider], map_job)

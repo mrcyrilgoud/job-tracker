@@ -73,6 +73,8 @@ export type Job = {
   isFavorite: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Overall appeal from 1 (least) to 5 (most). Null when unscored. */
+  appeal: number | null;
 };
 
 export type MatchMode = "word" | "substring";

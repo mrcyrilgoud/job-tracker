@@ -2,6 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
   ArchiveIcon,
@@ -173,6 +174,29 @@ export function JobsPage() {
       await load({ quiet: true });
     } finally {
       setTogglingFavId(null);
+    }
+  }
+
+  async function handleSetAppeal(jobId: string, appeal: number | null) {
+    const previous = jobs.find((item) => item.job.id === jobId)?.job.appeal ?? null;
+    setJobs((prev) =>
+      prev.map((item) =>
+        item.job.id === jobId ? { ...item, job: { ...item.job, appeal } } : item,
+      ),
+    );
+    try {
+      const res = await api.updateJob(jobId, { appeal });
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId ? { ...item, job: res.detail.job } : item,
+        ),
+      );
+    } catch {
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId ? { ...item, job: { ...item.job, appeal: previous } } : item,
+        ),
+      );
     }
   }
 
@@ -645,6 +669,28 @@ export function JobsPage() {
                           {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
                         </div>
                         <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+                          <div
+                            className="flex items-center gap-1.5"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                          >
+                            <label
+                              htmlFor={`appeal-${job.id}`}
+                              className="text-xs text-[var(--faint)]"
+                              title={APPEAL_SCALE_LABEL}
+                            >
+                              Appeal
+                            </label>
+                            <AppealSelect
+                              id={`appeal-${job.id}`}
+                              value={job.appeal}
+                              compact
+                              onChange={(appeal) => void handleSetAppeal(job.id, appeal)}
+                            />
+                          </div>
                           <button
                             type="button"
                             onClick={(e) => {

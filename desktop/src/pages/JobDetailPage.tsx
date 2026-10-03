@@ -169,6 +169,7 @@ export function JobDetailPage() {
           url: detail.job.url,
           isNewFromWatch: detail.job.isNewFromWatch,
           isFavorite: detail.job.isFavorite,
+          appeal: detail.job.appeal,
         }}
         onUpdated={onUpdated}
         onDeleted={() => navigate("/")}

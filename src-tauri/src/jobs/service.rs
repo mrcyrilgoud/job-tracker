@@ -6,8 +6,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
-    is_job_status, AttachedDocument, Company, Document, Job, JobDetail, JobDocument, JobEvent,
-    JobListItem, WeeklyActivity, WeeklyDay,
+    checked_appeal, is_job_status, AttachedDocument, Company, Document, Job, JobDetail,
+    JobDocument, JobEvent, JobListItem, WeeklyActivity, WeeklyDay,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -19,6 +19,46 @@ fn map_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
         created_at: row.get(3)?,
         updated_at: row.get(4)?,
     })
+}
+
+/// Column order read by [`map_job`]. `appeal` is last so a company column
+/// joined after this list starts at [`JOB_COL_COUNT`].
+pub const JOB_COLUMNS: &[&str] = &[
+    "id",
+    "company_id",
+    "title",
+    "url",
+    "canonical_url",
+    "source_external_id",
+    "status",
+    "applied_at",
+    "posting_state",
+    "last_checked_at",
+    "last_check_result",
+    "source",
+    "notes",
+    "description",
+    "location",
+    "is_new_from_watch",
+    "watch_disposition",
+    "missing_from_sync_count",
+    "is_favorite",
+    "created_at",
+    "updated_at",
+    "appeal",
+];
+
+pub const JOB_COL_COUNT: usize = JOB_COLUMNS.len();
+
+pub fn job_cols(alias: Option<&str>) -> String {
+    JOB_COLUMNS
+        .iter()
+        .map(|column| match alias {
+            Some(prefix) => format!("{prefix}.{column}"),
+            None => (*column).to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
@@ -44,10 +84,9 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         is_favorite: row.get::<_, i64>(18)? != 0,
         created_at: row.get(19)?,
         updated_at: row.get(20)?,
+        appeal: row.get(21)?,
     })
 }
-
-const JOB_COLS: &str = "id, company_id, title, url, canonical_url, source_external_id, status, applied_at, posting_state, last_checked_at, last_check_result, source, notes, description, location, is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at";
 
 /// Resolve a page title via network. Callers must not hold a DB mutex across this.
 pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
@@ -243,7 +282,7 @@ fn delete_untracked_empty_company(conn: &Connection, company_id: &str) -> AppRes
 
 pub fn get_job_by_id(conn: &Connection, job_id: &str) -> AppResult<Option<Job>> {
     conn.query_row(
-        &format!("SELECT {JOB_COLS} FROM jobs WHERE id = ?1"),
+        &format!("SELECT {} FROM jobs WHERE id = ?1", job_cols(None)),
         params![job_id],
         map_job,
     )
@@ -272,9 +311,10 @@ pub struct LocationSettings {
 }
 
 pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
-    let mut sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+    let mut sql = format!(
+        "SELECT {}, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE 1=1",
+        job_cols(Some("j"))
     );
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -352,7 +392,7 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
         .query_map(params_ref.as_slice(), |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(21)?,
+                company_name: row.get(JOB_COL_COUNT)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -412,13 +452,14 @@ pub fn list_open_watch_positions(
     // `expand_country_keywords`/`expand_location_keywords` is now evaluated in
     // memory by the single filter engine (Req 10.1, 10.2), so every watch
     // listing agrees on inclusion.
-    let sql = String::from(
-        "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at, c.name
+    let sql = format!(
+        "SELECT {}, c.name
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id
          WHERE j.company_id = ?1
            AND j.posting_state = 'active'
            AND j.source IN ('greenhouse', 'lever', 'ashby')
-         ORDER BY j.updated_at DESC"
+         ORDER BY j.updated_at DESC",
+        job_cols(Some("j"))
     );
 
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
@@ -426,7 +467,7 @@ pub fn list_open_watch_positions(
         .query_map(params![company_id], |row| {
             Ok(JobListItem {
                 job: map_job(row)?,
-                company_name: row.get(21)?,
+                company_name: row.get(JOB_COL_COUNT)?,
             })
         })
         .map_err(map_sqlite)?;
@@ -467,23 +508,24 @@ pub fn list_open_watch_positions(
 
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
-        .prepare(
-            "SELECT j.id, j.company_id, j.title, j.url, j.canonical_url, j.source_external_id, j.status, j.applied_at, j.posting_state, j.last_checked_at, j.last_check_result, j.source, j.notes, j.description, j.location, j.is_new_from_watch, j.watch_disposition, j.missing_from_sync_count, j.is_favorite, j.created_at, j.updated_at,
-                    c.id, c.name, c.careers_url, c.created_at, c.updated_at
+        .prepare(&format!(
+            "SELECT {}, c.id, c.name, c.careers_url, c.created_at, c.updated_at
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
-        )
+            job_cols(Some("j"))
+        ))
         .map_err(map_sqlite)?;
 
     let detail = stmt
         .query_row(params![job_id], |row| {
+            let company_at = JOB_COL_COUNT;
             Ok((
                 map_job(row)?,
                 Company {
-                    id: row.get(21)?,
-                    name: row.get(22)?,
-                    careers_url: row.get(23)?,
-                    created_at: row.get(24)?,
-                    updated_at: row.get(25)?,
+                    id: row.get(company_at)?,
+                    name: row.get(company_at + 1)?,
+                    careers_url: row.get(company_at + 2)?,
+                    created_at: row.get(company_at + 3)?,
+                    updated_at: row.get(company_at + 4)?,
                 },
             ))
         })
@@ -554,6 +596,16 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
     }))
 }
 
+/// `null` becomes `Some(None)` (an explicit clear). A missing field stays
+/// `None` via `#[serde(default)]` and does not change the stored value.
+fn deserialize_optional_update<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(serde::Deserialize::deserialize(deserializer)?))
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateJobInput {
@@ -567,6 +619,10 @@ pub struct UpdateJobInput {
     pub url: Option<String>,
     pub is_new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
+    /// `None` leaves the score unchanged. `Some(None)` clears it.
+    /// `Some(Some(n))` sets it when `n` is 1–5.
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub appeal: Option<Option<i64>>,
 }
 
 use serde::Deserialize;
@@ -657,11 +713,20 @@ pub fn update_job(
         .is_new_from_watch
         .unwrap_or(existing.is_new_from_watch);
     let is_fav = updates.is_favorite.unwrap_or(existing.is_favorite);
+    let appeal = match updates.appeal {
+        Some(next) => {
+            if let Some(score) = next {
+                checked_appeal(score).map_err(AppError::from)?;
+            }
+            next
+        }
+        None => existing.appeal,
+    };
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, updated_at=?12
-           WHERE id=?13"#,
+           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, updated_at=?13
+           WHERE id=?14"#,
         params![
             title,
             company_id,
@@ -674,6 +739,7 @@ pub fn update_job(
             location,
             if is_new { 1 } else { 0 },
             if is_fav { 1 } else { 0 },
+            appeal,
             timestamp,
             job_id
         ],
@@ -2077,6 +2143,105 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.job.status, "closed");
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn appeal_is_optional_and_does_not_change_favorite_or_closed_delete() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/appeal",
+            "Appealing role",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(job.appeal, None);
+        assert!(!job.is_favorite);
+
+        let favorited = set_job_favorite(&conn, &job.id, true).unwrap();
+        assert!(favorited.job.is_favorite);
+
+        let scored = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                appeal: Some(Some(5)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(scored.job.appeal, Some(5));
+        assert!(scored.job.is_favorite);
+        assert_eq!(
+            scored
+                .events
+                .iter()
+                .filter(|event| event.event_type == "favorited")
+                .count(),
+            1
+        );
+
+        let missing: UpdateJobInput = serde_json::from_str("{}").unwrap();
+        assert!(missing.appeal.is_none());
+        let clear_input: UpdateJobInput = serde_json::from_str(r#"{"appeal":null}"#).unwrap();
+        assert_eq!(clear_input.appeal, Some(None));
+        let set_input: UpdateJobInput = serde_json::from_str(r#"{"appeal":4}"#).unwrap();
+        assert_eq!(set_input.appeal, Some(Some(4)));
+
+        let cleared = update_job(&conn, &job.id, clear_input).unwrap();
+        assert_eq!(cleared.job.appeal, None);
+        assert!(cleared.job.is_favorite);
+
+        assert!(update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                appeal: Some(Some(0)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .is_err());
+        assert!(update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                appeal: Some(Some(6)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .is_err());
+        assert_eq!(get_job_by_id(&conn, &job.id).unwrap().unwrap().appeal, None);
+
+        let archived = archive_job(&conn, &job.id).unwrap();
+        assert_eq!(archived.job.appeal, None);
+        let restored = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                status: Some("wishlist".into()),
+                appeal: Some(Some(3)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(restored.job.status, "wishlist");
+        assert_eq!(restored.job.appeal, Some(3));
+
+        let closed = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                status: Some("closed".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(closed.job.status, "closed");
         assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
     }
 

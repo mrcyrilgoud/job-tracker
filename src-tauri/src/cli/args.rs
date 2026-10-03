@@ -51,7 +51,7 @@ pub enum Commands {
 
     #[command(
         name = "update",
-        about = "Update a job's status, notes, description, applied date, or favorite"
+        about = "Update a job's status, notes, description, applied date, appeal, or favorite"
     )]
     Update(UpdateArgs),
 
@@ -214,6 +214,21 @@ pub struct UpdateArgs {
 
     #[arg(long, conflicts_with = "archive", help = "Unarchive this job")]
     pub unarchive: bool,
+
+    #[arg(
+        long,
+        conflicts_with = "clear_appeal",
+        value_parser = clap::value_parser!(i64).range(1..=5),
+        help = "Overall appeal from 1 (least appealing) to 5 (most appealing)"
+    )]
+    pub appeal: Option<i64>,
+
+    #[arg(
+        long,
+        conflicts_with = "appeal",
+        help = "Clear the appeal score (leave the job unscored)"
+    )]
+    pub clear_appeal: bool,
 }
 
 #[derive(Debug, Args)]
