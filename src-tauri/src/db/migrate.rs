@@ -36,7 +36,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       is_favorite BOOLEAN NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5))
+      appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5)),
+      salary_min INTEGER,
+      salary_max INTEGER,
+      CHECK (salary_min IS NULL OR salary_min >= 0),
+      CHECK (salary_max IS NULL OR salary_max >= 0),
+      CHECK (salary_min IS NULL OR salary_max IS NULL OR salary_min <= salary_max)
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS jobs_canonical_url_uidx ON jobs(canonical_url);
@@ -181,6 +186,15 @@ pub fn migrate(conn: &Connection) -> Result<()> {
             "ALTER TABLE jobs ADD COLUMN appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5))",
             [],
         )?;
+    }
+
+    let has_salary_min = table_columns.iter().any(|name| name == "salary_min");
+    if !has_salary_min {
+        conn.execute("ALTER TABLE jobs ADD COLUMN salary_min INTEGER CHECK (salary_min IS NULL OR salary_min >= 0)", [])?;
+    }
+    let has_salary_max = table_columns.iter().any(|name| name == "salary_max");
+    if !has_salary_max {
+        conn.execute("ALTER TABLE jobs ADD COLUMN salary_max INTEGER CHECK (salary_max IS NULL OR salary_max >= 0)", [])?;
     }
 
     // Watchlist job filtering: nullable hint recording the sync-time filter
@@ -426,7 +440,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_nullable_appeal_without_scoring_existing_jobs() {
+    fn adds_nullable_appeal_and_salary_fields_to_existing_jobs() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             r#"
@@ -473,6 +487,22 @@ mod tests {
             })
             .unwrap();
         assert_eq!(appeal, None);
+        let salary: (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT salary_min, salary_max FROM jobs WHERE id = 'j1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(salary, (None, None));
+        conn.execute(
+            "UPDATE jobs SET salary_min=100000, salary_max=150000 WHERE id='j1'",
+            [],
+        )
+        .unwrap();
+        assert!(conn
+            .execute("UPDATE jobs SET salary_min=-1 WHERE id='j1'", [])
+            .is_err());
 
         conn.execute("UPDATE jobs SET appeal = 5 WHERE id = 'j1'", [])
             .unwrap();
@@ -500,6 +530,8 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(cols.iter().filter(|name| *name == "appeal").count(), 1);
+        assert_eq!(cols.iter().filter(|name| *name == "salary_min").count(), 1);
+        assert_eq!(cols.iter().filter(|name| *name == "salary_max").count(), 1);
     }
 
     fn schema_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {

@@ -37,6 +37,9 @@ pub struct Job {
     /// Overall appeal from 1 (least appealing) to 5 (most appealing).
     /// `None` means the job has not been scored.
     pub appeal: Option<i64>,
+    /// Optional annual USD salary bounds. A missing bound is open-ended.
+    pub salary_min: Option<i64>,
+    pub salary_max: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

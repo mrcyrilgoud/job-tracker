@@ -40,6 +40,15 @@ export function JobsPage() {
   const companyId = searchParams.get("companyId") ?? undefined;
   const postingState = searchParams.get("postingState") ?? undefined;
   const search = searchParams.get("search") ?? undefined;
+  const salaryMinParam = searchParams.get("salaryMin");
+  const salaryMaxParam = searchParams.get("salaryMax");
+  const parseSalaryBound = (value: string | null) => {
+    if (value === null || !/^\d+$/.test(value)) return undefined;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
+  };
+  const salaryMin = parseSalaryBound(salaryMinParam);
+  const salaryMax = parseSalaryBound(salaryMaxParam);
   const isFavoriteFilter = searchParams.get("favorites") === "true";
   const isArchivedFilter = searchParams.get("archived") === "true";
   const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
@@ -52,7 +61,9 @@ export function JobsPage() {
   const [companySidebarSearch, setCompanySidebarSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null));
+  const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
+  const [liveSearch, setLiveSearch] = useState(search ?? "");
+  const [appliedSearch, setAppliedSearch] = useState(search ?? "");
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
@@ -62,15 +73,23 @@ export function JobsPage() {
   const { onRunSettled, reportRefreshFailed } = useRunMonitor();
 
   useEffect(() => {
-    setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null));
-  }, [postingState, search]);
+    setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
+    setLiveSearch(search ?? "");
+  }, [postingState, search, salaryMinParam, salaryMaxParam]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAppliedSearch(liveSearch.trim()), 180);
+    return () => window.clearTimeout(timer);
+  }, [liveSearch]);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const requestKey = JSON.stringify({
       status,
       companyId,
       postingState,
-      search,
+      search: appliedSearch,
+      salaryMin,
+      salaryMax,
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
     });
@@ -85,7 +104,9 @@ export function JobsPage() {
           status,
           companyId,
           postingState,
-          search,
+          search: appliedSearch || undefined,
+          salaryMin,
+          salaryMax,
           isFavorite: isFavoriteFilter ? true : undefined,
           isArchived: isArchivedFilter
             ? true
@@ -103,7 +124,9 @@ export function JobsPage() {
           status,
           companyId,
           postingState,
-          search,
+          search: appliedSearch,
+          salaryMin,
+          salaryMax,
           isFavorite: isFavoriteFilter,
           isArchived: isArchivedFilter,
         }) !== requestKey
@@ -125,7 +148,7 @@ export function JobsPage() {
         setLoading(false);
       }
     }
-  }, [status, companyId, postingState, search, isFavoriteFilter, isArchivedFilter, reportRefreshFailed]);
+  }, [status, companyId, postingState, appliedSearch, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, reportRefreshFailed]);
 
   useEffect(() => {
     void load();
@@ -280,19 +303,23 @@ export function JobsPage() {
         ? "Nothing here yet."
         : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
 
-  const isFiltered = Boolean(status || companyId || postingState || search || isFavoriteFilter || isArchivedFilter);
+  const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter);
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const next = new URLSearchParams();
     const nextSearch = filterDraft.search.trim();
     const nextPosting = filterDraft.postingState;
+    const nextSalaryMin = filterDraft.salaryMin.trim();
+    const nextSalaryMax = filterDraft.salaryMax.trim();
     if (isFavoriteFilter) next.set("favorites", "true");
     if (isArchivedFilter) next.set("archived", "true");
     if (status) next.set("status", status);
     if (companyId) next.set("companyId", companyId);
     if (nextSearch) next.set("search", nextSearch);
     if (nextPosting) next.set("postingState", nextPosting);
+    if (nextSalaryMin) next.set("salaryMin", nextSalaryMin);
+    if (nextSalaryMax) next.set("salaryMax", nextSalaryMax);
     if (viewMode) next.set("view", viewMode);
     setSearchParams(next);
   }
@@ -440,10 +467,38 @@ export function JobsPage() {
                 type="search"
                 name="search"
                 value={filterDraft.search}
-                onChange={(event) => setFilterDraft((current) => ({ ...current, search: event.target.value }))}
-                placeholder="Search jobs…"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFilterDraft((current) => ({ ...current, search: value }));
+                  setLiveSearch(value);
+                }}
+                placeholder="Search title, company, or posting URL…"
                 aria-label="Search jobs"
                 className="field max-w-xs"
+              />
+              <label className="sr-only" htmlFor="salary-min">Minimum annual salary in USD</label>
+              <input
+                id="salary-min"
+                type="number"
+                min="0"
+                step="1000"
+                inputMode="numeric"
+                value={filterDraft.salaryMin}
+                onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMin: event.target.value }))}
+                placeholder="Min salary / year"
+                className="field w-40"
+              />
+              <label className="sr-only" htmlFor="salary-max">Maximum annual salary in USD</label>
+              <input
+                id="salary-max"
+                type="number"
+                min="0"
+                step="1000"
+                inputMode="numeric"
+                value={filterDraft.salaryMax}
+                onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMax: event.target.value }))}
+                placeholder="Max salary / year"
+                className="field w-40"
               />
               <select
                 name="postingState"

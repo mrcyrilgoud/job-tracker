@@ -75,6 +75,9 @@ export type Job = {
   updatedAt: string;
   /** Overall appeal from 1 (least) to 5 (most). Null when unscored. */
   appeal: number | null;
+  /** Optional annual USD salary bounds; a missing bound is open-ended. */
+  salaryMin: number | null;
+  salaryMax: number | null;
 };
 
 export type MatchMode = "word" | "substring";

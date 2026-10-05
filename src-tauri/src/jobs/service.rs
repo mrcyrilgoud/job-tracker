@@ -46,6 +46,8 @@ pub const JOB_COLUMNS: &[&str] = &[
     "created_at",
     "updated_at",
     "appeal",
+    "salary_min",
+    "salary_max",
 ];
 
 pub const JOB_COL_COUNT: usize = JOB_COLUMNS.len();
@@ -85,6 +87,8 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         created_at: row.get(19)?,
         updated_at: row.get(20)?,
         appeal: row.get(21)?,
+        salary_min: row.get(22)?,
+        salary_max: row.get(23)?,
     })
 }
 
@@ -296,6 +300,8 @@ pub struct JobFilters {
     pub company_id: Option<String>,
     pub posting_state: Option<String>,
     pub search: Option<String>,
+    pub salary_min: Option<i64>,
+    pub salary_max: Option<i64>,
     pub location: Option<String>,
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
@@ -349,13 +355,28 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
     if let Some(search) = &filters.search {
         sql.push_str(
-            " AND (j.title LIKE ? OR c.name LIKE ? OR j.notes LIKE ? OR j.description LIKE ?)",
+            " AND (j.title LIKE ? OR c.name LIKE ? OR j.url LIKE ? OR j.notes LIKE ? OR j.description LIKE ?)",
         );
         let pattern = format!("%{search}%");
         values.push(Box::new(pattern.clone()));
         values.push(Box::new(pattern.clone()));
         values.push(Box::new(pattern.clone()));
+        values.push(Box::new(pattern.clone()));
         values.push(Box::new(pattern));
+    }
+
+    if filters.salary_min.is_some() || filters.salary_max.is_some() {
+        // Treat a single known bound as an open-ended posting range; omit jobs
+        // with no salary data entirely from salary-filtered results.
+        sql.push_str(" AND (j.salary_min IS NOT NULL OR j.salary_max IS NOT NULL)");
+        if let Some(minimum) = filters.salary_min {
+            sql.push_str(" AND COALESCE(j.salary_max, 9223372036854775807) >= ?");
+            values.push(Box::new(minimum));
+        }
+        if let Some(maximum) = filters.salary_max {
+            sql.push_str(" AND COALESCE(j.salary_min, 0) <= ?");
+            values.push(Box::new(maximum));
+        }
     }
 
     // Location filtering: the watch path evaluates the structured filter engine
@@ -619,6 +640,11 @@ pub struct UpdateJobInput {
     pub url: Option<String>,
     pub is_new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
+    /// `None` leaves salary unchanged; `Some(None)` clears a bound.
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub salary_min: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub salary_max: Option<Option<i64>>,
     /// `None` leaves the score unchanged. `Some(None)` clears it.
     /// `Some(Some(n))` sets it when `n` is 1–5.
     #[serde(default, deserialize_with = "deserialize_optional_update")]
@@ -713,6 +739,16 @@ pub fn update_job(
         .is_new_from_watch
         .unwrap_or(existing.is_new_from_watch);
     let is_fav = updates.is_favorite.unwrap_or(existing.is_favorite);
+    let salary_min = updates.salary_min.clone().unwrap_or(existing.salary_min);
+    let salary_max = updates.salary_max.clone().unwrap_or(existing.salary_max);
+    if salary_min.is_some_and(|value| value < 0)
+        || salary_max.is_some_and(|value| value < 0)
+        || matches!((salary_min, salary_max), (Some(minimum), Some(maximum)) if minimum > maximum)
+    {
+        return Err(AppError::from(
+            "Salary must use non-negative USD amounts with minimum no greater than maximum",
+        ));
+    }
     let appeal = match updates.appeal {
         Some(next) => {
             if let Some(score) = next {
@@ -725,8 +761,8 @@ pub fn update_job(
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, updated_at=?13
-           WHERE id=?14"#,
+           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14, updated_at=?15
+           WHERE id=?16"#,
         params![
             title,
             company_id,
@@ -740,6 +776,8 @@ pub fn update_job(
             if is_new { 1 } else { 0 },
             if is_fav { 1 } else { 0 },
             appeal,
+            salary_min,
+            salary_max,
             timestamp,
             job_id
         ],
@@ -1370,6 +1408,136 @@ mod tests {
         .unwrap();
         assert_eq!(inbox.len(), 1);
         assert_eq!(inbox[0].job.id, pending_id);
+    }
+
+    #[test]
+    fn list_jobs_searches_posting_url_and_filters_overlapping_salary_ranges() {
+        let conn = test_connection();
+        let (url_match, _) = create_job_from_url(
+            &conn,
+            "https://example.com/openings/unique-posting-code",
+            "Senior Engineer",
+            Some("Acme Research"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (salary_job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/salary-role",
+            "Salary Role",
+            Some("Acme Research"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (open_ended, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/open-ended",
+            "Open Ended",
+            Some("Acme Research"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE jobs SET salary_min=120000, salary_max=180000 WHERE id=?1",
+            [&salary_job.id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE jobs SET salary_min=200000, salary_max=NULL WHERE id=?1",
+            [&open_ended.id],
+        )
+        .unwrap();
+
+        let by_url = list_jobs(
+            &conn,
+            JobFilters {
+                search: Some("UNIQUE-POSTING-CODE".into()),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert!(by_url.iter().any(|item| item.job.id == url_match.id));
+        let overlap = list_jobs(
+            &conn,
+            JobFilters {
+                salary_min: Some(175000),
+                salary_max: Some(210000),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        let overlap_ids: Vec<_> = overlap.iter().map(|item| item.job.id.as_str()).collect();
+        assert!(overlap_ids.contains(&salary_job.id.as_str()));
+        assert!(overlap_ids.contains(&open_ended.id.as_str()));
+        assert_eq!(overlap.len(), 2);
+        let upper_bound = list_jobs(
+            &conn,
+            JobFilters {
+                salary_max: Some(119999),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert!(upper_bound.is_empty());
+        let lower_open = list_jobs(
+            &conn,
+            JobFilters {
+                salary_max: Some(120000),
+                ..JobFilters::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(lower_open.len(), 1);
+        assert_eq!(lower_open[0].job.id, salary_job.id);
+    }
+
+    #[test]
+    fn update_job_persists_and_validates_salary_bounds() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/salary-update",
+            "Salary Update",
+            Some("Acme"),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let saved = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                salary_min: Some(Some(100000)),
+                salary_max: Some(Some(150000)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.job.salary_min, Some(100000));
+        assert_eq!(saved.job.salary_max, Some(150000));
+        let error = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                salary_min: Some(Some(160000)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("minimum no greater than maximum"));
     }
 
     #[test]

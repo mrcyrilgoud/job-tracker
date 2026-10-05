@@ -28,6 +28,8 @@ type Initial = {
   isNewFromWatch: boolean;
   isFavorite: boolean;
   appeal: number | null;
+  salaryMin: number | null;
+  salaryMax: number | null;
 };
 
 /** The editable subset of a job. Compared against the last persisted copy to
@@ -41,6 +43,8 @@ type Draft = {
   description: string;
   isFavorite: boolean;
   appeal: number | null;
+  salaryMin: string;
+  salaryMax: string;
 };
 
 export type JobDetailUpdateMode = "save" | "check" | "attachment" | "full";
@@ -57,6 +61,8 @@ function toDraft(initial: Initial): Draft {
     description: initial.description ?? "",
     isFavorite: initial.isFavorite,
     appeal: initial.appeal,
+    salaryMin: initial.salaryMin === null ? "" : String(initial.salaryMin),
+    salaryMax: initial.salaryMax === null ? "" : String(initial.salaryMax),
   };
 }
 
@@ -69,7 +75,9 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.notes === b.notes &&
     a.description === b.description &&
     a.isFavorite === b.isFavorite &&
-    a.appeal === b.appeal
+    a.appeal === b.appeal &&
+    a.salaryMin === b.salaryMin &&
+    a.salaryMax === b.salaryMax
   );
 }
 
@@ -182,6 +190,8 @@ export function JobDetailClient({
         isNewFromWatch: false,
         isFavorite: attempted.isFavorite,
         appeal: attempted.appeal,
+        salaryMin: attempted.salaryMin.trim() === "" ? null : Number(attempted.salaryMin),
+        salaryMax: attempted.salaryMax.trim() === "" ? null : Number(attempted.salaryMax),
       });
       const detail = result.detail;
       if (attempted.status === "closed") {
@@ -197,6 +207,8 @@ export function JobDetailClient({
         description: detail.job.description ?? "",
         isFavorite: detail.job.isFavorite,
         appeal: detail.job.appeal,
+        salaryMin: detail.job.salaryMin === null ? "" : String(detail.job.salaryMin),
+        salaryMax: detail.job.salaryMax === null ? "" : String(detail.job.salaryMax),
       };
       setSaved(baseline);
       // If the user typed more while save was in flight, keep the newer draft.
@@ -268,6 +280,8 @@ export function JobDetailClient({
           notes: detail.job.notes,
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
+          salaryMin: detail.job.salaryMin,
+          salaryMax: detail.job.salaryMax,
         });
         setSaved(baseline);
         setDraft(baseline);
@@ -285,6 +299,8 @@ export function JobDetailClient({
           notes: detail.job.notes,
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
+          salaryMin: detail.job.salaryMin,
+          salaryMax: detail.job.salaryMax,
         });
         setSaved(baseline);
         setDraft(baseline);
@@ -454,6 +470,35 @@ export function JobDetailClient({
               <p className="mt-1.5 text-xs text-[var(--faint)]">
                 One overall score for salary, growth, industry, and role fit. Leave unscored until you decide.
               </p>
+            </div>
+            <div className="sm:col-span-2">
+              <span className="field-label">Salary range (USD per year)</span>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="sr-only" htmlFor="job-salary-min">Minimum annual salary in USD</label>
+                <input
+                  id="job-salary-min"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={draft.salaryMin}
+                  onChange={(event) => update("salaryMin", event.target.value)}
+                  placeholder="Minimum (optional)"
+                  className="field"
+                />
+                <label className="sr-only" htmlFor="job-salary-max">Maximum annual salary in USD</label>
+                <input
+                  id="job-salary-max"
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={draft.salaryMax}
+                  onChange={(event) => update("salaryMax", event.target.value)}
+                  placeholder="Maximum (optional)"
+                  className="field"
+                />
+              </div>
             </div>
           </div>
 

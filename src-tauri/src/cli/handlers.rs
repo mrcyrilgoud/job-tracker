@@ -121,6 +121,8 @@ pub fn handle_list(
         company_id: args.company,
         posting_state: None,
         search: args.search,
+        salary_min: None,
+        salary_max: None,
         location: args.location,
         new_from_watch: None,
         is_favorite: if args.favorites { Some(true) } else { None },
@@ -338,6 +340,8 @@ pub fn handle_update(
         } else {
             args.appeal.map(Some)
         },
+        salary_min: None,
+        salary_max: None,
     };
 
     let updated = update_job(conn, &job_id, input)?;
@@ -406,6 +410,8 @@ pub fn handle_note(
             is_new_from_watch: None,
             is_favorite: None,
             appeal: None,
+            salary_min: None,
+            salary_max: None,
         },
     )?;
 

@@ -52,6 +52,8 @@ export type JobFilters = {
   companyId?: string;
   postingState?: string;
   search?: string;
+  salaryMin?: number;
+  salaryMax?: number;
   location?: string;
   newFromWatch?: boolean;
   isFavorite?: boolean;
@@ -103,6 +105,8 @@ export type UpdateJobInput = {
   isFavorite?: boolean;
   /** 1–5, where 5 is most appealing. Null clears the score. */
   appeal?: number | null;
+  salaryMin?: number | null;
+  salaryMax?: number | null;
 };
 
 export type ImportDocumentInput = {

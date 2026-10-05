@@ -1,12 +1,21 @@
 export type JobFilterDraft = {
   search: string;
   postingState: string;
+  salaryMin: string;
+  salaryMax: string;
 };
 
-export function filterDraftFromUrl(search: string | null, postingState: string | null): JobFilterDraft {
+export function filterDraftFromUrl(
+  search: string | null,
+  postingState: string | null,
+  salaryMin: string | null = null,
+  salaryMax: string | null = null,
+): JobFilterDraft {
   return {
     search: search ?? "",
     postingState: postingState ?? "",
+    salaryMin: salaryMin ?? "",
+    salaryMax: salaryMax ?? "",
   };
 }
 

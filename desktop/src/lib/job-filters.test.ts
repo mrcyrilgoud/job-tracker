@@ -7,6 +7,8 @@ describe("job filter draft", () => {
     expect(filterDraftFromUrl("OpenAI", "active")).toEqual({
       search: "OpenAI",
       postingState: "active",
+      salaryMin: "",
+      salaryMax: "",
     });
   });
 
@@ -14,6 +16,17 @@ describe("job filter draft", () => {
     expect(filterDraftFromUrl(null, null)).toEqual({
       search: "",
       postingState: "",
+      salaryMin: "",
+      salaryMax: "",
+    });
+  });
+
+  it("hydrates annual salary bounds from the URL", () => {
+    expect(filterDraftFromUrl("role", "active", "120000", "180000")).toEqual({
+      search: "role",
+      postingState: "active",
+      salaryMin: "120000",
+      salaryMax: "180000",
     });
   });
 });

@@ -95,6 +95,8 @@ function job(
     createdAt: ago(5 * days),
     updatedAt: ago(1 * hours),
     appeal: opts.appeal ?? null,
+    salaryMin: null,
+    salaryMax: null,
   };
 }
 
@@ -376,8 +378,12 @@ export function createFixtureBackend() {
         description?: string | null;
         isFavorite?: boolean;
         appeal?: number | null;
+        salaryMin?: number | null;
+        salaryMax?: number | null;
       };
       if (typeof updates.title === "string") found.title = updates.title;
+      if ("salaryMin" in updates) found.salaryMin = updates.salaryMin ?? null;
+      if ("salaryMax" in updates) found.salaryMax = updates.salaryMax ?? null;
       if (typeof updates.companyName === "string") {
         const match = companies.find((company) => company.name === updates.companyName);
         if (match) found.companyId = match.id;

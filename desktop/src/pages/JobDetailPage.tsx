@@ -170,6 +170,8 @@ export function JobDetailPage() {
           isNewFromWatch: detail.job.isNewFromWatch,
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
+          salaryMin: detail.job.salaryMin,
+          salaryMax: detail.job.salaryMax,
         }}
         onUpdated={onUpdated}
         onDeleted={() => navigate("/")}

@@ -383,6 +383,8 @@ mod tests {
                 company_id: list_args.company.clone(),
                 posting_state: None,
                 search: list_args.search.clone(),
+                salary_min: None,
+                salary_max: None,
                 location: list_args.location.clone(),
                 new_from_watch: None,
                 is_favorite: None,
