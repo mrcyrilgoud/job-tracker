@@ -1318,6 +1318,8 @@ pub fn set_location_settings(conn: &Connection, settings: &LocationSettings) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use super::*;
     use crate::db::migrate::migrate;
     use crate::jobs::metadata::extract_job_metadata;
@@ -1326,6 +1328,57 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         migrate(&connection).unwrap();
         connection
+    }
+
+    /// Manual performance gate for the live-search query at the planned 5,000-job scale.
+    /// Run with `cargo test list_jobs_search_performance_5000_long_descriptions -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual search latency benchmark"]
+    fn list_jobs_search_performance_5000_long_descriptions() {
+        let conn = test_connection();
+        let timestamp = "2026-01-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('bench-company', 'Benchmark Co', ?1, ?1)",
+            [timestamp],
+        )
+        .unwrap();
+        let description = format!("{}", "Synthetic engineering role with detailed responsibilities and qualifications. ".repeat(110));
+        let transaction = conn.unchecked_transaction().unwrap();
+        for index in 0..5_000 {
+            let title = if index == 4_999 {
+                "Software Engineer, Sandboxing".to_string()
+            } else {
+                format!("Software Engineer {index}")
+            };
+            let id = format!("bench-job-{index}");
+            let url = format!("https://example.test/jobs/{index}");
+            transaction.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, posting_state, source, description, is_new_from_watch, missing_from_sync_count, created_at, updated_at) VALUES (?1, 'bench-company', ?2, ?3, ?3, 'wishlist', 'active', 'manual', ?4, 0, 0, ?5, ?5)",
+                params![id, title, url, description, timestamp],
+            ).unwrap();
+        }
+        transaction.commit().unwrap();
+
+        // Warm SQLite's page cache, then sample enough repeated searches to
+        // provide a stable p95 without making ordinary unit tests timing-sensitive.
+        for _ in 0..3 {
+            list_jobs(&conn, JobFilters { search: Some("sandbo".into()), ..JobFilters::default() }).unwrap();
+        }
+        let mut samples = Vec::with_capacity(20);
+        for _ in 0..20 {
+            let started = Instant::now();
+            let results = list_jobs(
+                &conn,
+                JobFilters { search: Some("sandbo".into()), ..JobFilters::default() },
+            ).unwrap();
+            samples.push(started.elapsed());
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].job.title, "Software Engineer, Sandboxing");
+        }
+        samples.sort_unstable();
+        let p95 = samples[18];
+        println!("5,000-job long-description search p95: {} ms", p95.as_millis());
+        assert!(p95 <= Duration::from_millis(100), "search p95 exceeded 100 ms: {p95:?}");
     }
 
     fn insert_watch_pending_job(

@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
@@ -33,8 +33,12 @@ import {
 
 /** How many watch discoveries the Jobs page previews before deferring to Companies. */
 const WATCH_PREVIEW_COUNT = 5;
+const SEARCH_DEBOUNCE_MS = 250;
+const SUGGESTION_MIN_LENGTH = 3;
+const MAX_SEARCH_SUGGESTIONS = 5;
 
 export function JobsPage() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status") ?? undefined;
   const companyId = searchParams.get("companyId") ?? undefined;
@@ -64,12 +68,39 @@ export function JobsPage() {
   const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
   const [liveSearch, setLiveSearch] = useState(search ?? "");
   const [appliedSearch, setAppliedSearch] = useState(search ?? "");
+  const [searchMenuOpen, setSearchMenuOpen] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
+  const [loadedRequestKey, setLoadedRequestKey] = useState("");
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
   const [jobToDelete, setJobToDelete] = useState<{ id: string; title: string; companyName: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const loadSequenceRef = useRef(0);
+  const appliedSearchRef = useRef(appliedSearch);
+  appliedSearchRef.current = appliedSearch;
+  const activeRequestKeyRef = useRef("");
+  const jobsQueueRef = useRef<{
+    running: boolean;
+    activeKey: string | null;
+    activeSequence: number | null;
+    pending: {
+      key: string;
+      sequence: number;
+      search: string;
+      quiet: boolean;
+      filters: {
+        status?: string;
+        companyId?: string;
+        postingState?: string;
+        salaryMin?: number;
+        salaryMax?: number;
+        isFavorite?: boolean;
+        isArchived?: boolean;
+      };
+    } | null;
+  }>({ running: false, activeKey: null, activeSequence: null, pending: null });
+  const lastPageFiltersKeyRef = useRef("");
   const { onRunSettled, reportRefreshFailed } = useRunMonitor();
 
   useEffect(() => {
@@ -78,81 +109,121 @@ export function JobsPage() {
   }, [postingState, search, salaryMinParam, salaryMaxParam]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setAppliedSearch(liveSearch.trim()), 180);
+    const timer = window.setTimeout(() => setAppliedSearch(liveSearch.trim()), SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [liveSearch]);
 
-  const load = useCallback(async (opts?: { quiet?: boolean }) => {
-    const requestKey = JSON.stringify({
+  const filtersKey = JSON.stringify({
       status,
       companyId,
       postingState,
-      search: appliedSearch,
       salaryMin,
       salaryMax,
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
-    });
-    const sequence = ++loadSequenceRef.current;
-    if (!opts?.quiet) {
-      setLoading(true);
+  });
+  const requestKeyFor = (searchText: string) => JSON.stringify({ filtersKey, search: searchText });
+  activeRequestKeyRef.current = requestKeyFor(appliedSearch);
+
+  const loadJobs = useCallback((searchText: string, quiet = true, force = false) => {
+    const queue = jobsQueueRef.current;
+    const key = requestKeyFor(searchText);
+    if (!force && queue.activeKey === key) {
+      queue.pending = null;
+      if (queue.activeSequence !== null) loadSequenceRef.current = queue.activeSequence;
+      return;
     }
+    if (!force && queue.pending?.key === key) return;
+    const sequence = ++loadSequenceRef.current;
+    queue.pending = {
+      key,
+      sequence,
+      search: searchText,
+      quiet,
+      filters: {
+        status,
+        companyId,
+        postingState,
+        salaryMin,
+        salaryMax,
+        isFavorite: isFavoriteFilter ? true : undefined,
+        isArchived: isArchivedFilter
+          ? true
+          : !status && !isFavoriteFilter
+            ? false
+            : undefined,
+      },
+    };
+    if (!quiet && !queue.running) setLoading(true);
     setError(null);
+    if (queue.running) return;
+
+    queue.running = true;
+    const drain = async () => {
+      try {
+        while (queue.pending) {
+          const request = queue.pending;
+          queue.pending = null;
+          queue.activeKey = request.key;
+          queue.activeSequence = request.sequence;
+          try {
+            const result = await api.listJobs({ ...request.filters, search: request.search || undefined });
+            if (request.sequence === loadSequenceRef.current && request.key === activeRequestKeyRef.current) {
+              setJobs(result.jobs);
+              setLoadedRequestKey(request.key);
+            }
+          } catch (err) {
+            if (request.sequence === loadSequenceRef.current && request.key === activeRequestKeyRef.current) {
+              const message = err instanceof Error ? err.message : "Failed to load jobs";
+              setError(message);
+              if (request.quiet) reportRefreshFailed(message);
+            }
+          } finally {
+            queue.activeKey = null;
+            queue.activeSequence = null;
+          }
+        }
+      } finally {
+        queue.running = false;
+        if (!queue.pending) setLoading(false);
+      }
+    };
+    void drain();
+  }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, filtersKey, reportRefreshFailed]);
+
+  const load = useCallback(async (opts?: { quiet?: boolean }) => {
+    const searchText = appliedSearchRef.current;
+    loadJobs(searchText, opts?.quiet ?? false, true);
     try {
-      const [listResult, dashboardResult, companiesResult, watchResult] = await Promise.all([
-        api.listJobs({
-          status,
-          companyId,
-          postingState,
-          search: appliedSearch || undefined,
-          salaryMin,
-          salaryMax,
-          isFavorite: isFavoriteFilter ? true : undefined,
-          isArchived: isArchivedFilter
-            ? true
-            : !status && !isFavoriteFilter
-              ? false
-              : undefined,
-        }),
+      const [dashboardResult, companiesResult, watchResult] = await Promise.all([
         api.getJobsDashboard(),
         api.listCompanies(),
         api.listJobs({ newFromWatch: true, limit: WATCH_PREVIEW_COUNT + 1 }),
       ]);
-      if (sequence !== loadSequenceRef.current) return;
-      if (
-        JSON.stringify({
-          status,
-          companyId,
-          postingState,
-          search: appliedSearch,
-          salaryMin,
-          salaryMax,
-          isFavorite: isFavoriteFilter,
-          isArchived: isArchivedFilter,
-        }) !== requestKey
-      ) {
-        return;
-      }
-      setJobs(listResult.jobs);
       setCounts(dashboardResult.counts);
       setActivity(dashboardResult.weeklyActivity);
       setCompanies(companiesResult.companies.map((row) => row.company));
       setNewFromWatch(watchResult.jobs);
     } catch (err) {
-      if (sequence !== loadSequenceRef.current) return;
       const message = err instanceof Error ? err.message : "Failed to load jobs";
       setError(message);
       if (opts?.quiet) reportRefreshFailed(message);
-    } finally {
-      if (sequence === loadSequenceRef.current && !opts?.quiet) {
-        setLoading(false);
-      }
     }
-  }, [status, companyId, postingState, appliedSearch, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, reportRefreshFailed]);
+  }, [loadJobs, reportRefreshFailed]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (lastPageFiltersKeyRef.current !== filtersKey) {
+      lastPageFiltersKeyRef.current = filtersKey;
+      return;
+    }
+    loadJobs(appliedSearch, true);
+  }, [appliedSearch, loadJobs, filtersKey]);
+
+  useEffect(() => setActiveSuggestionIndex(-1), [appliedSearch, filtersKey]);
 
   useEffect(() => onRunSettled(() => { void load({ quiet: true }); }), [load, onRunSettled]);
 
@@ -330,6 +401,12 @@ export function JobsPage() {
     () => filterCompaniesBySearch(companies, companySidebarSearch),
     [companies, companySidebarSearch],
   );
+  const normalizedLiveSearch = liveSearch.trim();
+  const suggestionsReady = normalizedLiveSearch.length >= SUGGESTION_MIN_LENGTH
+    && normalizedLiveSearch === appliedSearch
+    && loadedRequestKey === activeRequestKeyRef.current;
+  const suggestionMenuExpanded = searchMenuOpen && suggestionsReady;
+  const suggestions = suggestionsReady ? jobs.slice(0, MAX_SEARCH_SUGGESTIONS) : [];
 
   return (
     <>
@@ -463,19 +540,80 @@ export function JobsPage() {
 
           <div className="flex flex-wrap items-center gap-3">
             <form onSubmit={handleFilterSubmit} className="flex flex-1 flex-wrap gap-2">
-              <input
-                type="search"
-                name="search"
-                value={filterDraft.search}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setFilterDraft((current) => ({ ...current, search: value }));
-                  setLiveSearch(value);
+              <div
+                className="relative w-full max-w-xs"
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    setSearchMenuOpen(false);
+                  }
                 }}
-                placeholder="Search title, company, or posting URL…"
-                aria-label="Search jobs"
-                className="field max-w-xs"
-              />
+              >
+                <input
+                  type="search"
+                  name="search"
+                  value={filterDraft.search}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setFilterDraft((current) => ({ ...current, search: value }));
+                    setLiveSearch(value);
+                    setActiveSuggestionIndex(-1);
+                    setSearchMenuOpen(true);
+                  }}
+                  onFocus={() => setSearchMenuOpen(true)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setSearchMenuOpen(false);
+                      setActiveSuggestionIndex(-1);
+                    } else if (suggestions.length > 0 && event.key === "ArrowDown") {
+                      event.preventDefault();
+                      setSearchMenuOpen(true);
+                      setActiveSuggestionIndex((current) => (current + 1) % suggestions.length);
+                    } else if (suggestions.length > 0 && event.key === "ArrowUp") {
+                      event.preventDefault();
+                      setSearchMenuOpen(true);
+                      setActiveSuggestionIndex((current) => current <= 0 ? suggestions.length - 1 : current - 1);
+                    } else if (event.key === "Enter" && searchMenuOpen && suggestionsReady) {
+                      event.preventDefault();
+                      const selected = suggestions[Math.max(activeSuggestionIndex, 0)];
+                      if (selected) navigate(`/jobs/${selected.job.id}`);
+                    }
+                  }}
+                  placeholder="Search title, company, or posting URL…"
+                  aria-label="Search jobs"
+                  aria-autocomplete="list"
+                  aria-expanded={suggestionMenuExpanded}
+                  aria-controls="job-search-suggestions"
+                  aria-activedescendant={suggestionMenuExpanded && activeSuggestionIndex >= 0 ? `job-search-option-${activeSuggestionIndex}` : undefined}
+                  className="field w-full"
+                />
+                {suggestionMenuExpanded ? (
+                  <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
+                    <ul id="job-search-suggestions" role="listbox" aria-label="Matching jobs" className="max-h-80 overflow-y-auto py-1">
+                      {suggestions.map((item, index) => (
+                        <li key={item.job.id}>
+                          <button
+                            id={`job-search-option-${index}`}
+                            type="button"
+                            role="option"
+                            aria-selected={index === activeSuggestionIndex}
+                            className={`block w-full px-3 py-2 text-left ${index === activeSuggestionIndex ? "bg-[var(--accent-soft)]" : "hover:bg-[var(--surface-muted)]"}`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onMouseEnter={() => setActiveSuggestionIndex(index)}
+                            onClick={() => navigate(`/jobs/${item.job.id}`)}
+                          >
+                            <span className="block truncate text-sm font-medium text-[var(--foreground)]">{item.job.title}</span>
+                            <span className="block truncate text-xs text-[var(--muted)]">{item.companyName}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    {suggestions.length === 0 ? (
+                      <p role="status" className="px-3 py-2 text-sm text-[var(--muted)]">No matching jobs</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               <label className="sr-only" htmlFor="salary-min">Minimum annual salary in USD</label>
               <input
                 id="salary-min"
