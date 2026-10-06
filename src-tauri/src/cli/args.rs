@@ -96,7 +96,7 @@ pub struct ListArgs {
     #[arg(
         short = 's',
         long,
-        help = "Search text across title, company, notes, description, URL"
+        help = "Search text across role, company, location, careers URL, and job notes/history"
     )]
     pub search: Option<String>,
 
@@ -306,6 +306,13 @@ pub enum WatchCommands {
 
 #[derive(Debug, Args)]
 pub struct WatchListArgs {
+    #[arg(
+        short = 's',
+        long,
+        help = "Search text across role, company, location, careers URL, and job notes/history"
+    )]
+    pub search: Option<String>,
+
     #[arg(long, help = "Show only new/pending review watch positions")]
     pub new_only: bool,
 

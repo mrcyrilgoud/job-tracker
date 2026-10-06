@@ -620,6 +620,18 @@ fn load_watch_positions(conn: &Connection, args: WatchListArgs) -> AppResult<Vec
         values.push(Box::new(prov.to_lowercase()));
     }
 
+    if let Some(search) = &args.search {
+        sql.push_str(
+            " AND (j.title LIKE ? OR c.name LIKE ? OR j.url LIKE ? OR j.notes LIKE ? OR \
+             j.description LIKE ? OR j.location LIKE ? OR c.careers_url LIKE ? OR \
+             EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.note LIKE ?))",
+        );
+        let pattern = format!("%{search}%");
+        for _ in 0..8 {
+            values.push(Box::new(pattern.clone()));
+        }
+    }
+
     if args.dismissed {
         sql.push_str(" AND j.watch_disposition = 'dismissed'");
     } else if args.new_only {
@@ -699,6 +711,7 @@ pub async fn handle_watches(
                 all: false,
                 provider: None,
                 company: None,
+                search: None,
                 limit: None,
             };
             handle_watch_list(conn, default_args, json)?;
@@ -805,6 +818,7 @@ mod tests {
                 all: true,
                 provider: None,
                 company: None,
+                search: None,
                 limit: None,
             },
         )
@@ -817,5 +831,85 @@ mod tests {
             Some("Build distributed systems")
         );
         assert_eq!(positions[0].job.location.as_deref(), Some("Remote"));
+    }
+
+    #[test]
+    fn list_and_watch_search_cover_location_careers_url_and_job_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let company_id = create_id();
+        let job_id = create_id();
+        let timestamp = now_iso();
+
+        conn.execute(
+            "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES (?1, 'Acme', 'https://careers.acme.example/jobs', ?2, ?2)",
+            params![company_id, timestamp],
+        )
+        .unwrap();
+        conn.execute(
+            r#"INSERT INTO jobs (
+                id, company_id, title, url, canonical_url, status, posting_state, source,
+                description, location, is_new_from_watch, watch_disposition,
+                missing_from_sync_count, is_favorite, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, 'Platform Engineer', 'https://example.com/jobs/1',
+                'https://example.com/jobs/1', 'wishlist', 'active', 'greenhouse',
+                'Build distributed systems', 'Remote - North America', 1, 'new', 0, 0, ?3, ?3
+            )"#,
+            params![job_id, company_id, timestamp],
+        )
+        .unwrap();
+        for event_id in [create_id(), create_id()] {
+            conn.execute(
+                "INSERT INTO job_events (id, job_id, type, note, occurred_at) VALUES (?1, ?2, 'note_added', 'Recruiter mentioned special historical milestone', ?3)",
+                params![event_id, job_id, timestamp],
+            )
+            .unwrap();
+        }
+
+        for search_term in ["North America", "careers.acme", "historical milestone"] {
+            let tracked = crate::jobs::service::list_jobs(
+                &conn,
+                crate::jobs::service::JobFilters {
+                    search: Some(search_term.to_string()),
+                    new_from_watch: Some(true),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(tracked.len(), 1, "tracked search term: {search_term}");
+            assert_eq!(tracked[0].job.id, job_id);
+
+            let watched = load_watch_positions(
+                &conn,
+                WatchListArgs {
+                    new_only: true,
+                    dismissed: false,
+                    all: false,
+                    provider: Some("greenhouse".to_string()),
+                    company: Some("Acme".to_string()),
+                    search: Some(search_term.to_string()),
+                    limit: Some(1),
+                },
+            )
+            .unwrap();
+            assert_eq!(watched.len(), 1, "watch search term: {search_term}");
+            assert_eq!(watched[0].job.id, job_id);
+        }
+
+        let empty = load_watch_positions(
+            &conn,
+            WatchListArgs {
+                new_only: true,
+                dismissed: false,
+                all: false,
+                provider: None,
+                company: None,
+                search: Some("no matching posting".to_string()),
+                limit: None,
+            },
+        )
+        .unwrap();
+        assert!(empty.is_empty());
     }
 }

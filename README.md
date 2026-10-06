@@ -151,6 +151,8 @@ npm run cli:install
 # List & search (agents: always add --json)
 jt list --status interviewing
 jt list --search "Staff" --favorites --json
+jt list --search "Remote" --json                 # Also searches location, careers URL, and job history
+jt watches list --search "distributed systems" --new-only --json
 
 # Pipeline overview
 jt stats --json

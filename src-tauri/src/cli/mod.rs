@@ -122,6 +122,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_watch_list_search_arg() {
+        let cli = Cli::try_parse_from([
+            "job-tracker",
+            "watches",
+            "list",
+            "--search",
+            "distributed systems",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Watches(WatchesArgs {
+                command: Some(WatchCommands::List(args)),
+            })) => assert_eq!(args.search.as_deref(), Some("distributed systems")),
+            _ => panic!("Expected watches list command"),
+        }
+    }
+
+    #[test]
     fn parses_add_args() {
         let cli = Cli::try_parse_from([
             "job-tracker",

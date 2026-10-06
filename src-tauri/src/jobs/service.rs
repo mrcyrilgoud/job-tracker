@@ -355,14 +355,14 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
     if let Some(search) = &filters.search {
         sql.push_str(
-            " AND (j.title LIKE ? OR c.name LIKE ? OR j.url LIKE ? OR j.notes LIKE ? OR j.description LIKE ?)",
+            " AND (j.title LIKE ? OR c.name LIKE ? OR j.url LIKE ? OR j.notes LIKE ? OR \
+             j.description LIKE ? OR j.location LIKE ? OR c.careers_url LIKE ? OR \
+             EXISTS (SELECT 1 FROM job_events e WHERE e.job_id = j.id AND e.note LIKE ?))",
         );
         let pattern = format!("%{search}%");
-        values.push(Box::new(pattern.clone()));
-        values.push(Box::new(pattern.clone()));
-        values.push(Box::new(pattern.clone()));
-        values.push(Box::new(pattern.clone()));
-        values.push(Box::new(pattern));
+        for _ in 0..8 {
+            values.push(Box::new(pattern.clone()));
+        }
     }
 
     if filters.salary_min.is_some() || filters.salary_max.is_some() {
