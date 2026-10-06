@@ -34,13 +34,13 @@ export function DocumentsClient({ onImported }: { onImported: () => void }) {
   return (
     <div className="card space-y-3 p-5">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="btn btn-secondary cursor-pointer">
+        <label className="btn btn-secondary cursor-pointer focus-within:ring-2 focus-within:ring-[var(--accent)] focus-within:ring-offset-2">
           {file ? file.name : "Choose a file"}
           <input
             type="file"
             accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="hidden"
+            className="sr-only"
           />
         </label>
         <button

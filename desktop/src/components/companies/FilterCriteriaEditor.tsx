@@ -154,15 +154,14 @@ export function FilterCriteriaEditor({
 
       <fieldset className="space-y-1.5">
         <legend className="field-label">Remote</legend>
-        <div className="flex flex-wrap gap-2" data-testid="remote-mode" role="radiogroup" aria-label="Remote mode">
+        <div className="flex flex-wrap gap-2" data-testid="remote-mode" role="group" aria-label="Remote mode">
           {REMOTE_OPTIONS.map((option) => {
             const active = value.remote === option.value;
             return (
               <button
                 key={option.value}
                 type="button"
-                role="radio"
-                aria-checked={active}
+                aria-pressed={active}
                 className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
                 onClick={() => setRemote(option.value)}
               >
@@ -277,15 +276,14 @@ function MatchModeToggle({ label, testId, value, onChange }: MatchModeToggleProp
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-xs text-[var(--muted)]">{label}</span>
-      <div className="flex gap-1.5" data-testid={testId} role="radiogroup" aria-label={label}>
+      <div className="flex gap-1.5" data-testid={testId} role="group" aria-label={label}>
         {options.map((option) => {
           const active = value === option.value;
           return (
             <button
               key={option.value}
               type="button"
-              role="radio"
-              aria-checked={active}
+              aria-pressed={active}
               className={`btn btn-sm ${active ? "btn-primary" : "btn-secondary"}`}
               onClick={() => onChange(option.value)}
             >

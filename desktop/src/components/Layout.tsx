@@ -103,7 +103,7 @@ export function Layout() {
         <Outlet />
       </main>
       <footer className="mt-12 text-center text-xs text-[var(--faint)]">
-        Stored locally on your Mac · nothing leaves your machine
+        Your tracker data is stored locally on your Mac
       </footer>
     </div>
   );

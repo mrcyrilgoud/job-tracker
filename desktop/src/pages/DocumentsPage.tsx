@@ -10,7 +10,17 @@ export function DocumentsPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
   const sequenceRef = useRef(0);
+
+  async function openDocument(documentId: string) {
+    setOpenError(null);
+    try {
+      await api.openDocument(documentId);
+    } catch (err) {
+      setOpenError(err instanceof Error ? err.message : "Failed to open document");
+    }
+  }
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const sequence = ++sequenceRef.current;
@@ -64,6 +74,11 @@ export function DocumentsPage() {
           {error}
         </p>
       ) : null}
+      {openError ? (
+        <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+          {openError}
+        </p>
+      ) : null}
 
       {!initialLoading && documents.length === 0 ? (
         <div className="card px-6 py-16 text-center">
@@ -93,7 +108,7 @@ export function DocumentsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => void api.openDocument(doc.id)}
+                    onClick={() => void openDocument(doc.id)}
                     className="shrink-0 text-sm font-medium text-[var(--accent)] hover:underline"
                   >
                     Open

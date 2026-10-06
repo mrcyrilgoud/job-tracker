@@ -266,6 +266,7 @@ export function JobsPage() {
     } catch (err) {
       // Revert on error
       await load({ quiet: true });
+      setError(err instanceof Error ? err.message : "Failed to update favorite");
     } finally {
       setTogglingFavId(null);
     }
@@ -285,7 +286,8 @@ export function JobsPage() {
           item.job.id === jobId ? { ...item, job: res.detail.job } : item,
         ),
       );
-    } catch {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update appeal score");
       setJobs((prev) =>
         prev.map((item) =>
           item.job.id === jobId ? { ...item, job: { ...item.job, appeal: previous } } : item,
@@ -304,8 +306,9 @@ export function JobsPage() {
     try {
       await api.updateJob(jobId, { status: nextStatus });
       await load({ quiet: true });
-    } catch {
+    } catch (err) {
       await load({ quiet: true });
+      setError(err instanceof Error ? err.message : "Failed to update job status");
     }
   }
 
@@ -741,8 +744,8 @@ export function JobsPage() {
             </section>
           ) : null}
 
-          {error && jobs.length === 0 ? (
-            <p className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+          {error ? (
+            <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
               {error}
             </p>
           ) : loading && jobs.length === 0 ? (

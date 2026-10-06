@@ -21,10 +21,20 @@ export function JobDetailPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documentError, setDocumentError] = useState<string | null>(null);
   const sequenceRef = useRef(0);
   const idRef = useRef(id);
   idRef.current = id;
   const { onRunSettled, reportRefreshFailed } = useRunMonitor();
+
+  async function openDocument(documentId: string) {
+    setDocumentError(null);
+    try {
+      await api.openDocument(documentId);
+    } catch (err) {
+      setDocumentError(err instanceof Error ? err.message : "Failed to open document");
+    }
+  }
 
   const loadDetail = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!id) return;
@@ -181,6 +191,11 @@ export function JobDetailPage() {
         <section className="card p-6">
           <h2 className="mb-4 font-display text-lg font-medium">Documents</h2>
           <div className="space-y-3">
+            {documentError ? (
+              <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
+                {documentError}
+              </p>
+            ) : null}
             {detail.attached.length === 0 ? (
               <p className="text-sm text-[var(--muted)]">
                 Nothing attached yet. Add a resume or cover letter below.
@@ -203,7 +218,7 @@ export function JobDetailPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => void api.openDocument(document.id)}
+                    onClick={() => void openDocument(document.id)}
                     className="shrink-0 text-sm font-medium text-[var(--accent)] hover:underline"
                   >
                     Open

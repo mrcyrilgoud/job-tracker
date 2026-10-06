@@ -90,9 +90,9 @@ export function RunPanel() {
             className="run-progress-bar h-1.5"
             role="progressbar"
             aria-valuemin={0}
-            aria-valuemax={total}
-            aria-valuenow={vm.completed}
-            aria-label={`${vm.completed} of ${total} complete`}
+            aria-valuemax={Math.max(1, total)}
+            aria-valuenow={total > 0 ? vm.completed : undefined}
+            aria-label={total > 0 ? `${vm.completed} of ${total} complete` : "Waiting for work"}
           >
             <div className="run-progress-fill" style={{ width: `${pct}%` }} />
           </div>

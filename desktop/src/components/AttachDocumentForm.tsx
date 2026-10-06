@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 import { documentKinds, type DocumentKind } from "@/lib/schema";
@@ -23,6 +23,10 @@ export function AttachDocumentForm({
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!documentId && library.length > 0) setDocumentId(library[0].id);
+  }, [documentId, library]);
 
   async function attachExisting() {
     if (!documentId) return;
@@ -100,13 +104,13 @@ export function AttachDocumentForm({
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="btn btn-secondary cursor-pointer">
+        <label className="btn btn-secondary cursor-pointer focus-within:ring-2 focus-within:ring-[var(--accent)] focus-within:ring-offset-2">
           {file ? file.name : "Upload new"}
           <input
             type="file"
             accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="hidden"
+            className="sr-only"
           />
         </label>
         <button

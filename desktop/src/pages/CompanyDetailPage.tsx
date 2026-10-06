@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { CompanyCard } from "@/components/companies/CompanyCard";
@@ -19,9 +19,16 @@ export function CompanyDetailPage() {
   const [openPositions, setOpenPositions] = useState<JobListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestSequenceRef = useRef(0);
+  const requestedCompanyIdRef = useRef<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!id) return;
+    const sequence = ++requestSequenceRef.current;
+    if (requestedCompanyIdRef.current !== id) {
+      requestedCompanyIdRef.current = id;
+      setLoaded(false);
+    }
     setError(null);
     try {
       const [companyResult, roleResult, positionsResult] = await Promise.all([
@@ -29,18 +36,23 @@ export function CompanyDetailPage() {
         api.listJobs({ companyId: id, newFromWatch: true }),
         api.listOpenWatchPositions(id),
       ]);
+      if (sequence !== requestSequenceRef.current) return;
       setRow(companyResult.companies.find((candidate) => candidate.company.id === id) ?? null);
       setNewRoles(roleResult.jobs);
       setOpenPositions(positionsResult.positions);
     } catch (err) {
+      if (sequence !== requestSequenceRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load company");
     } finally {
-      setLoaded(true);
+      if (sequence === requestSequenceRef.current) setLoaded(true);
     }
   }, [id]);
 
   useEffect(() => {
     void load();
+    return () => {
+      requestSequenceRef.current += 1;
+    };
   }, [load]);
 
   const actions = useCompanyActions(() => void load());
