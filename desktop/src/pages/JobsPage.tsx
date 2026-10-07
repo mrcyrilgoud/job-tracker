@@ -69,6 +69,7 @@ export function JobsPage() {
   const [liveSearch, setLiveSearch] = useState(search ?? "");
   const [appliedSearch, setAppliedSearch] = useState(search ?? "");
   const [searchMenuOpen, setSearchMenuOpen] = useState(false);
+  const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [loadedRequestKey, setLoadedRequestKey] = useState("");
   const [triagingId, setTriagingId] = useState<string | null>(null);
@@ -76,6 +77,9 @@ export function JobsPage() {
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
   const [jobToDelete, setJobToDelete] = useState<{ id: string; title: string; companyName: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const filterButtonRef = useRef<HTMLButtonElement>(null);
+  const filterPopoverRef = useRef<HTMLDivElement>(null);
+  const salaryMinInputRef = useRef<HTMLInputElement>(null);
   const loadSequenceRef = useRef(0);
   const appliedSearchRef = useRef(appliedSearch);
   appliedSearchRef.current = appliedSearch;
@@ -107,6 +111,34 @@ export function JobsPage() {
     setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
     setLiveSearch(search ?? "");
   }, [postingState, search, salaryMinParam, salaryMaxParam]);
+
+  useEffect(() => {
+    if (!filterPopoverOpen) return;
+
+    setSearchMenuOpen(false);
+    salaryMinInputRef.current?.focus();
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (filterPopoverRef.current?.contains(target) || filterButtonRef.current?.contains(target)) return;
+      setFilterPopoverOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setFilterPopoverOpen(false);
+      filterButtonRef.current?.focus();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [filterPopoverOpen]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setAppliedSearch(liveSearch.trim()), SEARCH_DEBOUNCE_MS);
@@ -378,6 +410,17 @@ export function JobsPage() {
         : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
 
   const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter);
+  const hasDraftFilters = Boolean(
+    filterDraft.search.trim()
+    || filterDraft.postingState
+    || filterDraft.salaryMin.trim()
+    || filterDraft.salaryMax.trim()
+    || status
+    || companyId
+    || isFavoriteFilter
+    || isArchivedFilter,
+  );
+  const activeFilterCount = Number(salaryMin !== undefined || salaryMax !== undefined) + Number(Boolean(postingState));
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -396,6 +439,10 @@ export function JobsPage() {
     if (nextSalaryMax) next.set("salaryMax", nextSalaryMax);
     if (viewMode) next.set("view", viewMode);
     setSearchParams(next);
+    if (filterPopoverOpen) {
+      setFilterPopoverOpen(false);
+      filterButtonRef.current?.focus();
+    }
   }
 
   const activeJobsCount = Math.max(0, (counts.all ?? 0) - (counts.archivedTotal ?? 0));
@@ -541,10 +588,10 @@ export function JobsPage() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <form onSubmit={handleFilterSubmit} className="flex flex-1 flex-wrap gap-2">
+          <div className="flex items-center">
+            <form onSubmit={handleFilterSubmit} className="flex w-full flex-wrap items-center gap-2">
               <div
-                className="relative w-full max-w-xs"
+                className="relative min-w-0 w-full max-w-sm flex-1"
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                     setSearchMenuOpen(false);
@@ -562,7 +609,10 @@ export function JobsPage() {
                     setActiveSuggestionIndex(-1);
                     setSearchMenuOpen(true);
                   }}
-                  onFocus={() => setSearchMenuOpen(true)}
+                  onFocus={() => {
+                    setFilterPopoverOpen(false);
+                    setSearchMenuOpen(true);
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") {
                       event.preventDefault();
@@ -588,8 +638,21 @@ export function JobsPage() {
                   aria-expanded={suggestionMenuExpanded}
                   aria-controls="job-search-suggestions"
                   aria-activedescendant={suggestionMenuExpanded && activeSuggestionIndex >= 0 ? `job-search-option-${activeSuggestionIndex}` : undefined}
-                  className="field w-full"
+                  className="field jobs-search-field w-full"
                 />
+                <svg
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="10.8" cy="10.8" r="6.3" />
+                  <path d="m16 16 4.2 4.2" />
+                </svg>
                 {suggestionMenuExpanded ? (
                   <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-md)]">
                     <ul id="job-search-suggestions" role="listbox" aria-label="Matching jobs" className="max-h-80 overflow-y-auto py-1">
@@ -617,49 +680,97 @@ export function JobsPage() {
                   </div>
                 ) : null}
               </div>
-              <label className="sr-only" htmlFor="salary-min">Minimum annual salary in USD</label>
-              <input
-                id="salary-min"
-                type="number"
-                min="0"
-                step="1000"
-                inputMode="numeric"
-                value={filterDraft.salaryMin}
-                onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMin: event.target.value }))}
-                placeholder="Min salary / year"
-                className="field w-40"
-              />
-              <label className="sr-only" htmlFor="salary-max">Maximum annual salary in USD</label>
-              <input
-                id="salary-max"
-                type="number"
-                min="0"
-                step="1000"
-                inputMode="numeric"
-                value={filterDraft.salaryMax}
-                onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMax: event.target.value }))}
-                placeholder="Max salary / year"
-                className="field w-40"
-              />
-              <select
-                name="postingState"
-                value={filterDraft.postingState}
-                onChange={(event) => setFilterDraft((current) => ({ ...current, postingState: event.target.value }))}
-                aria-label="Posting status"
-                className="field max-w-[160px]"
-              >
-                <option value="">All postings</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-              <button type="submit" className="btn btn-secondary">
-                Filter
-              </button>
-              {isFiltered ? (
-                <Link to="/" className="btn btn-ghost">
-                  Clear
-                </Link>
-              ) : null}
+              <div className="relative shrink-0">
+                <button
+                  ref={filterButtonRef}
+                  type="button"
+                  className={`btn btn-secondary btn-sm ${filterPopoverOpen || activeFilterCount > 0 ? "border-[var(--accent)] text-[var(--accent-ink)]" : ""}`}
+                  aria-label={activeFilterCount > 0 ? `Filters, ${activeFilterCount} active` : "Filters"}
+                  aria-haspopup="dialog"
+                  aria-expanded={filterPopoverOpen}
+                  aria-controls="jobs-filter-popover"
+                  onClick={() => setFilterPopoverOpen((open) => !open)}
+                >
+                  Filters
+                  {activeFilterCount > 0 ? (
+                    <span aria-hidden="true" className="ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--accent-soft)] px-1.5 py-0.5 text-[0.6875rem] font-semibold leading-none text-[var(--accent-ink)]">
+                      {activeFilterCount}
+                    </span>
+                  ) : null}
+                </button>
+                {filterPopoverOpen ? (
+                  <div
+                    id="jobs-filter-popover"
+                    ref={filterPopoverRef}
+                    role="dialog"
+                    aria-modal="false"
+                    aria-labelledby="jobs-filter-heading"
+                    className="jobs-filter-popover absolute right-0 top-full z-30 mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-md)]"
+                  >
+                    <h2 id="jobs-filter-heading" className="mb-4 text-sm font-semibold text-[var(--foreground)]">Filters</h2>
+                    <fieldset>
+                      <legend className="field-label">Salary per year (USD)</legend>
+                      <div className="grid grid-cols-2 gap-3">
+                        <label htmlFor="salary-min" className="text-xs font-medium text-[var(--muted)]">
+                          Minimum
+                          <input
+                            ref={salaryMinInputRef}
+                            id="salary-min"
+                            type="number"
+                            min="0"
+                            step="1000"
+                            inputMode="numeric"
+                            value={filterDraft.salaryMin}
+                            onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMin: event.target.value }))}
+                            placeholder="No minimum"
+                            className="field mt-1.5 text-sm"
+                          />
+                        </label>
+                        <label htmlFor="salary-max" className="text-xs font-medium text-[var(--muted)]">
+                          Maximum
+                          <input
+                            id="salary-max"
+                            type="number"
+                            min="0"
+                            step="1000"
+                            inputMode="numeric"
+                            value={filterDraft.salaryMax}
+                            onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMax: event.target.value }))}
+                            placeholder="No maximum"
+                            className="field mt-1.5 text-sm"
+                          />
+                        </label>
+                      </div>
+                    </fieldset>
+                    <label htmlFor="posting-state" className="field-label mt-4">Posting status</label>
+                    <select
+                      id="posting-state"
+                      name="postingState"
+                      value={filterDraft.postingState}
+                      onChange={(event) => setFilterDraft((current) => ({ ...current, postingState: event.target.value }))}
+                      className="field text-sm"
+                    >
+                      <option value="">All postings</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                    <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-3">
+                      {isFiltered || hasDraftFilters ? (
+                        <Link
+                          to="/"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setFilterPopoverOpen(false)}
+                        >
+                          Clear all
+                        </Link>
+                      ) : <span />}
+                      <button type="submit" className="btn btn-secondary btn-sm">
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </form>
 
           </div>

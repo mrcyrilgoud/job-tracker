@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { JobListItem } from "@/lib/schema";
@@ -47,7 +47,13 @@ function makeJob(id: string, title: string, companyName = "Thinking Machines Lab
 
 function Location() {
   const location = useLocation();
-  return createElement("output", { "data-testid": "location" }, location.pathname);
+  const navigate = useNavigate();
+  return createElement("div", null,
+    createElement("output", { "data-testid": "location" }, location.pathname),
+    createElement("output", { "data-testid": "location-search" }, location.search),
+    createElement("button", { type: "button", "data-testid": "history-back", onClick: () => navigate(-1) }, "Back"),
+    createElement("button", { type: "button", "data-testid": "history-forward", onClick: () => navigate(1) }, "Forward"),
+  );
 }
 
 describe("JobsPage live search suggestions", () => {
@@ -75,12 +81,15 @@ describe("JobsPage live search suggestions", () => {
     vi.useRealTimers();
   });
 
-  async function mount() {
+  async function mount(initialEntry = "/") {
     await act(async () => {
-      root.render(createElement(MemoryRouter, { initialEntries: ["/"] }, createElement(Routes, null,
-        createElement(Route, { path: "/", element: createElement(JobsPage) }),
-        createElement(Route, { path: "/jobs/:id", element: createElement(Location) }),
-      )));
+      root.render(createElement(MemoryRouter, { initialEntries: [initialEntry] },
+        createElement(Location),
+        createElement(Routes, null,
+          createElement(Route, { path: "/", element: createElement(JobsPage) }),
+          createElement(Route, { path: "/jobs/:id", element: createElement("p", null, "Job details") }),
+        ),
+      ));
       await Promise.resolve();
     });
     await act(async () => { await Promise.resolve(); });
@@ -90,6 +99,12 @@ describe("JobsPage live search suggestions", () => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
     setter?.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function selectValue(select: HTMLSelectElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+    setter?.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   it("waits for the debounce and renders matching suggestions from the filtered jobs response", async () => {
@@ -212,5 +227,79 @@ describe("JobsPage live search suggestions", () => {
     expect(peakInFlight).toBe(1);
     expect(host.textContent).toContain("Latest result");
     expect(host.textContent).not.toContain("Stale result");
+  });
+
+  it("keeps filter drafts on dismiss and applies them while preserving the current jobs scope", async () => {
+    await mount("/?search=engineer&status=applied&companyId=company-1&view=board&salaryMin=100000&salaryMax=200000&postingState=active");
+    const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Filters, 2 active"]')!;
+    expect(trigger.textContent).toContain("2");
+
+    await act(async () => trigger.click());
+    const popover = host.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="jobs-filter-heading"]')!;
+    const minimum = popover.querySelector<HTMLInputElement>("#salary-min")!;
+    const posting = popover.querySelector<HTMLSelectElement>("#posting-state")!;
+    expect(minimum.value).toBe("100000");
+    expect(popover.querySelector<HTMLInputElement>("#salary-max")?.value).toBe("200000");
+    expect(popover.querySelector<HTMLSelectElement>("#posting-state")?.value).toBe("active");
+
+    await act(async () => {
+      typeInto(minimum, "125000");
+      selectValue(posting, "");
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-label")).toBe("Filters, 2 active");
+
+    await act(async () => trigger.click());
+    expect(host.querySelector<HTMLInputElement>("#salary-min")?.value).toBe("125000");
+    expect(host.querySelector<HTMLSelectElement>("#posting-state")?.value).toBe("");
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click();
+      await Promise.resolve();
+    });
+
+    const applied = new URLSearchParams(host.querySelector('[data-testid="location-search"]')?.textContent ?? "");
+    expect(applied.get("search")).toBe("engineer");
+    expect(applied.get("salaryMin")).toBe("125000");
+    expect(applied.get("salaryMax")).toBe("200000");
+    expect(applied.get("postingState")).toBeNull();
+    expect(applied.get("status")).toBe("applied");
+    expect(applied.get("companyId")).toBe("company-1");
+    expect(applied.get("view")).toBe("board");
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="Filters, 1 active"]')).not.toBeNull();
+
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="history-back"]')!.click());
+    expect(host.querySelector<HTMLInputElement>("#salary-min")).toBeNull();
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="Filters, 2 active"]')).not.toBeNull();
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="history-forward"]')!.click());
+    await act(async () => trigger.click());
+    expect(host.querySelector<HTMLInputElement>("#salary-min")?.value).toBe("125000");
+    expect(host.querySelector<HTMLSelectElement>("#posting-state")?.value).toBe("");
+  });
+
+  it("closes on outside click, keeps drafts, and Clear all resets the full jobs view", async () => {
+    await mount("/?search=engineer&status=applied&companyId=company-1&view=board&salaryMin=100000&postingState=active");
+    const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Filters, 2 active"]')!;
+
+    await act(async () => trigger.click());
+    const maximum = host.querySelector<HTMLInputElement>("#salary-max")!;
+    await act(async () => {
+      typeInto(maximum, "180000");
+      document.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    await act(async () => trigger.click());
+    expect(host.querySelector<HTMLInputElement>("#salary-max")?.value).toBe("180000");
+    await act(async () => {
+      host.querySelector<HTMLAnchorElement>('[role="dialog"] a')!.click();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(host.querySelector('[data-testid="location"]')?.textContent).toBe("/");
+    expect(host.querySelector('[data-testid="location-search"]')?.textContent).toBe("");
+    expect(host.querySelector<HTMLButtonElement>('button[aria-label="Filters"]')?.textContent).toBe("Filters");
   });
 });

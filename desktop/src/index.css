@@ -127,6 +127,14 @@ button {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.jobs-search-field {
+  padding-left: 2.5rem;
+}
+
+.jobs-filter-popover {
+  width: min(22rem, calc(100vw - 2rem));
+}
+
 .field::placeholder {
   color: var(--faint);
 }
