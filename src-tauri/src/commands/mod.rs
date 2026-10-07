@@ -34,12 +34,14 @@ use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::posting_check::fetch::HttpPostingFetcher;
 use crate::jobs::service::{
     approve_watch_job, archive_job, create_job_from_url_with_careers,
-    delete_job as delete_job_service, dismiss_watch_job, get_job_detail, get_location_settings,
-    get_pipeline_counts, get_watch_role_keywords as service_get_keywords, get_weekly_activity,
-    list_jobs, list_open_watch_positions, reset_dismissed_watch_job, resolve_title_from_url,
+    delete_job as delete_job_service, delete_jobs as delete_jobs_service, dismiss_watch_job,
+    get_job_detail, get_location_settings, get_pipeline_counts,
+    get_watch_role_keywords as service_get_keywords, get_weekly_activity, list_jobs,
+    list_open_watch_positions, reset_dismissed_watch_job, resolve_title_from_url,
     save_open_watch_job, set_job_favorite, set_location_settings,
     set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
-    update_job, JobFilters, LocationSettings, UpdateJobInput,
+    unarchive_jobs as unarchive_jobs_service, update_job, JobFilters, LocationSettings,
+    UpdateJobInput,
 };
 use crate::runner::try_lock_runner;
 use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
@@ -507,6 +509,32 @@ mod tests {
         );
         assert_eq!(row_counts(&state), (0, 0, 0));
     }
+
+    #[test]
+    fn successful_batch_marks_csv_dirty_once_and_failed_batch_does_not_mark_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dirty_marks = AtomicUsize::new(0);
+        let result = mark_csv_dirty_after_batch(
+            Ok(3usize),
+            |count| *count > 0,
+            || {
+                dirty_marks.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        assert_eq!(result.unwrap(), 3);
+        assert_eq!(dirty_marks.load(Ordering::SeqCst), 1);
+
+        let result = mark_csv_dirty_after_batch(
+            Err(crate::error::AppError::from("batch failed")),
+            |_count: &usize| true,
+            || {
+                dirty_marks.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(dirty_marks.load(Ordering::SeqCst), 1);
+    }
 }
 
 #[tauri::command]
@@ -542,6 +570,19 @@ pub async fn delete_job(state: State<'_, AppState>, id: String) -> AppResult<ser
 }
 
 #[tauri::command]
+pub async fn delete_jobs(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> AppResult<serde_json::Value> {
+    let deleted_count = mark_csv_dirty_after_batch(
+        state.with_db_tx(|conn| delete_jobs_service(conn, &ids)),
+        |count| *count > 0,
+        || state.csv_export.mark_dirty(),
+    )?;
+    Ok(serde_json::json!({ "success": true, "deletedCount": deleted_count }))
+}
+
+#[tauri::command]
 pub async fn archive_job_cmd(
     state: State<'_, AppState>,
     id: String,
@@ -566,6 +607,31 @@ pub async fn unarchive_job_cmd(
     })?;
     state.csv_export.mark_dirty();
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn unarchive_jobs(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> AppResult<serde_json::Value> {
+    let restored_count = mark_csv_dirty_after_batch(
+        state.with_db_tx(|conn| unarchive_jobs_service(conn, &ids)),
+        |count| *count > 0,
+        || state.csv_export.mark_dirty(),
+    )?;
+    Ok(serde_json::json!({ "success": true, "restoredCount": restored_count }))
+}
+
+fn mark_csv_dirty_after_batch<T>(
+    result: AppResult<T>,
+    changed: impl FnOnce(&T) -> bool,
+    mark_dirty: impl FnOnce(),
+) -> AppResult<T> {
+    let value = result?;
+    if changed(&value) {
+        mark_dirty();
+    }
+    Ok(value)
 }
 
 #[tauri::command]

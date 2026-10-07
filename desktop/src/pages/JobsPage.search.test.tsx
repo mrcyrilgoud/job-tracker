@@ -10,6 +10,9 @@ const apiMocks = vi.hoisted(() => ({
   listJobs: vi.fn(),
   getJobsDashboard: vi.fn(),
   listCompanies: vi.fn(),
+  deleteJob: vi.fn(),
+  deleteJobs: vi.fn(),
+  unarchiveJobs: vi.fn(),
   reportRefreshFailed: vi.fn(),
   onRunSettled: vi.fn(() => () => {}),
 }));
@@ -45,6 +48,41 @@ function makeJob(id: string, title: string, companyName = "Thinking Machines Lab
   } as JobListItem;
 }
 
+function makeArchivedJob(
+  id: string,
+  title: string,
+  status: JobListItem["job"]["status"] = "archived",
+): JobListItem {
+  const item = makeJob(id, title);
+  return { ...item, job: { ...item.job, status } };
+}
+
+function setupArchivedRows(rows: JobListItem[]) {
+  let currentRows = rows;
+  apiMocks.listJobs.mockImplementation(async (filters?: {
+    newFromWatch?: boolean;
+    isArchived?: boolean;
+    search?: string;
+  }) => {
+    if (filters?.newFromWatch) return { jobs: [] };
+    const matchingRows = filters?.isArchived ? currentRows : [makeJob("sandbox-role", "Software Engineer, Sandboxing")];
+    const query = filters?.search?.toLowerCase();
+    return {
+      jobs: query ? matchingRows.filter(({ job, companyName }) =>
+        `${job.title} ${companyName}`.toLowerCase().includes(query)) : matchingRows,
+    };
+  });
+  apiMocks.unarchiveJobs.mockImplementation(async (ids: string[]) => {
+    currentRows = currentRows.filter((item) => !ids.includes(item.job.id));
+    return { success: true, restoredCount: ids.length };
+  });
+  apiMocks.deleteJobs.mockImplementation(async (ids: string[]) => {
+    currentRows = currentRows.filter((item) => !ids.includes(item.job.id));
+    return { success: true, deletedCount: ids.length };
+  });
+  return { getRows: () => currentRows };
+}
+
 function Location() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -65,7 +103,13 @@ describe("JobsPage live search suggestions", () => {
     apiMocks.listJobs.mockReset();
     apiMocks.getJobsDashboard.mockReset();
     apiMocks.listCompanies.mockReset();
-    apiMocks.listJobs.mockImplementation(async (filters?: { newFromWatch?: boolean }) => ({
+    apiMocks.deleteJob.mockReset();
+    apiMocks.deleteJobs.mockReset();
+    apiMocks.unarchiveJobs.mockReset();
+    apiMocks.deleteJob.mockResolvedValue({ success: true, id: "sandbox-role" });
+    apiMocks.deleteJobs.mockResolvedValue({ success: true, deletedCount: 0 });
+    apiMocks.unarchiveJobs.mockResolvedValue({ success: true, restoredCount: 0 });
+    apiMocks.listJobs.mockImplementation(async (filters?: { newFromWatch?: boolean; isArchived?: boolean }) => ({
       jobs: filters?.newFromWatch ? [] : [makeJob("sandbox-role", "Software Engineer, Sandboxing")],
     }));
     apiMocks.getJobsDashboard.mockResolvedValue({ counts: { all: 1 }, weeklyActivity: null });
@@ -301,5 +345,132 @@ describe("JobsPage live search suggestions", () => {
     expect(host.querySelector('[data-testid="location"]')?.textContent).toBe("/");
     expect(host.querySelector('[data-testid="location-search"]')?.textContent).toBe("");
     expect(host.querySelector<HTMLButtonElement>('button[aria-label="Filters"]')?.textContent).toBe("Filters");
+  });
+
+  it("selects archived list rows and clears the selection as the search scope changes", async () => {
+    setupArchivedRows([
+      makeArchivedJob("role-1", "Software Engineer"),
+      makeArchivedJob("role-2", "Research Engineer"),
+    ]);
+    await mount("/?archived=true");
+
+    const firstCheckbox = host.querySelector<HTMLInputElement>('input[aria-label="Select Software Engineer at Thinking Machines Lab"]')!;
+    const selectAll = host.querySelector<HTMLInputElement>('input[aria-label="Select all 2 matching archived postings"]')!;
+    await act(async () => firstCheckbox.click());
+
+    expect(firstCheckbox.checked).toBe(true);
+    expect(selectAll.checked).toBe(false);
+    expect(selectAll.indeterminate).toBe(true);
+    expect(host.textContent).toContain("1 selected");
+    expect(firstCheckbox.closest("li")?.querySelector("a")?.classList.contains("is-selected")).toBe(true);
+
+    const search = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;
+    await act(async () => {
+      search.focus();
+      typeInto(search, "research");
+      await Promise.resolve();
+    });
+    expect(host.textContent).not.toContain("1 selected");
+    expect(firstCheckbox.closest("li")?.querySelector("a")?.classList.contains("is-selected")).toBe(false);
+  });
+
+  it("selects all archived board cards and restores them in one batch", async () => {
+    const archived = setupArchivedRows([
+      makeArchivedJob("role-1", "Software Engineer"),
+      makeArchivedJob("role-2", "Research Engineer", "closed"),
+    ]);
+    await mount("/?archived=true&view=board");
+
+    const selectAll = host.querySelector<HTMLInputElement>('input[aria-label="Select all 2 matching archived postings"]')!;
+    await act(async () => selectAll.click());
+    expect(host.textContent).toContain("2 selected");
+    expect(host.querySelectorAll<HTMLInputElement>('input[aria-label^="Select "][aria-label*=" at "]')).toHaveLength(2);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Software Engineer at Thinking Machines Lab"]')?.parentElement?.classList.contains("bg-[var(--accent-soft)]")).toBe(true);
+
+    const restore = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Restore selected"))!;
+    await act(async () => {
+      restore.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.unarchiveJobs).toHaveBeenCalledWith(["role-1", "role-2"]);
+    expect(archived.getRows()).toHaveLength(0);
+    expect(host.textContent).not.toContain("2 selected");
+  });
+
+  it("confirms bulk deletion with the selected count before sending one batch", async () => {
+    setupArchivedRows([
+      makeArchivedJob("role-1", "Software Engineer"),
+      makeArchivedJob("role-2", "Research Engineer"),
+    ]);
+    await mount("/?archived=true");
+
+    await act(async () => {
+      host.querySelector<HTMLInputElement>('input[aria-label="Select all 2 matching archived postings"]')!.click();
+    });
+    const deleteSelected = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Delete selected"))!;
+    await act(async () => deleteSelected.click());
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Delete 2 job postings?");
+
+    const confirm = [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((button) => button.textContent?.includes("Delete permanently"))!;
+    await act(async () => {
+      confirm.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.deleteJobs).toHaveBeenCalledWith(["role-1", "role-2"]);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("keeps selected postings available when a bulk restore fails", async () => {
+    setupArchivedRows([makeArchivedJob("role-1", "Software Engineer")]);
+    apiMocks.unarchiveJobs.mockRejectedValue(new Error("Batch restore failed"));
+    await mount("/?archived=true");
+
+    const checkbox = host.querySelector<HTMLInputElement>('input[aria-label="Select Software Engineer at Thinking Machines Lab"]')!;
+    await act(async () => checkbox.click());
+    const restore = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Restore selected"))!;
+    await act(async () => {
+      restore.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Software Engineer at Thinking Machines Lab"]')?.checked).toBe(true);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Batch restore failed");
+  });
+
+  it("keeps the confirmation and selection when a bulk delete fails", async () => {
+    setupArchivedRows([makeArchivedJob("role-1", "Software Engineer")]);
+    apiMocks.deleteJobs.mockRejectedValue(new Error("Batch delete failed"));
+    await mount("/?archived=true");
+
+    await act(async () => {
+      host.querySelector<HTMLInputElement>('input[aria-label="Select all 1 matching archived postings"]')!.click();
+    });
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent?.includes("Delete selected"))!.click();
+    });
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+        .find((button) => button.textContent?.includes("Delete permanently"))!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Software Engineer at Thinking Machines Lab"]')?.checked).toBe(true);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Delete permanently");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("Batch delete failed");
   });
 });

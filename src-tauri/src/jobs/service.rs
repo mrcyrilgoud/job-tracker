@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{Datelike, Local, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -867,6 +867,20 @@ pub fn delete_job(conn: &Connection, job_id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Permanently remove a batch of jobs. The caller owns the surrounding
+/// transaction so one invalid ID rolls back the whole batch.
+pub fn delete_jobs(conn: &Connection, job_ids: &[String]) -> AppResult<usize> {
+    let mut seen = HashSet::with_capacity(job_ids.len());
+    let mut deleted = 0;
+    for job_id in job_ids {
+        if seen.insert(job_id.as_str()) {
+            delete_job(conn, job_id)?;
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
+}
+
 /// Permanently remove legacy closed jobs so they cannot reappear in the app or CSV.
 pub fn delete_closed_jobs(conn: &Connection) -> AppResult<usize> {
     let ids = conn
@@ -922,6 +936,20 @@ pub fn unarchive_job(
             ..Default::default()
         },
     )
+}
+
+/// Restore a batch of archived jobs using the same applied-date fallback as
+/// [`unarchive_job`]. The caller owns the surrounding transaction.
+pub fn unarchive_jobs(conn: &Connection, job_ids: &[String]) -> AppResult<usize> {
+    let mut seen = HashSet::with_capacity(job_ids.len());
+    let mut restored = 0;
+    for job_id in job_ids {
+        if seen.insert(job_id.as_str()) {
+            unarchive_job(conn, job_id, None)?;
+            restored += 1;
+        }
+    }
+    Ok(restored)
 }
 
 /// Move a pending watch discovery onto the wishlist pipeline.
@@ -2336,6 +2364,123 @@ mod tests {
         let counts_after = get_pipeline_counts(&conn).unwrap();
         assert_eq!(counts_after.get("archived"), Some(&0));
         assert_eq!(counts_after.get("wishlist"), Some(&1));
+    }
+
+    #[test]
+    fn delete_jobs_removes_each_unique_job() {
+        let conn = test_connection();
+        let (first, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/bulk-delete-first",
+            "First role",
+            Some("Acme"),
+            Some("archived"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (second, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/bulk-delete-second-archived",
+            "Second role",
+            Some("Acme"),
+            Some("archived"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let deleted = delete_jobs(
+            &conn,
+            &[first.id.clone(), first.id.clone(), second.id.clone()],
+        )
+        .unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+
+        assert_eq!(deleted, 2);
+        assert!(get_job_by_id(&conn, &first.id).unwrap().is_none());
+        assert!(get_job_by_id(&conn, &second.id).unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_jobs_rolls_back_as_a_batch_when_an_id_is_missing() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/bulk-delete-rollback",
+            "Role to keep",
+            Some("Acme"),
+            Some("archived"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let result = delete_jobs(&conn, &[job.id.clone(), "missing-job".to_string()]);
+        assert!(result.is_err());
+        conn.execute_batch("ROLLBACK").unwrap();
+
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn unarchive_jobs_preserves_the_existing_applied_date_fallback() {
+        let conn = test_connection();
+        let (wishlist_job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/bulk-restore-wishlist",
+            "Wishlist role",
+            Some("Acme"),
+            Some("archived"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (applied_job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/bulk-restore-applied",
+            "Applied role",
+            Some("Acme"),
+            Some("archived"),
+            Some("2026-01-15"),
+            None,
+            None,
+        )
+        .unwrap();
+
+        conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let restored = unarchive_jobs(
+            &conn,
+            &[
+                wishlist_job.id.clone(),
+                applied_job.id.clone(),
+                wishlist_job.id.clone(),
+            ],
+        )
+        .unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+
+        assert_eq!(restored, 2);
+        assert_eq!(
+            get_job_by_id(&conn, &wishlist_job.id)
+                .unwrap()
+                .unwrap()
+                .status,
+            "wishlist"
+        );
+        assert_eq!(
+            get_job_by_id(&conn, &applied_job.id)
+                .unwrap()
+                .unwrap()
+                .status,
+            "applied"
+        );
     }
 
     #[test]

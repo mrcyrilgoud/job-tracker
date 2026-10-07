@@ -184,10 +184,16 @@ export const api = {
 
   deleteJob: (id: string) => call<{ success: boolean; id: string }>("delete_job", { id }),
 
+  deleteJobs: (ids: string[]) =>
+    call<{ success: boolean; deletedCount: number }>("delete_jobs", { ids }),
+
   archiveJob: (id: string) => call<{ detail: JobDetail }>("archive_job_cmd", { id }),
 
   unarchiveJob: (id: string, targetStatus?: JobStatus) =>
     call<{ detail: JobDetail }>("unarchive_job_cmd", { id, targetStatus: targetStatus ?? null }),
+
+  unarchiveJobs: (ids: string[]) =>
+    call<{ success: boolean; restoredCount: number }>("unarchive_jobs", { ids }),
 
   toggleFavorite: (jobId: string) =>
     call<{ item: JobListItem }>("toggle_job_favorite_cmd", { jobId }),

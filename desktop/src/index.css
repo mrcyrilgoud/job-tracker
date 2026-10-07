@@ -253,6 +253,16 @@ button {
   box-shadow: var(--shadow-sm);
 }
 
+.archived-job-card {
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.archived-job-card.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+}
+
 /* A card's committed-actions bar. Anchors the primary action and the record's
    save state to one predictable place at the bottom edge. */
 .card-footer {

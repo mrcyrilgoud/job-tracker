@@ -75,11 +75,18 @@ export function JobsPage() {
   const [triagingId, setTriagingId] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
-  const [jobToDelete, setJobToDelete] = useState<{ id: string; title: string; companyName: string } | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(() => new Set());
+  const [bulkAction, setBulkAction] = useState<"restore" | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    ids: string[];
+    job?: { id: string; title: string; companyName: string };
+    isBulk: boolean;
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPopoverRef = useRef<HTMLDivElement>(null);
   const salaryMinInputRef = useRef<HTMLInputElement>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
   const loadSequenceRef = useRef(0);
   const appliedSearchRef = useRef(appliedSearch);
   appliedSearchRef.current = appliedSearch;
@@ -154,8 +161,18 @@ export function JobsPage() {
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
   });
+  const selectionScopeKey = JSON.stringify({
+    isArchived: isArchivedFilter,
+    filtersKey,
+    liveSearch: liveSearch.trim(),
+    appliedSearch,
+  });
   const requestKeyFor = (searchText: string) => JSON.stringify({ filtersKey, search: searchText });
   activeRequestKeyRef.current = requestKeyFor(appliedSearch);
+  const selectionReady = isArchivedFilter && loadedRequestKey === activeRequestKeyRef.current;
+  const selectedCount = jobs.reduce((count, item) => count + Number(selectedJobIds.has(item.job.id)), 0);
+  const allVisibleSelected = jobs.length > 0 && selectedCount === jobs.length;
+  const someVisibleSelected = selectedCount > 0 && !allVisibleSelected;
 
   const loadJobs = useCallback((searchText: string, quiet = true, force = false) => {
     const queue = jobsQueueRef.current;
@@ -254,6 +271,24 @@ export function JobsPage() {
     }
     loadJobs(appliedSearch, true);
   }, [appliedSearch, loadJobs, filtersKey]);
+
+  useEffect(() => {
+    setSelectedJobIds(new Set());
+  }, [selectionScopeKey]);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someVisibleSelected;
+    }
+  }, [someVisibleSelected]);
+
+  useEffect(() => {
+    const visibleIds = new Set(jobs.map((item) => item.job.id));
+    setSelectedJobIds((current) => {
+      const next = new Set([...current].filter((id) => visibleIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [jobs]);
 
   useEffect(() => setActiveSuggestionIndex(-1), [appliedSearch, filtersKey]);
 
@@ -357,31 +392,89 @@ export function JobsPage() {
     }
   }
 
-  async function confirmDeleteJob() {
-    if (!jobToDelete) return;
-    setDeletingId(jobToDelete.id);
+  function toggleJobSelection(jobId: string) {
+    if (!selectionReady || bulkAction || deleting) return;
+    setSelectedJobIds((current) => {
+      const next = new Set(current);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
+  function toggleAllVisibleJobs() {
+    if (!selectionReady || jobs.length === 0 || bulkAction || deleting) return;
+    setSelectedJobIds((current) => {
+      if (jobs.every((item) => current.has(item.job.id))) return new Set();
+      return new Set(jobs.map((item) => item.job.id));
+    });
+  }
+
+  function clearJobSelection() {
+    setSelectedJobIds(new Set());
+  }
+
+  async function restoreSelectedJobs() {
+    const ids = jobs.filter((item) => selectedJobIds.has(item.job.id)).map((item) => item.job.id);
+    if (ids.length === 0 || !selectionReady || bulkAction || deleting) return;
+    setBulkAction("restore");
+    setError(null);
     try {
-      await api.deleteJob(jobToDelete.id);
-      setJobs((prev) => prev.filter((item) => item.job.id !== jobToDelete.id));
-      setJobToDelete(null);
+      await api.unarchiveJobs(ids);
+      const restoredIds = new Set(ids);
+      setJobs((previous) => previous.filter((item) => !restoredIds.has(item.job.id)));
+      setSelectedJobIds(new Set());
       await load({ quiet: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete job");
+      setError(err instanceof Error ? err.message : "Failed to restore selected postings");
     } finally {
-      setDeletingId(null);
+      setBulkAction(null);
+    }
+  }
+
+  function requestDeleteJob(job: { id: string; title: string; companyName: string }) {
+    setDeleteConfirmation({ ids: [job.id], job, isBulk: false });
+  }
+
+  function requestDeleteSelectedJobs() {
+    const ids = jobs.filter((item) => selectedJobIds.has(item.job.id)).map((item) => item.job.id);
+    if (ids.length === 0 || !selectionReady || bulkAction || deleting) return;
+    setDeleteConfirmation({ ids, isBulk: true });
+  }
+
+  async function confirmDeleteJob() {
+    const confirmation = deleteConfirmation;
+    if (!confirmation || deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      if (confirmation.isBulk) {
+        await api.deleteJobs(confirmation.ids);
+      } else {
+        await api.deleteJob(confirmation.ids[0]);
+      }
+      const deletedIds = new Set(confirmation.ids);
+      setJobs((prev) => prev.filter((item) => !deletedIds.has(item.job.id)));
+      setDeleteConfirmation(null);
+      if (confirmation.isBulk) setSelectedJobIds(new Set());
+      await load({ quiet: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete selected postings");
+    } finally {
+      setDeleting(false);
     }
   }
 
   useEffect(() => {
-    if (!jobToDelete) return;
+    if (!deleteConfirmation) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && !deletingId) {
-        setJobToDelete(null);
+      if (e.key === "Escape" && !deleting) {
+        setDeleteConfirmation(null);
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [jobToDelete, deletingId]);
+  }, [deleteConfirmation, deleting]);
 
   function setView(nextView: "list" | "board") {
     const next = new URLSearchParams(searchParams);
@@ -855,11 +948,63 @@ export function JobsPage() {
             </section>
           ) : null}
 
+          {isArchivedFilter && jobs.length > 0 ? (
+            <div className="card flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
+              <label className="flex min-h-8 cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  disabled={!selectionReady || bulkAction !== null || deleting}
+                  onChange={toggleAllVisibleJobs}
+                  aria-label={`Select all ${jobs.length} matching archived postings`}
+                  className="h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+                />
+                <span>Select all {jobs.length} {jobs.length === 1 ? "posting" : "postings"}</span>
+              </label>
+              {selectedCount > 0 ? (
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <span role="status" aria-live="polite" className="mr-1 text-xs font-medium text-[var(--muted)]">
+                    {selectedCount} selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void restoreSelectedJobs()}
+                    disabled={!selectionReady || bulkAction !== null || deleting}
+                    className="btn btn-secondary btn-sm inline-flex items-center gap-1.5"
+                  >
+                    {bulkAction === "restore" ? <span className="spinner" /> : <ArchiveIcon size={14} />}
+                    <span>{bulkAction === "restore" ? "Restoring…" : "Restore selected"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={requestDeleteSelectedJobs}
+                    disabled={!selectionReady || bulkAction !== null || deleting}
+                    className="btn btn-sm inline-flex items-center gap-1.5 bg-[var(--danger-soft)] text-[var(--danger)] hover:opacity-80"
+                  >
+                    <TrashIcon size={14} />
+                    <span>Delete selected</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearJobSelection}
+                    disabled={bulkAction !== null || deleting}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {error ? (
             <p role="alert" className="rounded-xl bg-[var(--danger-soft)] px-3.5 py-2.5 text-sm text-[var(--danger)]">
               {error}
             </p>
-          ) : loading && jobs.length === 0 ? (
+          ) : null}
+
+          {loading && jobs.length === 0 ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
                 <div
@@ -927,7 +1072,12 @@ export function JobsPage() {
               onToggleFavorite={handleToggleFavorite}
               onUpdateStatus={handleUpdateStatus}
               onToggleArchive={handleToggleArchive}
-              onDeleteJob={setJobToDelete}
+              onDeleteJob={requestDeleteJob}
+              selection={isArchivedFilter ? {
+                selectedIds: selectedJobIds,
+                disabled: !selectionReady || bulkAction !== null || deleting,
+                onToggle: toggleJobSelection,
+              } : undefined}
               isPendingFavorite={(id) => togglingFavId === id}
             />
           ) : (
@@ -939,11 +1089,14 @@ export function JobsPage() {
                   : null;
                 const source = jobSourceLabel(job.source);
                 const StageIcon = statusIcons[job.status];
+                const selected = selectedJobIds.has(job.id);
                 return (
-                  <li key={job.id}>
+                  <li key={job.id} className="relative">
                     <Link
                       to={`/jobs/${job.id}`}
-                      className="card group block p-5 transition-shadow hover:shadow-[var(--shadow-md)]"
+                      className={`card group block p-5 hover:shadow-[var(--shadow-md)] ${
+                        isArchivedFilter ? "archived-job-card pl-12" : ""
+                      } ${selected ? "is-selected" : ""}`}
                     >
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div className="space-y-2">
@@ -1015,7 +1168,7 @@ export function JobsPage() {
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              setJobToDelete({ id: job.id, title: job.title, companyName });
+                              requestDeleteJob({ id: job.id, title: job.title, companyName });
                             }}
                             className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] transition-colors"
                             title="Delete role"
@@ -1034,6 +1187,16 @@ export function JobsPage() {
                         </div>
                       </div>
                     </Link>
+                    {isArchivedFilter ? (
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        disabled={!selectionReady || bulkAction !== null || deleting}
+                        onChange={() => toggleJobSelection(job.id)}
+                        aria-label={`Select ${job.title} at ${companyName}`}
+                        className="absolute left-5 top-6 z-10 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+                      />
+                    ) : null}
                   </li>
                 );
               })}
@@ -1042,7 +1205,7 @@ export function JobsPage() {
         </section>
       </div>
 
-      {jobToDelete ? (
+      {deleteConfirmation ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
           role="presentation"
@@ -1062,25 +1225,33 @@ export function JobsPage() {
                   id="delete-job-dialog-title"
                   className="font-display text-lg font-semibold text-[var(--foreground)]"
                 >
-                  Delete job posting?
+                  {deleteConfirmation.isBulk
+                    ? `Delete ${deleteConfirmation.ids.length} job ${deleteConfirmation.ids.length === 1 ? "posting" : "postings"}?`
+                    : "Delete job posting?"}
                 </h3>
                 <p className="text-xs text-[var(--muted)]">Permanent removal from database and CSV</p>
               </div>
             </div>
 
-            <p className="text-sm text-[var(--muted)] leading-relaxed">
-              Are you sure you want to delete <strong className="text-[var(--foreground)]">{jobToDelete.title}</strong> at{" "}
-              <strong className="text-[var(--foreground)]">{jobToDelete.companyName}</strong>?
-            </p>
+            {deleteConfirmation.isBulk ? (
+              <p className="text-sm text-[var(--muted)] leading-relaxed">
+                Permanently delete {deleteConfirmation.ids.length} selected {deleteConfirmation.ids.length === 1 ? "posting" : "postings"}?
+              </p>
+            ) : deleteConfirmation.job ? (
+              <p className="text-sm text-[var(--muted)] leading-relaxed">
+                Are you sure you want to delete <strong className="text-[var(--foreground)]">{deleteConfirmation.job.title}</strong> at{" "}
+                <strong className="text-[var(--foreground)]">{deleteConfirmation.job.companyName}</strong>?
+              </p>
+            ) : null}
             <p className="text-xs text-[var(--faint)]">
-              This will permanently delete this job, its timeline history, and document attachment links from your local database and the synchronized CSV file. This cannot be undone.
+              This will permanently delete {deleteConfirmation.isBulk ? "these postings and their" : "this posting, its"} timeline history and document attachment links from your local database and the synchronized CSV file. This cannot be undone.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setJobToDelete(null)}
-                disabled={deletingId !== null}
+                onClick={() => setDeleteConfirmation(null)}
+                disabled={deleting}
                 className="btn btn-secondary"
               >
                 Cancel
@@ -1088,11 +1259,11 @@ export function JobsPage() {
               <button
                 type="button"
                 onClick={() => void confirmDeleteJob()}
-                disabled={deletingId !== null}
+                disabled={deleting}
                 className="btn bg-[var(--danger)] text-white hover:opacity-90 flex items-center gap-1.5"
               >
-                {deletingId !== null ? <span className="spinner" /> : <TrashIcon size={14} />}
-                <span>{deletingId !== null ? "Deleting…" : "Delete permanently"}</span>
+                {deleting ? <span className="spinner" /> : <TrashIcon size={14} />}
+                <span>{deleting ? "Deleting…" : "Delete permanently"}</span>
               </button>
             </div>
           </section>

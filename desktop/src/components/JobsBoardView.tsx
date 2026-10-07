@@ -23,6 +23,7 @@ export function JobsBoardView({
   onUpdateStatus,
   onToggleArchive,
   onDeleteJob,
+  selection,
   isPendingFavorite,
 }: {
   jobs: JobListItem[];
@@ -30,6 +31,11 @@ export function JobsBoardView({
   onUpdateStatus?: (jobId: string, nextStatus: JobStatus) => void;
   onToggleArchive?: (jobId: string, currentStatus: JobStatus) => void;
   onDeleteJob?: (job: { id: string; title: string; companyName: string }) => void;
+  selection?: {
+    selectedIds: ReadonlySet<string>;
+    disabled: boolean;
+    onToggle: (jobId: string) => void;
+  };
   isPendingFavorite?: (jobId: string) => boolean;
 }) {
   const [expandedStages, setExpandedStages] = useState<Set<JobStatus>>(new Set());
@@ -249,8 +255,23 @@ export function JobsBoardView({
             {archivedJobs.map(({ job, companyName }) => (
               <div
                 key={job.id}
-                className="group flex items-center justify-between rounded-xl bg-[var(--surface-muted)] p-3 text-sm"
+                className={`group flex items-center justify-between gap-2 rounded-xl p-3 text-sm transition-colors ${
+                  selection?.selectedIds.has(job.id)
+                    ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent)]"
+                    : "bg-[var(--surface-muted)]"
+                }`}
               >
+                {selection ? (
+                  <input
+                    type="checkbox"
+                    checked={selection.selectedIds.has(job.id)}
+                    disabled={selection.disabled}
+                    onChange={() => selection.onToggle(job.id)}
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`Select ${job.title} at ${companyName}`}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+                  />
+                ) : null}
                 <div className="min-w-0 flex-1 pr-2">
                   <Link
                     to={`/jobs/${job.id}`}
