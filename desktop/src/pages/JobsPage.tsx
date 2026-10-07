@@ -949,7 +949,9 @@ export function JobsPage() {
           ) : null}
 
           {isArchivedFilter && jobs.length > 0 ? (
-            <div className="card flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3">
+            <div className={`card archived-selection-toolbar flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 ${
+              selectedCount > 0 ? "has-selection" : ""
+            }`}>
               <label className="flex min-h-8 cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
                 <input
                   ref={selectAllRef}
@@ -958,7 +960,7 @@ export function JobsPage() {
                   disabled={!selectionReady || bulkAction !== null || deleting}
                   onChange={toggleAllVisibleJobs}
                   aria-label={`Select all ${jobs.length} matching archived postings`}
-                  className="h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+                  className="archived-selection-checkbox h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
                 />
                 <span>Select all {jobs.length} {jobs.length === 1 ? "posting" : "postings"}</span>
               </label>
@@ -1091,7 +1093,10 @@ export function JobsPage() {
                 const StageIcon = statusIcons[job.status];
                 const selected = selectedJobIds.has(job.id);
                 return (
-                  <li key={job.id} className="relative">
+                  <li
+                    key={job.id}
+                    className={`archived-selection-row relative ${selected ? "is-selected" : ""}`}
+                  >
                     <Link
                       to={`/jobs/${job.id}`}
                       className={`card group block p-5 hover:shadow-[var(--shadow-md)] ${
@@ -1194,7 +1199,7 @@ export function JobsPage() {
                         disabled={!selectionReady || bulkAction !== null || deleting}
                         onChange={() => toggleJobSelection(job.id)}
                         aria-label={`Select ${job.title} at ${companyName}`}
-                        className="absolute left-5 top-6 z-10 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+                        className="archived-selection-checkbox absolute left-5 top-6 z-10 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
                       />
                     ) : null}
                   </li>

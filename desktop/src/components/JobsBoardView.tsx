@@ -255,9 +255,9 @@ export function JobsBoardView({
             {archivedJobs.map(({ job, companyName }) => (
               <div
                 key={job.id}
-                className={`group flex items-center justify-between gap-2 rounded-xl p-3 text-sm transition-colors ${
+                className={`group archived-selection-row flex items-center justify-between gap-2 rounded-xl p-3 text-sm transition-colors ${
                   selection?.selectedIds.has(job.id)
-                    ? "bg-[var(--accent-soft)] ring-1 ring-[var(--accent)]"
+                    ? "is-selected bg-[var(--accent-soft)] ring-1 ring-[var(--accent)]"
                     : "bg-[var(--surface-muted)]"
                 }`}
               >
@@ -269,7 +269,7 @@ export function JobsBoardView({
                     onChange={() => selection.onToggle(job.id)}
                     onClick={(event) => event.stopPropagation()}
                     aria-label={`Select ${job.title} at ${companyName}`}
-                    className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+                    className="archived-selection-checkbox h-4 w-4 shrink-0 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
                   />
                 ) : null}
                 <div className="min-w-0 flex-1 pr-2">

@@ -263,6 +263,28 @@ button {
   box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
 }
 
+.archived-selection-checkbox {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.archived-selection-row:hover .archived-selection-checkbox,
+.archived-selection-row:focus-within .archived-selection-checkbox,
+.archived-selection-row.is-selected .archived-selection-checkbox,
+.archived-selection-toolbar:hover .archived-selection-checkbox,
+.archived-selection-toolbar:focus-within .archived-selection-checkbox,
+.archived-selection-toolbar.has-selection .archived-selection-checkbox {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archived-selection-checkbox {
+    transition: none;
+  }
+}
+
 /* A card's committed-actions bar. Anchors the primary action and the record's
    save state to one predictable place at the bottom edge. */
 .card-footer {
