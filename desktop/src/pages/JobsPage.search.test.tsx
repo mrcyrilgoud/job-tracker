@@ -176,6 +176,17 @@ describe("JobsPage live search suggestions", () => {
     expect(apiMocks.listCompanies).toHaveBeenCalledTimes(companyCalls);
   });
 
+  it("does not fetch watch discoveries on the Jobs page", async () => {
+    await mount();
+
+    const fetchedWatchRoles = apiMocks.listJobs.mock.calls.some(([filters]) =>
+      typeof filters === "object" && filters !== null &&
+      "newFromWatch" in filters && filters.newFromWatch === true,
+    );
+    expect(fetchedWatchRoles).toBe(false);
+    expect(host.textContent).not.toContain("new roles from your watches");
+  });
+
   it("does not show suggestions before three characters and opens a selected job with the keyboard", async () => {
     await mount();
     const input = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;

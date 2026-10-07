@@ -1,4 +1,5 @@
 import type { JobListItem } from "@/lib/schema";
+import { formatAnnualSalaryRange } from "@/lib/companies-ui";
 
 export type TriageAction = "save" | "skip";
 
@@ -26,6 +27,7 @@ export function NewRolesList({
         const detail = [showCompany ? companyName : null, job.location]
           .filter(Boolean)
           .join(" · ");
+        const salary = formatAnnualSalaryRange(job.salaryMin, job.salaryMax);
         return (
           <li
             key={job.id}
@@ -42,6 +44,9 @@ export function NewRolesList({
               </a>
               {detail ? (
                 <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{detail}</p>
+              ) : null}
+              {salary ? (
+                <p className="mt-0.5 text-xs text-[var(--muted)]">{salary}</p>
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">

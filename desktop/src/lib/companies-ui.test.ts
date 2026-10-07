@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   canResetDismissedWatchRole,
+  formatAnnualSalaryRange,
   groupRolesByCompany,
   matchesRoleSearch,
   providerLabel,
   roleCountLabel,
   syncErrorNote,
-  watchPreviewCountLabel,
   watchPresentation,
 } from "./companies-ui";
 import type { CompanyWatch, Job, JobListItem } from "./schema";
@@ -68,6 +68,21 @@ describe("providerLabel", () => {
 
   it("falls back to capitalizing an unknown provider", () => {
     expect(providerLabel("workday")).toBe("Workday");
+  });
+});
+
+describe("formatAnnualSalaryRange", () => {
+  it("formats a closed annual range compactly", () => {
+    expect(formatAnnualSalaryRange(120_000, 180_000)).toBe("$120k–$180k/year");
+  });
+
+  it("formats open-ended annual ranges", () => {
+    expect(formatAnnualSalaryRange(120_000, null)).toBe("From $120k/year");
+    expect(formatAnnualSalaryRange(null, 180_000)).toBe("Up to $180k/year");
+  });
+
+  it("omits salary metadata when both bounds are unknown", () => {
+    expect(formatAnnualSalaryRange(null, null)).toBeNull();
   });
 });
 
@@ -151,17 +166,6 @@ describe("roleCountLabel", () => {
     expect(roleCountLabel(1)).toBe("1 new role");
     expect(roleCountLabel(7)).toBe("7 new roles");
     expect(roleCountLabel(0)).toBe("0 new roles");
-  });
-});
-
-describe("watchPreviewCountLabel", () => {
-  it("uses the exact count when the preview has every matching role", () => {
-    expect(watchPreviewCountLabel(1, 5)).toBe("1 new role");
-    expect(watchPreviewCountLabel(5, 5)).toBe("5 new roles");
-  });
-
-  it("does not present the extra probe row as a complete count", () => {
-    expect(watchPreviewCountLabel(6, 5)).toBe("More than 5 new roles");
   });
 });
 

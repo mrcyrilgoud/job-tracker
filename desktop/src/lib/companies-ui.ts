@@ -72,15 +72,25 @@ export function roleCountLabel(count: number): string {
   return `${count} new ${count === 1 ? "role" : "roles"}`;
 }
 
-/**
- * The dashboard asks for one more row than it displays to cheaply determine
- * whether additional watch discoveries exist. That extra row is a probe, not
- * the complete count, so never present it as one.
- */
-export function watchPreviewCountLabel(loadedCount: number, previewCount: number): string {
-  return loadedCount > previewCount
-    ? `More than ${previewCount} new roles`
-    : roleCountLabel(loadedCount);
+const compactUsdFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
+function formatAnnualSalaryBound(value: number): string {
+  return compactUsdFormatter.format(value).replace("K", "k").replace("M", "m").replace("B", "b");
+}
+
+/** Compact annual USD bounds for the small metadata line on discovered roles. */
+export function formatAnnualSalaryRange(minimum: number | null, maximum: number | null): string | null {
+  if (minimum !== null && maximum !== null) {
+    return `${formatAnnualSalaryBound(minimum)}–${formatAnnualSalaryBound(maximum)}/year`;
+  }
+  if (minimum !== null) return `From ${formatAnnualSalaryBound(minimum)}/year`;
+  if (maximum !== null) return `Up to ${formatAnnualSalaryBound(maximum)}/year`;
+  return null;
 }
 
 /**

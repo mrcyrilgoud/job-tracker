@@ -17,9 +17,7 @@ import {
   TrophyIcon,
 } from "@/components/icons";
 import { JobsBoardView } from "@/components/JobsBoardView";
-import { NewRolesList } from "@/components/companies/NewRolesList";
 import { api } from "@/lib/api";
-import { watchPreviewCountLabel } from "@/lib/companies-ui";
 import { filterCompaniesBySearch, filterDraftFromUrl } from "@/lib/job-filters";
 import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { useRunMonitor } from "@/lib/RunMonitorContext";
@@ -31,8 +29,6 @@ import {
   toneClasses,
 } from "@/lib/ui";
 
-/** How many watch discoveries the Jobs page previews before deferring to Companies. */
-const WATCH_PREVIEW_COUNT = 5;
 const SEARCH_DEBOUNCE_MS = 250;
 const SUGGESTION_MIN_LENGTH = 3;
 const MAX_SEARCH_SUGGESTIONS = 5;
@@ -58,7 +54,6 @@ export function JobsPage() {
   const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
 
   const [jobs, setJobs] = useState<JobListItem[]>([]);
-  const [newFromWatch, setNewFromWatch] = useState<JobListItem[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
@@ -72,8 +67,6 @@ export function JobsPage() {
   const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [loadedRequestKey, setLoadedRequestKey] = useState("");
-  const [triagingId, setTriagingId] = useState<string | null>(null);
-  const [triageError, setTriageError] = useState<string | null>(null);
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(() => new Set());
   const [bulkAction, setBulkAction] = useState<"restore" | null>(null);
@@ -244,15 +237,13 @@ export function JobsPage() {
     const searchText = appliedSearchRef.current;
     loadJobs(searchText, opts?.quiet ?? false, true);
     try {
-      const [dashboardResult, companiesResult, watchResult] = await Promise.all([
+      const [dashboardResult, companiesResult] = await Promise.all([
         api.getJobsDashboard(),
         api.listCompanies(),
-        api.listJobs({ newFromWatch: true, limit: WATCH_PREVIEW_COUNT + 1 }),
       ]);
       setCounts(dashboardResult.counts);
       setActivity(dashboardResult.weeklyActivity);
       setCompanies(companiesResult.companies.map((row) => row.company));
-      setNewFromWatch(watchResult.jobs);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load jobs";
       setError(message);
@@ -293,23 +284,6 @@ export function JobsPage() {
   useEffect(() => setActiveSuggestionIndex(-1), [appliedSearch, filtersKey]);
 
   useEffect(() => onRunSettled(() => { void load({ quiet: true }); }), [load, onRunSettled]);
-
-  async function triageWatchJob(jobId: string, action: "approve" | "dismiss") {
-    setTriagingId(jobId);
-    setTriageError(null);
-    try {
-      if (action === "approve") {
-        await api.approveWatchJob(jobId);
-      } else {
-        await api.dismissWatchJob(jobId);
-      }
-      await load({ quiet: true });
-    } catch (err) {
-      setTriageError(err instanceof Error ? err.message : `Failed to ${action} watch job`);
-    } finally {
-      setTriagingId(null);
-    }
-  }
 
   async function handleToggleFavorite(jobId: string) {
     setTogglingFavId(jobId);
@@ -539,7 +513,6 @@ export function JobsPage() {
   }
 
   const activeJobsCount = Math.max(0, (counts.all ?? 0) - (counts.archivedTotal ?? 0));
-  const hasMoreWatchRoles = newFromWatch.length > WATCH_PREVIEW_COUNT;
   const visibleCompanies = useMemo(
     () => filterCompaniesBySearch(companies, companySidebarSearch),
     [companies, companySidebarSearch],
@@ -905,48 +878,6 @@ export function JobsPage() {
           )}
 
           {!isFiltered && activity ? <ActivityLine activity={activity} /> : null}
-
-          {!isFiltered && newFromWatch.length > 0 ? (
-            <section className="card p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-display text-lg font-medium">
-                    {newFromWatch.length > 0
-                      ? `${watchPreviewCountLabel(newFromWatch.length, WATCH_PREVIEW_COUNT)} from your watches`
-                      : "0 new roles from your watches"}
-                  </h3>
-                  <p className="mt-0.5 text-sm text-[var(--muted)]">
-                    {newFromWatch.length > 0
-                      ? "Not on your list yet. Save the ones worth tracking."
-                      : "Your watches are up to date. No new matches found."}
-                  </p>
-                </div>
-                {hasMoreWatchRoles ? (
-                  <Link to="/companies" className="btn btn-secondary btn-sm">
-                    Browse all roles
-                  </Link>
-                ) : null}
-              </div>
-              {triageError ? (
-                <p
-                  role="alert"
-                  className="mt-3 rounded-lg bg-[var(--danger-soft)] px-2.5 py-1.5 text-sm text-[var(--danger)]"
-                >
-                  {triageError}
-                </p>
-              ) : null}
-              <div className="mt-3">
-                <NewRolesList
-                  roles={newFromWatch.slice(0, WATCH_PREVIEW_COUNT)}
-                  showCompany
-                  onTriage={(jobId, action) =>
-                    void triageWatchJob(jobId, action === "save" ? "approve" : "dismiss")
-                  }
-                  isPending={(jobId) => triagingId === jobId}
-                />
-              </div>
-            </section>
-          ) : null}
 
           {isArchivedFilter && jobs.length > 0 ? (
             <div className={`card archived-selection-toolbar flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 ${

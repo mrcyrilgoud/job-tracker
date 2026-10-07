@@ -7,9 +7,8 @@ import type { JobListItem } from "@/lib/schema";
 const COLLAPSED_COUNT = 6;
 
 /**
- * The payoff of watching a board, and the anchor of the Companies screen: every
- * role the watches turned up that is not on the board yet, across all companies.
- * Previously these were reachable only from the Jobs tab, capped at five.
+ * The full queue of watch discoveries that are not on the user's list yet.
+ * Shared between the dedicated New Roles page and the Companies screen.
  */
 export function NewRolesPanel({
   roles,

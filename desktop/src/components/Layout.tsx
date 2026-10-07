@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
 
 import {
+  BookmarkIcon,
   BriefcaseIcon,
   BuildingIcon,
   DocumentIcon,
@@ -18,6 +19,7 @@ import { useTheme } from "@/lib/ThemeContext";
 const nav = [
   { href: "/", label: "Jobs", Icon: BriefcaseIcon },
   { href: "/documents", label: "Documents", Icon: DocumentIcon },
+  { href: "/new-roles", label: "New Roles", Icon: BookmarkIcon },
   { href: "/companies", label: "Companies", Icon: BuildingIcon },
   { href: "/settings", label: "Settings", Icon: SettingsIcon },
 ];

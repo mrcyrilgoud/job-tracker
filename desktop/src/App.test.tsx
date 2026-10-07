@@ -21,6 +21,7 @@ vi.mock("@/lib/tauri", () => ({ isDesktopShell: () => true }));
 // Pages stand in for backend-heavy screens; routing, header, run UI, and provider are real.
 vi.mock("@/pages/JobsPage", () => ({ JobsPage: () => <h1>Jobs destination</h1> }));
 vi.mock("@/pages/DocumentsPage", () => ({ DocumentsPage: () => <h1>Documents destination</h1> }));
+vi.mock("@/pages/NewRolesPage", () => ({ NewRolesPage: () => <h1>New Roles destination</h1> }));
 vi.mock("@/pages/CompaniesPage", () => ({ CompaniesPage: () => <h1>Companies destination</h1> }));
 vi.mock("@/pages/SettingsPage", () => ({ SettingsPage: () => <h1>Settings destination</h1> }));
 vi.mock("@/pages/JobDetailPage", () => ({ JobDetailPage: () => null }));
@@ -137,13 +138,15 @@ describe("top navigation while a posting run is displayed", () => {
   });
 
   it.each([
-    ["Jobs", "/"], ["Documents", "/documents"], ["Companies", "/companies"], ["Settings", "/settings"],
+    ["Jobs", "/"], ["Documents", "/documents"], ["New Roles", "/new-roles"],
+    ["Companies", "/companies"], ["Settings", "/settings"],
   ])("shows %s immediately and retains the completed run for reopening", async (label, path) => {
     await mount();
     expect(panel()).not.toBeNull();
     await click([...container.querySelectorAll("nav a")].find((link) => link.textContent === label) ?? null);
     expect(window.location.pathname).toBe(path);
     expect(container.querySelector("main h1")?.textContent).toBe(`${label} destination`);
+    expect(container.querySelector('nav a[aria-current="page"]')?.textContent).toBe(label);
     expect(panel()).toBeNull();
     expect(mockApi.dismissRun).not.toHaveBeenCalled();
     expect(mockApi.cancelRun).not.toHaveBeenCalled();

@@ -12,6 +12,7 @@ import { DocumentsPage } from "@/pages/DocumentsPage";
 import { JobDetailPage } from "@/pages/JobDetailPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { NewJobPage } from "@/pages/NewJobPage";
+import { NewRolesPage } from "@/pages/NewRolesPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
 function BrowserOnlyNotice() {
@@ -62,6 +63,7 @@ export function App() {
               <Route path="jobs/new" element={<NewJobPage />} />
               <Route path="jobs/:id" element={<JobDetailPage />} />
               <Route path="documents" element={<DocumentsPage />} />
+              <Route path="new-roles" element={<NewRolesPage />} />
               <Route path="companies" element={<CompaniesPage />} />
               <Route path="companies/:id" element={<CompanyDetailPage />} />
               <Route path="settings" element={<SettingsPage />} />

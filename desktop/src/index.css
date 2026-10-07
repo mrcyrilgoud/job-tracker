@@ -466,13 +466,15 @@ select.field {
 }
 
 @media (min-width: 640px) {
-  .app-nav-links { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .app-nav-links { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .app-nav-link { gap: 0.25rem; padding: 0 0.5rem; font-size: 0.8125rem; }
 }
 
 @media (min-width: 1024px) {
   .app-header { grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 2rem; }
   .app-navigation { justify-self: end; }
-  .app-nav-links { grid-template-columns: repeat(4, 7.5rem); }
+  .app-nav-links { grid-template-columns: repeat(5, 7.5rem); }
+  .app-nav-link { gap: 0.375rem; padding: 0 0.875rem; font-size: 0.875rem; }
 }
 
 /* A fixed side tab keeps checks out of the main navigation and page flow. */
