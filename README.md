@@ -75,6 +75,10 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 4. **Companies / watches** — Greenhouse, Lever, Ashby board sync; careers pages produce review items
 5. **Settings** — choose a CSV mirror path and tune watch/location preferences
 
+### Closed status
+
+`closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate, and permanent deletion is only the explicit Delete action.
+
 ### Jobs CSV
 
 - Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`, `appeal`

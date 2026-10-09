@@ -8,9 +8,6 @@ use crate::cli::args::{Cli, Commands};
 use crate::db::migrate;
 use crate::db::paths::{resolve_data_dir, DataPaths};
 use crate::error::AppResult;
-use crate::jobs::csv::export_jobs_csv;
-use crate::jobs::csv_config::active_csv_path;
-use crate::jobs::service::delete_closed_jobs;
 
 /// Returns the nearest ancestor (inclusive) of `dir` containing a `.git` entry.
 pub(crate) fn enclosing_git_repo(dir: &std::path::Path) -> Option<std::path::PathBuf> {
@@ -28,12 +25,6 @@ fn open_cli_connection(paths: &DataPaths) -> AppResult<Connection> {
     conn.pragma_update(None, "busy_timeout", 5000i32)?;
     conn.pragma_update(None, "foreign_keys", true)?;
     migrate::migrate(&conn)?;
-    if delete_closed_jobs(&conn)? > 0 {
-        let csv_path = active_csv_path(&conn, &paths.jobs_csv_path)?;
-        if let Err(error) = export_jobs_csv(&conn, &csv_path, None) {
-            log::warn!("CSV export after CLI cleanup failed: {error}");
-        }
-    }
     Ok(conn)
 }
 

@@ -144,11 +144,6 @@ pub fn create_job_from_url_with_careers(
     location: Option<&str>,
     careers_url: Option<&str>,
 ) -> AppResult<(Job, Company)> {
-    if status == Some("closed") {
-        return Err(AppError::from(
-            "Closed jobs are deleted and cannot be added to the pipeline",
-        ));
-    }
     let canonical_url = normalize_canonical_url(url).map_err(AppError::from)?;
     let existing: Option<String> = conn
         .query_row(
@@ -707,13 +702,6 @@ pub fn update_job(
         .clone()
         .unwrap_or_else(|| existing.status.clone());
 
-    if next_status == "closed" {
-        let mut detail =
-            get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
-        detail.job.status = "closed".to_string();
-        delete_job(conn, job_id)?;
-        return Ok(detail);
-    }
     let next_applied = if let Some(applied) = &updates.applied_at {
         applied.clone()
     } else if next_status == "applied" && existing.applied_at.is_none() {
@@ -879,21 +867,6 @@ pub fn delete_jobs(conn: &Connection, job_ids: &[String]) -> AppResult<usize> {
         }
     }
     Ok(deleted)
-}
-
-/// Permanently remove legacy closed jobs so they cannot reappear in the app or CSV.
-pub fn delete_closed_jobs(conn: &Connection) -> AppResult<usize> {
-    let ids = conn
-        .prepare("SELECT id FROM jobs WHERE status = 'closed'")?
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(map_sqlite)?;
-
-    let count = ids.len();
-    for id in ids {
-        delete_job(conn, &id)?;
-    }
-    Ok(count)
 }
 
 /// Move a job out of the active pipeline into the archived status.
@@ -1370,7 +1343,11 @@ mod tests {
             [timestamp],
         )
         .unwrap();
-        let description = format!("{}", "Synthetic engineering role with detailed responsibilities and qualifications. ".repeat(110));
+        let description = format!(
+            "{}",
+            "Synthetic engineering role with detailed responsibilities and qualifications. "
+                .repeat(110)
+        );
         let transaction = conn.unchecked_transaction().unwrap();
         for index in 0..5_000 {
             let title = if index == 4_999 {
@@ -1390,23 +1367,40 @@ mod tests {
         // Warm SQLite's page cache, then sample enough repeated searches to
         // provide a stable p95 without making ordinary unit tests timing-sensitive.
         for _ in 0..3 {
-            list_jobs(&conn, JobFilters { search: Some("sandbo".into()), ..JobFilters::default() }).unwrap();
+            list_jobs(
+                &conn,
+                JobFilters {
+                    search: Some("sandbo".into()),
+                    ..JobFilters::default()
+                },
+            )
+            .unwrap();
         }
         let mut samples = Vec::with_capacity(20);
         for _ in 0..20 {
             let started = Instant::now();
             let results = list_jobs(
                 &conn,
-                JobFilters { search: Some("sandbo".into()), ..JobFilters::default() },
-            ).unwrap();
+                JobFilters {
+                    search: Some("sandbo".into()),
+                    ..JobFilters::default()
+                },
+            )
+            .unwrap();
             samples.push(started.elapsed());
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].job.title, "Software Engineer, Sandboxing");
         }
         samples.sort_unstable();
         let p95 = samples[18];
-        println!("5,000-job long-description search p95: {} ms", p95.as_millis());
-        assert!(p95 <= Duration::from_millis(100), "search p95 exceeded 100 ms: {p95:?}");
+        println!(
+            "5,000-job long-description search p95: {} ms",
+            p95.as_millis()
+        );
+        assert!(
+            p95 <= Duration::from_millis(100),
+            "search p95 exceeded 100 ms: {p95:?}"
+        );
     }
 
     fn insert_watch_pending_job(
@@ -2484,7 +2478,7 @@ mod tests {
     }
 
     #[test]
-    fn setting_status_to_closed_deletes_job() {
+    fn setting_status_to_closed_keeps_job_and_history() {
         let conn = test_connection();
         let (job, _) = create_job_from_url(
             &conn,
@@ -2509,11 +2503,38 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.job.status, "closed");
-        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
+        let stored = get_job_by_id(&conn, &job.id)
+            .unwrap()
+            .expect("closed job kept");
+        assert_eq!(stored.status, "closed");
+        let detail = get_job_detail(&conn, &job.id).unwrap().unwrap();
+        assert!(detail
+            .events
+            .iter()
+            .any(|event| event.event_type == "status_changed"));
+        assert!(detail.events.len() >= 2);
     }
 
     #[test]
-    fn appeal_is_optional_and_does_not_change_favorite_or_closed_delete() {
+    fn create_job_with_closed_status_is_allowed() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/created-closed",
+            "Closed at creation",
+            Some("Acme"),
+            Some("closed"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(job.status, "closed");
+        assert!(get_job_by_id(&conn, &job.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn appeal_is_optional_and_does_not_change_favorite_or_closed_status() {
         let conn = test_connection();
         let (job, _) = create_job_from_url(
             &conn,
@@ -2608,7 +2629,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(closed.job.status, "closed");
-        assert!(get_job_by_id(&conn, &job.id).unwrap().is_none());
+        assert_eq!(closed.job.appeal, Some(3));
+        assert_eq!(
+            get_job_by_id(&conn, &job.id).unwrap().unwrap().status,
+            "closed"
+        );
     }
 
     // ---- Query-time filtering integration tests (task 8.3) ----

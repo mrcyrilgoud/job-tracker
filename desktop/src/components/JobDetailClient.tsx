@@ -194,10 +194,6 @@ export function JobDetailClient({
         salaryMax: attempted.salaryMax.trim() === "" ? null : Number(attempted.salaryMax),
       });
       const detail = result.detail;
-      if (attempted.status === "closed") {
-        onDeleted?.();
-        return;
-      }
       const baseline: Draft = {
         title: detail.job.title,
         companyName: detail.company.name,

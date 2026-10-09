@@ -8,7 +8,6 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 use crate::jobs::csv_export::CsvExportCoordinator;
-use crate::jobs::service::delete_closed_jobs;
 
 pub mod migrate;
 pub mod paths;
@@ -35,12 +34,8 @@ impl AppState {
         conn.pragma_update(None, "busy_timeout", 5000i32)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         migrate::migrate(&conn)?;
-        let removed_closed = delete_closed_jobs(&conn)?;
         let csv_export =
             CsvExportCoordinator::new(paths.db_path.clone(), paths.jobs_csv_path.clone());
-        if removed_closed > 0 {
-            csv_export.mark_dirty();
-        }
         Ok(Self {
             paths,
             db: Arc::new(Mutex::new(conn)),

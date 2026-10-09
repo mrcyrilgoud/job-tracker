@@ -57,6 +57,8 @@ Always pass **`--json`** for automation. Use **`-q` / `--quiet`** when you only 
 | Watch triage | `jt watches list --new-only --json` |
 | Full sync cycle | `jt sync --json` (or `--run-jobs`) |
 
+`closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate, and permanent deletion is only the explicit Delete action.
+
 Do **not** pass `-f` / `--favorite` unless the human explicitly asked to favorite. Prefer leaving favorites for manual UI use.
 
 ### What not to build against

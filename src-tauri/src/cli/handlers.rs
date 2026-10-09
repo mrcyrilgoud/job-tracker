@@ -116,6 +116,7 @@ pub fn handle_list(
     args: ListArgs,
     json: bool,
 ) -> AppResult<()> {
+    let explicit_status = args.status.is_some();
     let filters = JobFilters {
         status: args.status,
         company_id: args.company,
@@ -128,6 +129,10 @@ pub fn handle_list(
         is_favorite: if args.favorites { Some(true) } else { None },
         is_archived: if args.archived {
             Some(true)
+        } else if explicit_status {
+            // An explicit --status (e.g. closed, rejected) must not be hidden
+            // by the default active-pipeline filter.
+            None
         } else {
             Some(false)
         },
