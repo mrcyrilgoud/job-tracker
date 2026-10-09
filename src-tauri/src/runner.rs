@@ -22,6 +22,16 @@ pub(crate) fn open_runner_conn(paths: &DataPaths) -> AppResult<Connection> {
     Ok(conn)
 }
 
+/// Open a short-lived-stage status connection without running migrations.
+/// Polling must never perform schema work; startup owns migrations.
+pub(crate) fn open_runner_status_conn(paths: &DataPaths) -> AppResult<Connection> {
+    paths.ensure_dirs()?;
+    let conn = Connection::open(&paths.db_path)?;
+    conn.pragma_update(None, "busy_timeout", 5000i32)?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    Ok(conn)
+}
+
 pub fn try_lock_runner(paths: &DataPaths) -> AppResult<std::fs::File> {
     let lock_file = OpenOptions::new()
         .create(true)

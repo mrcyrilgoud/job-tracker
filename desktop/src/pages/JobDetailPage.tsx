@@ -8,7 +8,7 @@ import {
   type JobDetailUpdateMode,
 } from "@/components/JobDetailClient";
 import { api } from "@/lib/api";
-import { useRunMonitor } from "@/lib/RunMonitorContext";
+import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import type { DocumentListItem, JobDetail } from "@/lib/schema";
 import { formatLabel } from "@/lib/utils";
 
@@ -25,7 +25,7 @@ export function JobDetailPage() {
   const sequenceRef = useRef(0);
   const idRef = useRef(id);
   idRef.current = id;
-  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
+  const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
 
   async function openDocument(documentId: string) {
     setDocumentError(null);

@@ -37,7 +37,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { api } from "@/lib/api";
-import { RunMonitorProvider, useRunMonitor, type RunMonitorContextValue } from "@/lib/RunMonitorContext";
+import { RunMonitorProvider, useRunMonitor, useRunMonitorActions, type RunMonitorContextValue } from "@/lib/RunMonitorContext";
 
 const mockApi = api as unknown as Record<string, Mock>;
 
@@ -97,9 +97,16 @@ function event(over: Partial<RunProgressEvent> = {}): RunProgressEvent {
 let container: HTMLDivElement;
 let root: Root;
 let captured: RunMonitorContextValue;
+let actionsRenderCount = 0;
 
 function Capture(): null {
   captured = useRunMonitor();
+  return null;
+}
+
+function CaptureActions(): null {
+  useRunMonitorActions();
+  actionsRenderCount += 1;
   return null;
 }
 
@@ -107,7 +114,10 @@ async function mount(): Promise<void> {
   await act(async () => {
     root.render(
       <RunMonitorProvider>
-        <Capture />
+        <>
+          <Capture />
+          <CaptureActions />
+        </>
       </RunMonitorProvider>,
     );
   });
@@ -116,6 +126,7 @@ async function mount(): Promise<void> {
 beforeEach(() => {
   vi.useFakeTimers();
   progressHandler = null;
+  actionsRenderCount = 0;
   unlisten.mockClear();
   for (const fn of Object.values(mockApi)) fn.mockReset();
   mockApi.getCurrentRun.mockResolvedValue(null);
@@ -163,6 +174,17 @@ describe("RunMonitorProvider", () => {
     });
     expect(captured.state.displayed?.runStatus).toBe("active");
     expect(captured.state.lastSeq).toBe(2);
+  });
+
+  it("does not rerender actions-only consumers for progress events", async () => {
+    await mount();
+    const initialRenders = actionsRenderCount;
+    await act(async () => {
+      progressHandler?.({ ok: true, value: event() });
+      progressHandler?.({ ok: true, value: event({ seq: 2, runStatus: "active", previousRunStatus: "queued" }) });
+    });
+    expect(captured.state.displayed?.runStatus).toBe("active");
+    expect(actionsRenderCount).toBe(initialRenders);
   });
 
   it("maps operation_in_progress:runner on start to rejectedInProgress", async () => {

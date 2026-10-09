@@ -68,7 +68,7 @@ use crate::jobs::posting_check::fetch::PostingFetcher;
 use crate::jobs::posting_check::persist::apply_classified_check;
 use crate::jobs::posting_check::provider::{ProviderListingCache, WatchBoard};
 use crate::jobs::posting_check::PostingCheckInput;
-use crate::runner::{open_runner_conn, try_lock_runner};
+use crate::runner::{open_runner_conn, open_runner_status_conn, try_lock_runner};
 
 // ---------------------------------------------------------------------------
 // Configuration and clock
@@ -1163,6 +1163,7 @@ where
         let mut snapshots: Vec<StageProgress> = Vec::new();
         let paths = self.coordinator.paths().clone();
         let run_id = self.run_id.clone();
+        let status_conn = open_runner_status_conn(&paths).ok();
         let mut poll = tokio::time::interval(self.config().cancel_poll);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         poll.tick().await;
@@ -1182,9 +1183,9 @@ where
                     }
                 }
                 _ = poll.tick() => {
-                    let persisted_canceled = open_runner_conn(&paths)
-                        .ok()
-                        .and_then(|conn| store::run_status(&conn, &run_id).ok().flatten())
+                    let persisted_canceled = status_conn
+                        .as_ref()
+                        .and_then(|conn| store::run_status(conn, &run_id).ok().flatten())
                         == Some(RunStatus::Canceling);
                     if persisted_canceled {
                         canceled = true;
@@ -1216,6 +1217,7 @@ where
         let mut snapshots: Vec<StageProgress> = Vec::new();
         let paths = self.coordinator.paths().clone();
         let run_id = self.run_id.clone();
+        let status_conn = open_runner_status_conn(&paths).ok();
         let mut poll = tokio::time::interval(self.config().cancel_poll);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         poll.tick().await;
@@ -1235,9 +1237,9 @@ where
                     }
                 }
                 _ = poll.tick() => {
-                    let persisted_canceled = open_runner_conn(&paths)
-                        .ok()
-                        .and_then(|conn| store::run_status(&conn, &run_id).ok().flatten())
+                    let persisted_canceled = status_conn
+                        .as_ref()
+                        .and_then(|conn| store::run_status(conn, &run_id).ok().flatten())
                         == Some(RunStatus::Canceling);
                     if persisted_canceled {
                         canceled = true;
@@ -4069,6 +4071,38 @@ mod cancel_tests {
             store::run_status(&env.conn(), &run_id).unwrap(),
             Some(RunStatus::Canceled)
         );
+    }
+
+    #[test]
+    fn migration_free_status_connection_reuses_reads_after_external_cancel() {
+        let env = Env::new(1);
+        let coord = env.coordinator(
+            GatedFetcher::new(),
+            Arc::new(RecordingSink::new()),
+            config(1),
+        );
+        let run = coord
+            .accept(RunRequest::PostingCheck {
+                trigger: Trigger::Desktop,
+            })
+            .unwrap();
+        let run_id = run.run_id().to_string();
+        let status_conn = open_runner_status_conn(&env.paths).unwrap();
+        let other_conn = open_runner_conn(&env.paths).unwrap();
+        assert_eq!(
+            store::request_cancel(&other_conn, &run_id, "2026-03-01T10:00:05.000Z").unwrap(),
+            store::CancelOutcome::Accepted {
+                previous: RunStatus::Queued
+            }
+        );
+
+        for _ in 0..5 {
+            assert_eq!(
+                store::run_status(&status_conn, &run_id).unwrap(),
+                Some(RunStatus::Canceling),
+                "the same open connection must observe committed cross-process status"
+            );
+        }
     }
 
     #[tokio::test(start_paused = true)]

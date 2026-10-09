@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::ats::{list_jobs, AtsJob};
@@ -6,8 +8,15 @@ use crate::error::{map_sqlite, AppError, AppResult};
 use crate::filtering::engine::{matches, JobView};
 use crate::filtering::model::FilterCriteria;
 use crate::filtering::resolver::{load_alias_table, resolve_effective_criteria};
-use crate::jobs::service::{job_cols, map_job};
 use crate::util::{create_id, normalize_canonical_url, now_iso};
+
+#[derive(Debug)]
+struct ExistingWatchJob {
+    source_external_id: String,
+    id: String,
+    posting_state: String,
+    missing_from_sync_count: i64,
+}
 
 /// Fetch remote jobs without holding a DB lock.
 pub async fn fetch_remote_jobs(provider: &str, board_slug: &str) -> AppResult<Vec<AtsJob>> {
@@ -60,16 +69,29 @@ fn apply_watch_sync_inner(
         remote_jobs.iter().map(|j| j.external_id.clone()).collect();
 
     let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {} FROM jobs WHERE company_id = ?1 AND source = ?2",
-            job_cols(None)
-        ))
+        .prepare(
+            "SELECT source_external_id, id, posting_state, missing_from_sync_count
+             FROM jobs
+             WHERE company_id = ?1 AND source = ?2 AND source_external_id IS NOT NULL",
+        )
         .map_err(map_sqlite)?;
-    let existing = stmt
-        .query_map(params![watch.company_id, watch.provider], map_job)
-        .map_err(map_sqlite)?
-        .collect::<Result<Vec<_>, _>>()
+    let rows = stmt
+        .query_map(params![watch.company_id, watch.provider], |row| {
+            Ok(ExistingWatchJob {
+                source_external_id: row.get(0)?,
+                id: row.get(1)?,
+                posting_state: row.get(2)?,
+                missing_from_sync_count: row.get(3)?,
+            })
+        })
         .map_err(map_sqlite)?;
+    let existing = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
+    let mut existing_by_external_id = HashMap::new();
+    for (index, local) in existing.iter().enumerate() {
+        existing_by_external_id
+            .entry(local.source_external_id.as_str())
+            .or_insert(index);
+    }
 
     // Resolve the effective filter criteria and alias table ONCE for this
     // watch, so ingest-time annotation uses the same matching authority as
@@ -98,9 +120,9 @@ fn apply_watch_sync_inner(
         )
         .included;
         let included_int = i64::from(included);
-        let by_external = existing
-            .iter()
-            .find(|j| j.source_external_id.as_deref() == Some(remote.external_id.as_str()));
+        let by_external = existing_by_external_id
+            .get(remote.external_id.as_str())
+            .map(|index| &existing[*index]);
 
         if let Some(local) = by_external {
             if local.posting_state == "inactive" {
@@ -262,10 +284,7 @@ fn apply_watch_sync_inner(
 
     let mut deactivated = 0usize;
     for local in &existing {
-        let Some(ext_id) = &local.source_external_id else {
-            continue;
-        };
-        if remote_ids.contains(ext_id) {
+        if remote_ids.contains(&local.source_external_id) {
             continue;
         }
         let next_missing = local.missing_from_sync_count + 1;
@@ -379,6 +398,45 @@ mod tests {
             )
             .unwrap();
         assert_eq!(matching_jobs, 1);
+    }
+
+    #[test]
+    fn sync_deactivates_after_two_misses_and_reactivates_on_reappearance() {
+        let connection = test_connection();
+        let company = create_company(&connection, "Source Co", None).unwrap();
+        let watch = insert_watch(&connection, &company.id, "greenhouse", "source-co").unwrap();
+        let remote = AtsJob {
+            external_id: "role-789".into(),
+            title: "Distributed Systems Engineer".into(),
+            url: "https://boards.greenhouse.io/source-co/jobs/789".into(),
+            location: Some("Remote".into()),
+        };
+        apply_watch_sync(&connection, &watch.id, Ok(vec![remote.clone()])).unwrap();
+
+        let first_miss = apply_watch_sync(&connection, &watch.id, Ok(vec![])).unwrap();
+        assert_eq!(first_miss["deactivated"], 0);
+        let second_miss = apply_watch_sync(&connection, &watch.id, Ok(vec![])).unwrap();
+        assert_eq!(second_miss["deactivated"], 1);
+        let inactive_state: String = connection
+            .query_row(
+                "SELECT posting_state FROM jobs WHERE source_external_id = 'role-789'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(inactive_state, "inactive");
+
+        let returned = apply_watch_sync(&connection, &watch.id, Ok(vec![remote])).unwrap();
+        assert_eq!(returned["created"], 0);
+        assert_eq!(returned["reactivated"], 1);
+        let active_state: String = connection
+            .query_row(
+                "SELECT posting_state FROM jobs WHERE source_external_id = 'role-789'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(active_state, "active");
     }
 
     #[test]

@@ -108,6 +108,46 @@ pub struct JobListItem {
     pub company_name: String,
 }
 
+/// Compact projection used by the paged Jobs screen. Keep long detail fields
+/// such as description, notes, and check results on the detail query only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSummary {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub applied_at: Option<String>,
+    pub posting_state: String,
+    pub last_checked_at: Option<String>,
+    pub source: String,
+    pub is_new_from_watch: bool,
+    pub is_favorite: bool,
+    pub updated_at: String,
+    pub appeal: Option<i64>,
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListSummary {
+    pub job: JobSummary,
+    pub company_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobPageCursor {
+    pub updated_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListPage {
+    pub jobs: Vec<JobListSummary>,
+    pub next_cursor: Option<JobPageCursor>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentListItem {

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { NewRolesPanel } from "@/components/companies/NewRolesPanel";
+import { NewRolesInbox } from "@/components/NewRolesInbox";
 import type { TriageAction } from "@/components/companies/NewRolesList";
 import { api } from "@/lib/api";
-import { useRunMonitor } from "@/lib/RunMonitorContext";
+import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import type { JobListItem } from "@/lib/schema";
 
 export function NewRolesPage() {
@@ -12,7 +12,7 @@ export function NewRolesPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [triagingId, setTriagingId] = useState<string | null>(null);
-  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
+  const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setLoading(true);
@@ -56,13 +56,22 @@ export function NewRolesPage() {
     }
   }
 
+  const companyCount = new Set(roles.map(({ job }) => job.companyId)).size;
+
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <div>
-        <h1 className="font-display text-3xl font-semibold tracking-tight">New Roles</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Review openings found by your watched company boards.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl font-semibold tracking-tight">New Roles</h1>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Review openings found by your watched company boards.
+          </p>
+        </div>
+        {hasLoaded ? (
+          <p className="text-sm text-[var(--muted)]">
+            {roles.length} {roles.length === 1 ? "role" : "roles"} · {companyCount} {companyCount === 1 ? "company" : "companies"}
+          </p>
+        ) : null}
       </div>
 
       {loading && !hasLoaded ? (
@@ -82,7 +91,7 @@ export function NewRolesPage() {
       ) : null}
 
       {hasLoaded ? (
-        <NewRolesPanel
+        <NewRolesInbox
           roles={roles}
           onTriage={(jobId, action) => void triageRole(jobId, action)}
           isPending={(jobId) => triagingId === jobId}

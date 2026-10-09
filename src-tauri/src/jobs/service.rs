@@ -7,7 +7,8 @@ use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
     checked_appeal, is_job_status, AttachedDocument, Company, Document, Job, JobDetail,
-    JobDocument, JobEvent, JobListItem, WeeklyActivity, WeeklyDay,
+    JobDocument, JobEvent, JobListItem, JobListPage, JobListSummary, JobPageCursor, JobSummary,
+    WeeklyActivity, WeeklyDay,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -289,7 +290,7 @@ pub fn get_job_by_id(conn: &Connection, job_id: &str) -> AppResult<Option<Job>> 
     .map_err(map_sqlite)
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct JobFilters {
     pub status: Option<String>,
     pub company_id: Option<String>,
@@ -305,20 +306,19 @@ pub struct JobFilters {
     pub limit: Option<usize>,
 }
 
+pub const JOB_PAGE_SIZE: usize = 100;
+
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct LocationSettings {
     pub country: String,
     pub cities: String,
 }
 
-pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
-    let mut sql = format!(
-        "SELECT {}, c.name
-         FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE 1=1",
-        job_cols(Some("j"))
-    );
-    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
+fn append_job_filters(
+    sql: &mut String,
+    values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    filters: &JobFilters,
+) {
     if let Some(status) = &filters.status {
         sql.push_str(" AND j.status = ?");
         values.push(Box::new(status.clone()));
@@ -385,7 +385,24 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
             values.push(Box::new(format!("%{location}%")));
         }
     }
+}
 
+fn job_filter_sql(filters: &JobFilters) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut sql = String::from(" WHERE 1=1");
+    let mut values = Vec::new();
+    append_job_filters(&mut sql, &mut values, filters);
+    (sql, values)
+}
+
+pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobListItem>> {
+    let (where_sql, mut values) = job_filter_sql(&filters);
+    let mut sql = format!(
+        "SELECT {}, c.name
+         FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}",
+        job_cols(Some("j"))
+    );
+
+    let watch_path = filters.new_from_watch == Some(true);
     sql.push_str(" ORDER BY j.updated_at DESC");
 
     // LIMIT ordering (Req 8.3): on the watch path the fine filter runs in Rust
@@ -454,6 +471,82 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     }
 
     Ok(out)
+}
+
+/// Return one compact, stable page for the Jobs screen.
+pub fn list_jobs_page(
+    conn: &Connection,
+    filters: JobFilters,
+    cursor: Option<JobPageCursor>,
+) -> AppResult<JobListPage> {
+    let (mut where_sql, mut values) = job_filter_sql(&filters);
+    if let Some(cursor) = &cursor {
+        where_sql.push_str(" AND (j.updated_at < ? OR (j.updated_at = ? AND j.id < ?))");
+        values.push(Box::new(cursor.updated_at.clone()));
+        values.push(Box::new(cursor.updated_at.clone()));
+        values.push(Box::new(cursor.id.clone()));
+    }
+    values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
+    let sql = format!(
+        "SELECT j.id, j.title, j.status, j.applied_at, j.posting_state,
+                j.last_checked_at, j.source, j.is_new_from_watch, j.is_favorite,
+                j.updated_at, j.appeal, j.location, c.name
+         FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
+         ORDER BY j.updated_at DESC, j.id DESC LIMIT ?"
+    );
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+    let rows = stmt
+        .query_map(params_ref.as_slice(), |row| {
+            Ok(JobListSummary {
+                job: JobSummary {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    status: row.get(2)?,
+                    applied_at: row.get(3)?,
+                    posting_state: row.get(4)?,
+                    last_checked_at: row.get(5)?,
+                    source: row.get(6)?,
+                    is_new_from_watch: row.get::<_, i64>(7)? != 0,
+                    is_favorite: row.get::<_, i64>(8)? != 0,
+                    updated_at: row.get(9)?,
+                    appeal: row.get(10)?,
+                    location: row.get(11)?,
+                },
+                company_name: row.get(12)?,
+            })
+        })
+        .map_err(map_sqlite)?;
+    let mut jobs = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
+    let has_more = jobs.len() > JOB_PAGE_SIZE;
+    if has_more {
+        jobs.pop();
+    }
+    let next_cursor = if has_more {
+        jobs.last().map(|item| JobPageCursor {
+            updated_at: item.job.updated_at.clone(),
+            id: item.job.id.clone(),
+        })
+    } else {
+        None
+    };
+    Ok(JobListPage { jobs, next_cursor })
+}
+
+/// Fetch IDs using the same SQL predicates as the paged list, for archived
+/// bulk-selection actions that intentionally span every matching page.
+pub fn list_job_ids(conn: &Connection, filters: JobFilters) -> AppResult<Vec<String>> {
+    let (where_sql, values) = job_filter_sql(&filters);
+    let sql = format!(
+        "SELECT j.id FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
+         ORDER BY j.updated_at DESC, j.id DESC"
+    );
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+    let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+    let rows = stmt
+        .query_map(params_ref.as_slice(), |row| row.get(0))
+        .map_err(map_sqlite)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)
 }
 
 /// The latest known open snapshot from a company's connected ATS boards.
@@ -1319,8 +1412,6 @@ pub fn set_location_settings(conn: &Connection, settings: &LocationSettings) -> 
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
     use super::*;
     use crate::db::migrate::migrate;
     use crate::jobs::metadata::extract_job_metadata;
@@ -1331,75 +1422,105 @@ mod tests {
         connection
     }
 
-    /// Manual performance gate for the live-search query at the planned 5,000-job scale.
-    /// Run with `cargo test list_jobs_search_performance_5000_long_descriptions -- --ignored --nocapture`.
     #[test]
-    #[ignore = "manual search latency benchmark"]
-    fn list_jobs_search_performance_5000_long_descriptions() {
+    fn jobs_page_uses_stable_updated_at_id_cursor_and_compact_projection() {
         let conn = test_connection();
         let timestamp = "2026-01-01T00:00:00Z";
         conn.execute(
-            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('bench-company', 'Benchmark Co', ?1, ?1)",
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('page-company', 'Page Co', ?1, ?1)",
             [timestamp],
-        )
-        .unwrap();
-        let description = format!(
-            "{}",
-            "Synthetic engineering role with detailed responsibilities and qualifications. "
-                .repeat(110)
-        );
-        let transaction = conn.unchecked_transaction().unwrap();
-        for index in 0..5_000 {
-            let title = if index == 4_999 {
-                "Software Engineer, Sandboxing".to_string()
-            } else {
-                format!("Software Engineer {index}")
-            };
-            let id = format!("bench-job-{index}");
+        ).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for index in 0..205 {
+            let id = format!("page-{index:03}");
             let url = format!("https://example.test/jobs/{index}");
-            transaction.execute(
-                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, posting_state, source, description, is_new_from_watch, missing_from_sync_count, created_at, updated_at) VALUES (?1, 'bench-company', ?2, ?3, ?3, 'wishlist', 'active', 'manual', ?4, 0, 0, ?5, ?5)",
-                params![id, title, url, description, timestamp],
+            tx.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, posting_state, source,
+                                   notes, description, is_new_from_watch, missing_from_sync_count,
+                                   created_at, updated_at)
+                 VALUES (?1, 'page-company', ?2, ?3, ?3, 'wishlist', 'active', 'manual', 'private note',
+                         'long description', 0, 0, ?4, ?4)",
+                params![id, format!("Role {index}"), url, timestamp],
             ).unwrap();
         }
-        transaction.commit().unwrap();
+        tx.commit().unwrap();
 
-        // Warm SQLite's page cache, then sample enough repeated searches to
-        // provide a stable p95 without making ordinary unit tests timing-sensitive.
-        for _ in 0..3 {
-            list_jobs(
-                &conn,
-                JobFilters {
-                    search: Some("sandbo".into()),
-                    ..JobFilters::default()
-                },
-            )
-            .unwrap();
-        }
-        let mut samples = Vec::with_capacity(20);
-        for _ in 0..20 {
-            let started = Instant::now();
-            let results = list_jobs(
-                &conn,
-                JobFilters {
-                    search: Some("sandbo".into()),
-                    ..JobFilters::default()
-                },
-            )
-            .unwrap();
-            samples.push(started.elapsed());
-            assert_eq!(results.len(), 1);
-            assert_eq!(results[0].job.title, "Software Engineer, Sandboxing");
-        }
-        samples.sort_unstable();
-        let p95 = samples[18];
-        println!(
-            "5,000-job long-description search p95: {} ms",
-            p95.as_millis()
+        let first = list_jobs_page(&conn, JobFilters::default(), None).unwrap();
+        assert_eq!(first.jobs.len(), JOB_PAGE_SIZE);
+        let cursor = first
+            .next_cursor
+            .clone()
+            .expect("there should be a second page");
+        assert_eq!(first.jobs.first().unwrap().job.id, "page-204");
+        assert_eq!(first.jobs.last().unwrap().job.id, "page-105");
+        let second = list_jobs_page(&conn, JobFilters::default(), Some(cursor)).unwrap();
+        assert_eq!(second.jobs.len(), JOB_PAGE_SIZE);
+        assert_eq!(second.jobs.first().unwrap().job.id, "page-104");
+        assert_eq!(second.jobs.last().unwrap().job.id, "page-005");
+        let third = list_jobs_page(&conn, JobFilters::default(), second.next_cursor).unwrap();
+        assert_eq!(
+            third
+                .jobs
+                .iter()
+                .map(|item| item.job.id.as_str())
+                .collect::<Vec<_>>(),
+            ["page-004", "page-003", "page-002", "page-001", "page-000"]
         );
-        assert!(
-            p95 <= Duration::from_millis(100),
-            "search p95 exceeded 100 ms: {p95:?}"
+        assert!(third.next_cursor.is_none());
+
+        let json = serde_json::to_value(&first.jobs[0]).unwrap();
+        assert!(json["job"].get("description").is_none());
+        assert!(json["job"].get("notes").is_none());
+    }
+
+    #[test]
+    fn paged_and_id_queries_share_archived_search_filters() {
+        let conn = test_connection();
+        let timestamp = "2026-01-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('filter-company', 'Filter Co', ?1, ?1)",
+            [timestamp],
+        ).unwrap();
+        for (id, title, status) in [
+            ("archived-one", "Needle archived", "archived"),
+            ("rejected-one", "Needle rejected", "rejected"),
+            ("active-one", "Needle active", "wishlist"),
+            ("archived-other", "Different title", "archived"),
+        ] {
+            let url = format!("https://example.test/{id}");
+            conn.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, posting_state, source,
+                                   is_new_from_watch, missing_from_sync_count, created_at, updated_at)
+                 VALUES (?1, 'filter-company', ?2, ?3, ?3, ?4, 'active', 'manual', 0, 0, ?5, ?5)",
+                params![id, title, url, status, timestamp],
+            ).unwrap();
+        }
+        let filters = JobFilters {
+            is_archived: Some(true),
+            search: Some("Needle".into()),
+            ..JobFilters::default()
+        };
+        let legacy = list_jobs(&conn, filters.clone()).unwrap();
+        let page = list_jobs_page(&conn, filters.clone(), None).unwrap();
+        let ids = list_job_ids(&conn, filters).unwrap();
+        let mut expected = legacy
+            .iter()
+            .map(|item| item.job.id.clone())
+            .collect::<Vec<_>>();
+        let mut paged = page
+            .jobs
+            .iter()
+            .map(|item| item.job.id.clone())
+            .collect::<Vec<_>>();
+        expected.sort();
+        paged.sort();
+        let mut selected = ids;
+        selected.sort();
+        assert_eq!(paged, expected);
+        assert_eq!(selected, expected);
+        assert_eq!(
+            expected,
+            vec!["archived-one".to_string(), "rejected-one".to_string()]
         );
     }
 

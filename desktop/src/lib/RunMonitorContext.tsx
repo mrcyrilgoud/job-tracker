@@ -95,12 +95,25 @@ export type RunMonitorContextValue = {
   reportRefreshFailed: (message?: string) => void;
 };
 
-const RunMonitorContext = createContext<RunMonitorContextValue | null>(null);
+export type RunMonitorActions = Omit<RunMonitorContextValue, "state" | "announcements">;
+type RunMonitorState = Pick<RunMonitorContextValue, "state" | "announcements">;
+const RunMonitorActionsContext = createContext<RunMonitorActions | null>(null);
+const RunMonitorStateContext = createContext<RunMonitorState | null>(null);
 
 export function useRunMonitor(): RunMonitorContextValue {
-  const ctx = useContext(RunMonitorContext);
-  if (ctx === null) {
+  const state = useContext(RunMonitorStateContext);
+  const actions = useContext(RunMonitorActionsContext);
+  if (state === null || actions === null) {
     throw new Error("useRunMonitor must be used within a RunMonitorProvider");
+  }
+  return useMemo(() => ({ ...state, ...actions }), [state, actions]);
+}
+
+/** Stable run actions for pages that only register callbacks and trigger refreshes. */
+export function useRunMonitorActions(): RunMonitorActions {
+  const ctx = useContext(RunMonitorActionsContext);
+  if (ctx === null) {
+    throw new Error("useRunMonitorActions must be used within a RunMonitorProvider");
   }
   return ctx;
 }
@@ -363,10 +376,8 @@ export function RunMonitorProvider({ children }: { children: ReactNode }): React
     };
   }, []);
 
-  const value = useMemo<RunMonitorContextValue>(
+  const actions = useMemo<RunMonitorActions>(
     () => ({
-      state,
-      announcements,
       start,
       cancel,
       retry,
@@ -379,8 +390,6 @@ export function RunMonitorProvider({ children }: { children: ReactNode }): React
       reportRefreshFailed,
     }),
     [
-      state,
-      announcements,
       start,
       cancel,
       retry,
@@ -393,6 +402,11 @@ export function RunMonitorProvider({ children }: { children: ReactNode }): React
       reportRefreshFailed,
     ],
   );
+  const runState = useMemo<RunMonitorState>(() => ({ state, announcements }), [state, announcements]);
 
-  return <RunMonitorContext.Provider value={value}>{children}</RunMonitorContext.Provider>;
+  return (
+    <RunMonitorActionsContext.Provider value={actions}>
+      <RunMonitorStateContext.Provider value={runState}>{children}</RunMonitorStateContext.Provider>
+    </RunMonitorActionsContext.Provider>
+  );
 }

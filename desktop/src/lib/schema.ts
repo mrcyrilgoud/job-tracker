@@ -163,6 +163,37 @@ export type JobListItem = {
   companyName: string;
 };
 
+export type JobSummary = Pick<
+  Job,
+  | "id"
+  | "title"
+  | "status"
+  | "appliedAt"
+  | "postingState"
+  | "lastCheckedAt"
+  | "source"
+  | "isNewFromWatch"
+  | "isFavorite"
+  | "updatedAt"
+  | "appeal"
+  | "location"
+>;
+
+export type JobListSummary = {
+  job: JobSummary;
+  companyName: string;
+};
+
+export type JobPageCursor = {
+  updatedAt: string;
+  id: string;
+};
+
+export type JobListPage = {
+  jobs: JobListSummary[];
+  nextCursor: JobPageCursor | null;
+};
+
 export type JobDetail = {
   job: Job;
   company: Company;

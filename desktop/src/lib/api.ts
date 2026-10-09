@@ -11,7 +11,9 @@ import type {
   FilterCriteria,
   Job,
   JobDetail,
+  JobListPage,
   JobListItem,
+  JobPageCursor,
   JobStatus,
   WeeklyActivity,
   WatchProvider,
@@ -164,6 +166,12 @@ export const api = {
     call<{
       jobs: JobListItem[];
     }>("list_jobs_cmd", { filters: filters ?? null }),
+
+  listJobsPage: (filters: JobFilters, cursor?: JobPageCursor | null) =>
+    call<JobListPage>("list_jobs_page_cmd", { filters, cursor: cursor ?? null }),
+
+  listJobIds: (filters: JobFilters) =>
+    call<{ ids: string[] }>("list_job_ids_cmd", { filters }),
 
   getJobsDashboard: () =>
     call<{
