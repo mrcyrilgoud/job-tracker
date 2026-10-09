@@ -36,13 +36,14 @@ use crate::jobs::service::{
     approve_watch_job, archive_job, create_job_from_url_with_careers,
     delete_job as delete_job_service, delete_jobs as delete_jobs_service, dismiss_watch_job,
     get_job_detail, get_location_settings, get_pipeline_counts,
-    get_watch_role_keywords as service_get_keywords, get_weekly_activity, list_jobs,
-    list_open_watch_positions, reset_dismissed_watch_job, resolve_title_from_url,
+    get_watch_role_keywords as service_get_keywords, get_weekly_activity, list_job_ids, list_jobs,
+    list_jobs_page, list_open_watch_positions, reset_dismissed_watch_job, resolve_title_from_url,
     save_open_watch_job, set_job_favorite, set_location_settings,
     set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
     unarchive_jobs as unarchive_jobs_service, update_job, JobFilters, LocationSettings,
     UpdateJobInput,
 };
+use crate::models::JobPageCursor;
 use crate::runner::try_lock_runner;
 use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
 use crate::runs::legacy::execute_legacy;
@@ -52,7 +53,7 @@ use crate::runs::RunRegistry;
 
 pub mod runs;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListJobsArgs {
     pub status: Option<String>,
@@ -69,42 +70,59 @@ pub struct ListJobsArgs {
     pub limit: Option<usize>,
 }
 
+impl From<ListJobsArgs> for JobFilters {
+    fn from(filters: ListJobsArgs) -> Self {
+        Self {
+            status: filters.status,
+            company_id: filters.company_id,
+            posting_state: filters.posting_state,
+            search: filters.search,
+            salary_min: filters.salary_min,
+            salary_max: filters.salary_max,
+            location: filters.location,
+            new_from_watch: filters.new_from_watch,
+            is_favorite: filters.is_favorite,
+            is_archived: filters.is_archived,
+            limit: filters.limit,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn list_jobs_cmd(
     state: State<'_, AppState>,
     filters: Option<ListJobsArgs>,
 ) -> AppResult<serde_json::Value> {
-    let filters = filters.unwrap_or(ListJobsArgs {
-        status: None,
-        company_id: None,
-        posting_state: None,
-        search: None,
-        salary_min: None,
-        salary_max: None,
-        location: None,
-        new_from_watch: None,
-        is_favorite: None,
-        is_archived: None,
-        limit: None,
-    });
+    let filters = filters.unwrap_or_default();
     state.with_db(|conn| {
-        let jobs = list_jobs(
-            conn,
-            JobFilters {
-                status: filters.status,
-                company_id: filters.company_id,
-                posting_state: filters.posting_state,
-                search: filters.search,
-                salary_min: filters.salary_min,
-                salary_max: filters.salary_max,
-                location: filters.location,
-                new_from_watch: filters.new_from_watch,
-                is_favorite: filters.is_favorite,
-                is_archived: filters.is_archived,
-                limit: filters.limit,
-            },
-        )?;
+        let jobs = list_jobs(conn, filters.into())?;
         Ok(serde_json::json!({ "jobs": jobs }))
+    })
+}
+
+/// Compact cursor-paged query used by the Jobs screen. The original list
+/// command stays available to CLI and watch-preview callers.
+#[tauri::command]
+pub async fn list_jobs_page_cmd(
+    state: State<'_, AppState>,
+    filters: Option<ListJobsArgs>,
+    cursor: Option<JobPageCursor>,
+) -> AppResult<serde_json::Value> {
+    state.with_db(|conn| {
+        let page = list_jobs_page(conn, filters.unwrap_or_default().into(), cursor)?;
+        Ok(serde_json::json!(page))
+    })
+}
+
+/// ID-only version of the same filter query for archived bulk selection.
+#[tauri::command]
+pub async fn list_job_ids_cmd(
+    state: State<'_, AppState>,
+    filters: Option<ListJobsArgs>,
+) -> AppResult<serde_json::Value> {
+    state.with_db(|conn| {
+        let ids = list_job_ids(conn, filters.unwrap_or_default().into())?;
+        Ok(serde_json::json!({ "ids": ids }))
     })
 }
 

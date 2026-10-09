@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { CompaniesClient } from "@/components/CompaniesClient";
 import { api } from "@/lib/api";
-import { useRunMonitor } from "@/lib/RunMonitorContext";
+import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import type { CompanyRow, JobListItem } from "@/lib/schema";
 
 export function CompaniesPage() {
@@ -10,7 +10,7 @@ export function CompaniesPage() {
   const [newRoles, setNewRoles] = useState<JobListItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
+  const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     setError(null);

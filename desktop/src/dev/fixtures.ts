@@ -200,6 +200,13 @@ export function createFixtureBackend() {
     return jobs
       .filter((j) => (companyId ? j.companyId === companyId : true))
       .filter((j) => j.isNewFromWatch === newFromWatch)
+      .filter((j) => (filters?.status ? j.status === filters.status : true))
+      .filter((j) => (filters?.isFavorite === true ? j.isFavorite : true))
+      .filter((j) => (filters?.isArchived === true
+        ? ["archived", "rejected", "withdrawn", "closed"].includes(j.status)
+        : filters?.isArchived === false
+          ? !["archived", "rejected", "withdrawn", "closed"].includes(j.status)
+          : true))
       .filter((j) => (search ? j.title.toLowerCase().includes(search) : true))
       .slice(0, typeof filters?.limit === "number" ? filters.limit : undefined)
       .map((j) => ({
@@ -226,6 +233,33 @@ export function createFixtureBackend() {
       return {
         jobs: jobListItems(filters),
       };
+    },
+
+    list_jobs_page_cmd: (args) => {
+      const filters = (args?.filters ?? null) as Record<string, unknown> | null;
+      const pageJobs = jobListItems(filters).map(({ job, companyName }) => ({
+        job: {
+          id: job.id,
+          title: job.title,
+          status: job.status,
+          appliedAt: job.appliedAt,
+          postingState: job.postingState,
+          lastCheckedAt: job.lastCheckedAt,
+          source: job.source,
+          isNewFromWatch: job.isNewFromWatch,
+          isFavorite: job.isFavorite,
+          updatedAt: job.updatedAt,
+          appeal: job.appeal,
+          location: job.location,
+        },
+        companyName,
+      }));
+      return { jobs: pageJobs, nextCursor: null };
+    },
+
+    list_job_ids_cmd: (args) => {
+      const filters = (args?.filters ?? null) as Record<string, unknown> | null;
+      return { ids: jobListItems(filters).map(({ job }) => job.id) };
     },
 
     get_jobs_dashboard: () => ({

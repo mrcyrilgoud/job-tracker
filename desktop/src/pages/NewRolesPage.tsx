@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { NewRolesInbox } from "@/components/NewRolesInbox";
 import type { TriageAction } from "@/components/companies/NewRolesList";
 import { api } from "@/lib/api";
-import { useRunMonitor } from "@/lib/RunMonitorContext";
+import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import type { JobListItem } from "@/lib/schema";
 
 export function NewRolesPage() {
@@ -12,7 +12,7 @@ export function NewRolesPage() {
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [triagingId, setTriagingId] = useState<string | null>(null);
-  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
+  const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     if (!opts?.quiet) setLoading(true);

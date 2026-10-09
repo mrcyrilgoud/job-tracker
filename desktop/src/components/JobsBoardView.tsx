@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ArchiveIcon, statusIcons, TrashIcon } from "@/components/icons";
-import { jobStatuses, type JobListItem, type JobStatus } from "@/lib/schema";
+import { jobStatuses, type JobListSummary, type JobStatus } from "@/lib/schema";
 import {
   jobStatusPresentation,
   nextActiveJobStage,
@@ -26,7 +26,7 @@ export function JobsBoardView({
   selection,
   isPendingFavorite,
 }: {
-  jobs: JobListItem[];
+  jobs: JobListSummary[];
   onToggleFavorite: (jobId: string) => void;
   onUpdateStatus?: (jobId: string, nextStatus: JobStatus) => void;
   onToggleArchive?: (jobId: string, currentStatus: JobStatus) => void;
@@ -40,7 +40,7 @@ export function JobsBoardView({
 }) {
   const [expandedStages, setExpandedStages] = useState<Set<JobStatus>>(new Set());
   const jobsByStage = useMemo(() => {
-    const grouped: Record<JobStatus, JobListItem[]> = {
+    const grouped: Record<JobStatus, JobListSummary[]> = {
       wishlist: [],
       applied: [],
       interviewing: [],

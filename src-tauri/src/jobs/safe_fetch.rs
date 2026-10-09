@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv6Addr};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use dns_lookup::lookup_host;
@@ -13,6 +14,23 @@ const MAX_REDIRECTS: usize = 5;
 /// Upper bound for a single hostname resolution. DNS runs on the blocking pool so it
 /// never stalls a Tokio worker, and this bound keeps the 30 s evaluation budget enforceable.
 const DNS_TIMEOUT: Duration = Duration::from_secs(5);
+
+static SHARED_CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
+
+pub(crate) fn shared_client() -> Result<Client, String> {
+    SHARED_CLIENT
+        .get_or_init(|| {
+            Client::builder()
+                .redirect(Policy::none())
+                .timeout(Duration::from_millis(TIMEOUT_MS))
+                .user_agent("JobTrackerLocal/1.0")
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map(Clone::clone)
+        .map_err(Clone::clone)
+}
 
 /// Response headers that carry classification signals. Everything else is discarded so
 /// cookies, auth headers, and other response metadata never leave the fetch layer.
@@ -329,21 +347,10 @@ pub async fn safe_fetch(
         redirect_statuses: Vec::new(),
     };
 
-    let client = match Client::builder()
-        .redirect(Policy::none())
-        .timeout(Duration::from_millis(TIMEOUT_MS))
-        .user_agent("JobTrackerLocal/1.0")
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return trace.fail(
-                0,
-                current,
-                FetchErrorKind::Client,
-                e.to_string(),
-                Vec::new(),
-            );
+    let client = match shared_client() {
+        Ok(client) => client,
+        Err(error) => {
+            return trace.fail(0, current, FetchErrorKind::Client, error, Vec::new());
         }
     };
 
@@ -455,6 +462,20 @@ mod tests {
     use super::*;
     use reqwest::header::HeaderValue;
     use std::net::Ipv4Addr;
+
+    #[test]
+    fn shared_client_configuration_is_initialized_once() {
+        let first = shared_client().expect("shared HTTP client should build");
+        let second = shared_client().expect("shared HTTP client should be reused");
+        assert!(first.get("https://example.com").build().is_ok());
+        assert!(second.get("https://example.com").build().is_ok());
+        assert!(std::ptr::eq(
+            SHARED_CLIENT.get().expect("client should be initialized"),
+            SHARED_CLIENT
+                .get()
+                .expect("same client config should be reused"),
+        ));
+    }
 
     #[tokio::test]
     async fn blocks_loopback() {

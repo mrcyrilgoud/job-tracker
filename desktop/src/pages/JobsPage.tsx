@@ -19,8 +19,8 @@ import {
 import { JobsBoardView } from "@/components/JobsBoardView";
 import { api } from "@/lib/api";
 import { filterCompaniesBySearch, filterDraftFromUrl } from "@/lib/job-filters";
-import { jobStatuses, type JobListItem, type JobStatus, type WeeklyActivity } from "@/lib/schema";
-import { useRunMonitor } from "@/lib/RunMonitorContext";
+import { jobStatuses, type JobListSummary, type JobPageCursor, type JobStatus, type WeeklyActivity } from "@/lib/schema";
+import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import {
   jobSourceLabel,
   jobStatusPresentation,
@@ -53,7 +53,9 @@ export function JobsPage() {
   const isArchivedFilter = searchParams.get("archived") === "true";
   const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
 
-  const [jobs, setJobs] = useState<JobListItem[]>([]);
+  const [jobs, setJobs] = useState<JobListSummary[]>([]);
+  const [nextCursor, setNextCursor] = useState<JobPageCursor | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
   const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
@@ -69,6 +71,8 @@ export function JobsPage() {
   const [loadedRequestKey, setLoadedRequestKey] = useState("");
   const [togglingFavId, setTogglingFavId] = useState<string | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(() => new Set());
+  const [matchingJobIds, setMatchingJobIds] = useState<string[] | null>(null);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [bulkAction, setBulkAction] = useState<"restore" | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     ids: string[];
@@ -81,6 +85,7 @@ export function JobsPage() {
   const salaryMinInputRef = useRef<HTMLInputElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const loadSequenceRef = useRef(0);
+  const selectAllSequenceRef = useRef(0);
   const appliedSearchRef = useRef(appliedSearch);
   appliedSearchRef.current = appliedSearch;
   const activeRequestKeyRef = useRef("");
@@ -91,8 +96,10 @@ export function JobsPage() {
     pending: {
       key: string;
       sequence: number;
+      pageKey: string;
       search: string;
       quiet: boolean;
+      cursor: JobPageCursor | null;
       filters: {
         status?: string;
         companyId?: string;
@@ -105,7 +112,7 @@ export function JobsPage() {
     } | null;
   }>({ running: false, activeKey: null, activeSequence: null, pending: null });
   const lastPageFiltersKeyRef = useRef("");
-  const { onRunSettled, reportRefreshFailed } = useRunMonitor();
+  const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
 
   useEffect(() => {
     setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
@@ -163,25 +170,38 @@ export function JobsPage() {
   const requestKeyFor = (searchText: string) => JSON.stringify({ filtersKey, search: searchText });
   activeRequestKeyRef.current = requestKeyFor(appliedSearch);
   const selectionReady = isArchivedFilter && loadedRequestKey === activeRequestKeyRef.current;
-  const selectedCount = jobs.reduce((count, item) => count + Number(selectedJobIds.has(item.job.id)), 0);
-  const allVisibleSelected = jobs.length > 0 && selectedCount === jobs.length;
-  const someVisibleSelected = selectedCount > 0 && !allVisibleSelected;
+  const selectedCount = selectedJobIds.size;
+  const allMatchingSelected = Boolean(
+    matchingJobIds?.length && matchingJobIds.every((id) => selectedJobIds.has(id)),
+  );
+  const someVisibleSelected = selectedCount > 0 && !allMatchingSelected;
 
-  const loadJobs = useCallback((searchText: string, quiet = true, force = false) => {
+  const loadJobs = useCallback((searchText: string, quiet = true, force = false, cursor: JobPageCursor | null = null) => {
     const queue = jobsQueueRef.current;
     const key = requestKeyFor(searchText);
-    if (!force && queue.activeKey === key) {
+    const pageKey = `${key}|${cursor ? `${cursor.updatedAt}:${cursor.id}` : "first"}`;
+    if (!force && queue.activeKey === pageKey) {
       queue.pending = null;
       if (queue.activeSequence !== null) loadSequenceRef.current = queue.activeSequence;
+      if (cursor) setLoadingMore(false);
       return;
     }
-    if (!force && queue.pending?.key === key) return;
+    if (!force && queue.pending?.pageKey === pageKey) {
+      if (cursor) setLoadingMore(false);
+      return;
+    }
+    if (!cursor) {
+      setNextCursor(null);
+      setLoadingMore(false);
+    }
     const sequence = ++loadSequenceRef.current;
     queue.pending = {
       key,
+      pageKey,
       sequence,
       search: searchText,
       quiet,
+      cursor,
       filters: {
         status,
         companyId,
@@ -206,12 +226,20 @@ export function JobsPage() {
         while (queue.pending) {
           const request = queue.pending;
           queue.pending = null;
-          queue.activeKey = request.key;
+          queue.activeKey = request.pageKey;
           queue.activeSequence = request.sequence;
           try {
-            const result = await api.listJobs({ ...request.filters, search: request.search || undefined });
+            const result = await api.listJobsPage(
+              { ...request.filters, search: request.search || undefined },
+              request.cursor,
+            );
             if (request.sequence === loadSequenceRef.current && request.key === activeRequestKeyRef.current) {
-              setJobs(result.jobs);
+              setJobs((previous) => {
+                if (!request.cursor) return result.jobs;
+                const seen = new Set(previous.map((item) => item.job.id));
+                return [...previous, ...result.jobs.filter((item) => !seen.has(item.job.id))];
+              });
+              setNextCursor(result.nextCursor);
               setLoadedRequestKey(request.key);
             }
           } catch (err) {
@@ -223,6 +251,7 @@ export function JobsPage() {
           } finally {
             queue.activeKey = null;
             queue.activeSequence = null;
+            if (request.cursor) setLoadingMore(false);
           }
         }
       } finally {
@@ -232,6 +261,12 @@ export function JobsPage() {
     };
     void drain();
   }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, filtersKey, reportRefreshFailed]);
+
+  const loadMore = useCallback(() => {
+    if (!nextCursor || loadingMore || loading) return;
+    setLoadingMore(true);
+    loadJobs(appliedSearch, true, false, nextCursor);
+  }, [nextCursor, loadingMore, loading, loadJobs, appliedSearch]);
 
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const searchText = appliedSearchRef.current;
@@ -264,7 +299,10 @@ export function JobsPage() {
   }, [appliedSearch, loadJobs, filtersKey]);
 
   useEffect(() => {
+    selectAllSequenceRef.current += 1;
     setSelectedJobIds(new Set());
+    setMatchingJobIds(null);
+    setSelectingAll(false);
   }, [selectionScopeKey]);
 
   useEffect(() => {
@@ -272,14 +310,6 @@ export function JobsPage() {
       selectAllRef.current.indeterminate = someVisibleSelected;
     }
   }, [someVisibleSelected]);
-
-  useEffect(() => {
-    const visibleIds = new Set(jobs.map((item) => item.job.id));
-    setSelectedJobIds((current) => {
-      const next = new Set([...current].filter((id) => visibleIds.has(id)));
-      return next.size === current.size ? current : next;
-    });
-  }, [jobs]);
 
   useEffect(() => setActiveSuggestionIndex(-1), [appliedSearch, filtersKey]);
 
@@ -298,7 +328,16 @@ export function JobsPage() {
     try {
       const res = await api.toggleFavorite(jobId);
       setJobs((prev) =>
-        prev.map((item) => (item.job.id === jobId ? { ...item, job: res.item.job } : item)),
+        prev.map((item) => item.job.id === jobId
+          ? {
+              ...item,
+              job: {
+                ...item.job,
+                isFavorite: res.item.job.isFavorite,
+                updatedAt: res.item.job.updatedAt,
+              },
+            }
+          : item),
       );
       setCounts((prev) => ({
         ...prev,
@@ -324,7 +363,9 @@ export function JobsPage() {
       const res = await api.updateJob(jobId, { appeal });
       setJobs((prev) =>
         prev.map((item) =>
-          item.job.id === jobId ? { ...item, job: res.detail.job } : item,
+          item.job.id === jobId
+            ? { ...item, job: { ...item.job, appeal: res.detail.job.appeal, updatedAt: res.detail.job.updatedAt } }
+            : item,
         ),
       );
     } catch (err) {
@@ -377,10 +418,31 @@ export function JobsPage() {
   }
 
   function toggleAllVisibleJobs() {
-    if (!selectionReady || jobs.length === 0 || bulkAction || deleting) return;
-    setSelectedJobIds((current) => {
-      if (jobs.every((item) => current.has(item.job.id))) return new Set();
-      return new Set(jobs.map((item) => item.job.id));
+    if (!selectionReady || selectingAll || bulkAction || deleting) return;
+    const requestSequence = ++selectAllSequenceRef.current;
+    setSelectingAll(true);
+    const filters = {
+      status,
+      companyId,
+      postingState,
+      salaryMin,
+      salaryMax,
+      search: appliedSearch || undefined,
+      isFavorite: isFavoriteFilter ? true : undefined,
+      isArchived: true,
+    };
+    void api.listJobIds(filters).then(({ ids }) => {
+      if (requestSequence !== selectAllSequenceRef.current) return;
+      setMatchingJobIds(ids);
+      setSelectedJobIds((current) => {
+        if (ids.length > 0 && ids.every((id) => current.has(id))) return new Set();
+        return new Set(ids);
+      });
+    }).catch((err) => {
+      if (requestSequence !== selectAllSequenceRef.current) return;
+      setError(err instanceof Error ? err.message : "Failed to select matching postings");
+    }).finally(() => {
+      if (requestSequence === selectAllSequenceRef.current) setSelectingAll(false);
     });
   }
 
@@ -389,7 +451,7 @@ export function JobsPage() {
   }
 
   async function restoreSelectedJobs() {
-    const ids = jobs.filter((item) => selectedJobIds.has(item.job.id)).map((item) => item.job.id);
+    const ids = [...selectedJobIds];
     if (ids.length === 0 || !selectionReady || bulkAction || deleting) return;
     setBulkAction("restore");
     setError(null);
@@ -411,7 +473,7 @@ export function JobsPage() {
   }
 
   function requestDeleteSelectedJobs() {
-    const ids = jobs.filter((item) => selectedJobIds.has(item.job.id)).map((item) => item.job.id);
+    const ids = [...selectedJobIds];
     if (ids.length === 0 || !selectionReady || bulkAction || deleting) return;
     setDeleteConfirmation({ ids, isBulk: true });
   }
@@ -467,14 +529,20 @@ export function JobsPage() {
   const subtitle = isFavoriteFilter
     ? jobs.length === 0
       ? "No starred roles yet."
-      : `${jobs.length} ${jobs.length === 1 ? "priority role" : "priority roles"} on your favorite board.`
+      : nextCursor
+        ? `Showing 100+ priority roles on your favorite board.`
+        : `${jobs.length} ${jobs.length === 1 ? "priority role" : "priority roles"} on your favorite board.`
     : isArchivedFilter
       ? jobs.length === 0
         ? "No archived roles."
-        : `${jobs.length} ${jobs.length === 1 ? "archived role" : "archived roles"} saved for reference.`
+        : nextCursor
+          ? "Showing 100+ archived roles saved for reference."
+          : `${jobs.length} ${jobs.length === 1 ? "archived role" : "archived roles"} saved for reference.`
       : jobs.length === 0
         ? "Nothing here yet."
-        : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
+        : nextCursor
+          ? "Showing 100+ roles on your radar."
+          : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
 
   const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter);
   const hasDraftFilters = Boolean(
@@ -887,13 +955,13 @@ export function JobsPage() {
                 <input
                   ref={selectAllRef}
                   type="checkbox"
-                  checked={allVisibleSelected}
-                  disabled={!selectionReady || bulkAction !== null || deleting}
+                  checked={allMatchingSelected}
+                  disabled={!selectionReady || selectingAll || bulkAction !== null || deleting}
                   onChange={toggleAllVisibleJobs}
-                  aria-label={`Select all ${jobs.length} matching archived postings`}
+                  aria-label="Select all matching archived postings"
                   className="archived-selection-checkbox h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
                 />
-                <span>Select all {jobs.length} {jobs.length === 1 ? "posting" : "postings"}</span>
+                <span>{selectingAll ? "Selecting matching postings…" : "Select all matching postings"}</span>
               </label>
               {selectedCount > 0 ? (
                 <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -1138,6 +1206,18 @@ export function JobsPage() {
               })}
             </ul>
           )}
+          {nextCursor ? (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={loadMore}
+                disabled={loadingMore || loading}
+                className="btn btn-secondary"
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          ) : null}
         </section>
       </div>
 

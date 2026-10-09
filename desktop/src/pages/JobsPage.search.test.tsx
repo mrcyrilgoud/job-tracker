@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobListItem } from "@/lib/schema";
 
 const apiMocks = vi.hoisted(() => ({
-  listJobs: vi.fn(),
+  listJobsPage: vi.fn(),
+  listJobIds: vi.fn(),
   getJobsDashboard: vi.fn(),
   listCompanies: vi.fn(),
   deleteJob: vi.fn(),
@@ -19,7 +20,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => ({ api: apiMocks }));
 vi.mock("@/lib/RunMonitorContext", () => ({
-  useRunMonitor: () => ({ onRunSettled: apiMocks.onRunSettled, reportRefreshFailed: apiMocks.reportRefreshFailed }),
+  useRunMonitorActions: () => ({ onRunSettled: apiMocks.onRunSettled, reportRefreshFailed: apiMocks.reportRefreshFailed }),
 }));
 
 import { JobsPage } from "./JobsPage";
@@ -59,19 +60,19 @@ function makeArchivedJob(
 
 function setupArchivedRows(rows: JobListItem[]) {
   let currentRows = rows;
-  apiMocks.listJobs.mockImplementation(async (filters?: {
+  const matchingFor = (filters?: {
     newFromWatch?: boolean;
     isArchived?: boolean;
     search?: string;
   }) => {
-    if (filters?.newFromWatch) return { jobs: [] };
+    if (filters?.newFromWatch) return [];
     const matchingRows = filters?.isArchived ? currentRows : [makeJob("sandbox-role", "Software Engineer, Sandboxing")];
     const query = filters?.search?.toLowerCase();
-    return {
-      jobs: query ? matchingRows.filter(({ job, companyName }) =>
-        `${job.title} ${companyName}`.toLowerCase().includes(query)) : matchingRows,
-    };
-  });
+    return query ? matchingRows.filter(({ job, companyName }) =>
+      `${job.title} ${companyName}`.toLowerCase().includes(query)) : matchingRows;
+  };
+  apiMocks.listJobsPage.mockImplementation(async (filters) => ({ jobs: matchingFor(filters), nextCursor: null }));
+  apiMocks.listJobIds.mockImplementation(async (filters) => ({ ids: matchingFor(filters).map(({ job }) => job.id) }));
   apiMocks.unarchiveJobs.mockImplementation(async (ids: string[]) => {
     currentRows = currentRows.filter((item) => !ids.includes(item.job.id));
     return { success: true, restoredCount: ids.length };
@@ -100,7 +101,8 @@ describe("JobsPage live search suggestions", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    apiMocks.listJobs.mockReset();
+    apiMocks.listJobsPage.mockReset();
+    apiMocks.listJobIds.mockReset();
     apiMocks.getJobsDashboard.mockReset();
     apiMocks.listCompanies.mockReset();
     apiMocks.deleteJob.mockReset();
@@ -109,9 +111,11 @@ describe("JobsPage live search suggestions", () => {
     apiMocks.deleteJob.mockResolvedValue({ success: true, id: "sandbox-role" });
     apiMocks.deleteJobs.mockResolvedValue({ success: true, deletedCount: 0 });
     apiMocks.unarchiveJobs.mockResolvedValue({ success: true, restoredCount: 0 });
-    apiMocks.listJobs.mockImplementation(async (filters?: { newFromWatch?: boolean; isArchived?: boolean }) => ({
+    apiMocks.listJobsPage.mockImplementation(async (filters?: { newFromWatch?: boolean; isArchived?: boolean }) => ({
       jobs: filters?.newFromWatch ? [] : [makeJob("sandbox-role", "Software Engineer, Sandboxing")],
+      nextCursor: null,
     }));
+    apiMocks.listJobIds.mockResolvedValue({ ids: [] });
     apiMocks.getJobsDashboard.mockResolvedValue({ counts: { all: 1 }, weeklyActivity: null });
     apiMocks.listCompanies.mockResolvedValue({ companies: [] });
     host = document.createElement("div");
@@ -154,7 +158,7 @@ describe("JobsPage live search suggestions", () => {
   it("waits for the debounce and renders matching suggestions from the filtered jobs response", async () => {
     await mount();
     const input = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;
-    const initialSearchCalls = apiMocks.listJobs.mock.calls.filter(([filters]) => !filters?.newFromWatch).length;
+    const initialSearchCalls = apiMocks.listJobsPage.mock.calls.filter(([filters]) => !filters?.newFromWatch).length;
     const dashboardCalls = apiMocks.getJobsDashboard.mock.calls.length;
     const companyCalls = apiMocks.listCompanies.mock.calls.length;
 
@@ -163,13 +167,13 @@ describe("JobsPage live search suggestions", () => {
       typeInto(input, "san");
       await vi.advanceTimersByTimeAsync(249);
     });
-    expect(apiMocks.listJobs.mock.calls.filter(([filters]) => !filters?.newFromWatch)).toHaveLength(initialSearchCalls);
+    expect(apiMocks.listJobsPage.mock.calls.filter(([filters]) => !filters?.newFromWatch)).toHaveLength(initialSearchCalls);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
       await Promise.resolve();
     });
-    expect(apiMocks.listJobs.mock.calls.filter(([filters]) => !filters?.newFromWatch)).toHaveLength(initialSearchCalls + 1);
+    expect(apiMocks.listJobsPage.mock.calls.filter(([filters]) => !filters?.newFromWatch)).toHaveLength(initialSearchCalls + 1);
     expect(host.querySelector('[role="option"]')?.textContent).toContain("Software Engineer, Sandboxing");
     expect(host.textContent).toContain("Thinking Machines Lab");
     expect(apiMocks.getJobsDashboard).toHaveBeenCalledTimes(dashboardCalls);
@@ -179,7 +183,7 @@ describe("JobsPage live search suggestions", () => {
   it("does not fetch watch discoveries on the Jobs page", async () => {
     await mount();
 
-    const fetchedWatchRoles = apiMocks.listJobs.mock.calls.some(([filters]) =>
+    const fetchedWatchRoles = apiMocks.listJobsPage.mock.calls.some(([filters]) =>
       typeof filters === "object" && filters !== null &&
       "newFromWatch" in filters && filters.newFromWatch === true,
     );
@@ -219,9 +223,10 @@ describe("JobsPage live search suggestions", () => {
   });
 
   it("caps the suggestion menu at five and opens a suggestion by mouse", async () => {
-    apiMocks.listJobs.mockImplementation(async (filters?: { newFromWatch?: boolean }) => ({
+    apiMocks.listJobsPage.mockImplementation(async (filters?: { newFromWatch?: boolean }) => ({
       jobs: filters?.newFromWatch ? [] : Array.from({ length: 8 }, (_, index) =>
         makeJob(`role-${index}`, `Sandbox Role ${index}`)),
+      nextCursor: null,
     }));
     await mount();
     const input = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;
@@ -239,11 +244,11 @@ describe("JobsPage live search suggestions", () => {
   });
 
   it("coalesces rapid edits while one search is pending and ignores the stale result", async () => {
-    let resolveSan!: (value: { jobs: JobListItem[] }) => void;
+    let resolveSan!: (value: { jobs: JobListItem[]; nextCursor: null }) => void;
     let inFlight = 0;
     let peakInFlight = 0;
-    apiMocks.listJobs.mockImplementation((filters?: { newFromWatch?: boolean; search?: string }) => {
-      if (filters?.newFromWatch) return Promise.resolve({ jobs: [] });
+    apiMocks.listJobsPage.mockImplementation((filters?: { newFromWatch?: boolean; search?: string }) => {
+      if (filters?.newFromWatch) return Promise.resolve({ jobs: [], nextCursor: null });
       if (filters?.search === "san") {
         inFlight += 1;
         peakInFlight = Math.max(peakInFlight, inFlight);
@@ -254,9 +259,9 @@ describe("JobsPage live search suggestions", () => {
       if (filters?.search === "sand") {
         inFlight += 1;
         peakInFlight = Math.max(peakInFlight, inFlight);
-        return Promise.resolve({ jobs: [makeJob("latest", "Latest result")] }).finally(() => { inFlight -= 1; });
+        return Promise.resolve({ jobs: [makeJob("latest", "Latest result")], nextCursor: null }).finally(() => { inFlight -= 1; });
       }
-      return Promise.resolve({ jobs: [makeJob("sandbox-role", "Software Engineer, Sandboxing")] });
+      return Promise.resolve({ jobs: [makeJob("sandbox-role", "Software Engineer, Sandboxing")], nextCursor: null });
     });
     await mount();
     const input = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;
@@ -270,18 +275,62 @@ describe("JobsPage live search suggestions", () => {
       typeInto(input, "sand");
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(apiMocks.listJobs.mock.calls.filter(([filters]) => filters?.search === "sand")).toHaveLength(0);
+    expect(apiMocks.listJobsPage.mock.calls.filter(([filters]) => filters?.search === "sand")).toHaveLength(0);
 
     await act(async () => {
-      resolveSan({ jobs: [makeJob("stale", "Stale result")] });
+      resolveSan({ jobs: [makeJob("stale", "Stale result")], nextCursor: null });
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(apiMocks.listJobs.mock.calls.filter(([filters]) => filters?.search === "sand")).toHaveLength(1);
+    expect(apiMocks.listJobsPage.mock.calls.filter(([filters]) => filters?.search === "sand")).toHaveLength(1);
     await act(async () => { await Promise.resolve(); });
     expect(peakInFlight).toBe(1);
     expect(host.textContent).toContain("Latest result");
     expect(host.textContent).not.toContain("Stale result");
+  });
+
+  it("appends cursor pages and resets to the first page when the search changes", async () => {
+    const rows = Array.from({ length: 150 }, (_, index) =>
+      makeJob(`paged-${String(index).padStart(3, "0")}`, index === 149 ? "Rare role" : `Paged role ${index}`));
+    rows.forEach((item, index) => { item.job.updatedAt = `2026-01-01T00:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`; });
+    apiMocks.listJobsPage.mockImplementation(async (filters, cursor) => {
+      const matching = [...(filters?.search ? rows.filter(({ job }) => job.title.toLowerCase().includes(String(filters.search).toLowerCase())) : rows)]
+        .sort((left, right) => right.job.updatedAt.localeCompare(left.job.updatedAt) || right.job.id.localeCompare(left.job.id));
+      if (filters?.search) return { jobs: matching, nextCursor: null };
+      const start = cursor ? matching.findIndex(({ job }) => job.id === cursor.id) + 1 : 0;
+      const page = matching.slice(start, start + 100);
+      const last = page.at(-1);
+      return {
+        jobs: page,
+        nextCursor: start + page.length < matching.length && last
+          ? { updatedAt: last.job.updatedAt, id: last.job.id }
+          : null,
+      };
+    });
+    await mount();
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(100);
+    const loadMore = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Load more"))!;
+    await act(async () => {
+      loadMore.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(150);
+    expect(apiMocks.listJobsPage.mock.calls.at(-1)?.[1]).toMatchObject({ id: "paged-050" });
+
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;
+    await act(async () => {
+      input.focus();
+      typeInto(input, "rare");
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMocks.listJobsPage.mock.calls.at(-1)?.[0]?.search).toBe("rare");
+    expect(apiMocks.listJobsPage.mock.calls.at(-1)?.[1]).toBeNull();
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(1);
+    expect(host.textContent).toContain("Rare role");
   });
 
   it("keeps filter drafts on dismiss and applies them while preserving the current jobs scope", async () => {
@@ -366,7 +415,7 @@ describe("JobsPage live search suggestions", () => {
     await mount("/?archived=true");
 
     const firstCheckbox = host.querySelector<HTMLInputElement>('input[aria-label="Select Software Engineer at Thinking Machines Lab"]')!;
-    const selectAll = host.querySelector<HTMLInputElement>('input[aria-label="Select all 2 matching archived postings"]')!;
+    const selectAll = host.querySelector<HTMLInputElement>('input[aria-label="Select all matching archived postings"]')!;
     await act(async () => firstCheckbox.click());
 
     expect(firstCheckbox.checked).toBe(true);
@@ -392,7 +441,7 @@ describe("JobsPage live search suggestions", () => {
     ]);
     await mount("/?archived=true&view=board");
 
-    const selectAll = host.querySelector<HTMLInputElement>('input[aria-label="Select all 2 matching archived postings"]')!;
+    const selectAll = host.querySelector<HTMLInputElement>('input[aria-label="Select all matching archived postings"]')!;
     await act(async () => selectAll.click());
     expect(host.textContent).toContain("2 selected");
     expect(host.querySelectorAll<HTMLInputElement>('input[aria-label^="Select "][aria-label*=" at "]')).toHaveLength(2);
@@ -412,6 +461,41 @@ describe("JobsPage live search suggestions", () => {
     expect(host.textContent).not.toContain("2 selected");
   });
 
+  it("selects archived matching IDs beyond the loaded page for bulk restore", async () => {
+    const rows = Array.from({ length: 105 }, (_, index) =>
+      makeArchivedJob(`archive-${String(index).padStart(3, "0")}`, `Archived role ${index}`));
+    apiMocks.listJobsPage.mockImplementation(async (_filters, cursor) => ({
+      jobs: cursor ? rows.slice(100) : rows.slice(0, 100),
+      nextCursor: cursor ? null : { updatedAt: rows[99].job.updatedAt, id: rows[99].job.id },
+    }));
+    apiMocks.listJobIds.mockResolvedValue({ ids: rows.map(({ job }) => job.id) });
+    await mount("/?archived=true");
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(100);
+    const firstRow = host.querySelector<HTMLInputElement>('input[aria-label="Select Archived role 0 at Thinking Machines Lab"]')!;
+    await act(async () => firstRow.click());
+    expect(host.textContent).toContain("1 selected");
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent?.includes("Load more"))!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(105);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Select Archived role 0 at Thinking Machines Lab"]')?.checked).toBe(true);
+    await act(async () => {
+      host.querySelector<HTMLInputElement>('input[aria-label="Select all matching archived postings"]')!.click();
+      await Promise.resolve();
+    });
+    expect(host.textContent).toContain("105 selected");
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent?.includes("Restore selected"))!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMocks.unarchiveJobs).toHaveBeenCalledWith(rows.map(({ job }) => job.id));
+  });
+
   it("confirms bulk deletion with the selected count before sending one batch", async () => {
     setupArchivedRows([
       makeArchivedJob("role-1", "Software Engineer"),
@@ -420,7 +504,7 @@ describe("JobsPage live search suggestions", () => {
     await mount("/?archived=true");
 
     await act(async () => {
-      host.querySelector<HTMLInputElement>('input[aria-label="Select all 2 matching archived postings"]')!.click();
+      host.querySelector<HTMLInputElement>('input[aria-label="Select all matching archived postings"]')!.click();
     });
     const deleteSelected = [...host.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.includes("Delete selected"))!;
@@ -466,7 +550,7 @@ describe("JobsPage live search suggestions", () => {
     await mount("/?archived=true");
 
     await act(async () => {
-      host.querySelector<HTMLInputElement>('input[aria-label="Select all 1 matching archived postings"]')!.click();
+      host.querySelector<HTMLInputElement>('input[aria-label="Select all matching archived postings"]')!.click();
     });
     await act(async () => {
       [...host.querySelectorAll<HTMLButtonElement>("button")]

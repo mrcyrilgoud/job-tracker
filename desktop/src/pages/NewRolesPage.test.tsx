@@ -19,7 +19,7 @@ const runMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => ({ api: apiMocks }));
 vi.mock("@/lib/RunMonitorContext", () => ({
-  useRunMonitor: () => ({
+  useRunMonitorActions: () => ({
     onRunSettled: runMocks.onRunSettled,
     reportRefreshFailed: runMocks.reportRefreshFailed,
   }),

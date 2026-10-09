@@ -15,6 +15,9 @@ mod util;
 #[cfg(test)]
 mod surface_tests;
 
+#[cfg(test)]
+mod performance_benchmarks;
+
 use std::path::PathBuf;
 
 use tauri::Manager;
@@ -72,6 +75,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::show_main_window,
             commands::list_jobs_cmd,
+            commands::list_jobs_page_cmd,
+            commands::list_job_ids_cmd,
             commands::get_jobs_dashboard,
             commands::preview_job_url,
             commands::create_job,
