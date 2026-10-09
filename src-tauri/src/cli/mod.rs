@@ -18,6 +18,35 @@ pub(crate) fn enclosing_git_repo(dir: &std::path::Path) -> Option<std::path::Pat
         .map(|p| p.to_path_buf())
 }
 
+fn canon(p: &std::path::Path) -> std::path::PathBuf {
+    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Returns the git repo that makes `data_dir` "dev-only" data, if any.
+///
+/// A git root that is the user's home directory (or an ancestor of it, e.g. `/`)
+/// is never treated as a dev repo: people accidentally `git init` their home
+/// folder. The standard app data dir (~/Library/Application Support/
+/// com.jobtracker.local) is always allowed.
+pub(crate) fn dev_data_repo(
+    data_dir: &std::path::Path,
+    home: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let data = canon(data_dir);
+    if let Some(home) = home {
+        let home = canon(home);
+        if data == canon(&home.join("Library/Application Support/com.jobtracker.local")) {
+            return None;
+        }
+        let repo = enclosing_git_repo(&data)?;
+        if home.starts_with(&repo) {
+            return None;
+        }
+        return Some(repo);
+    }
+    enclosing_git_repo(&data).filter(|r| r.parent().is_some())
+}
+
 fn open_cli_connection(paths: &DataPaths) -> AppResult<Connection> {
     paths.ensure_dirs()?;
     let conn = Connection::open(&paths.db_path)?;
@@ -40,7 +69,8 @@ pub async fn run_cli(cli: Cli) -> AppResult<()> {
 
     if cli.run_jobs {
         if !cfg!(debug_assertions) && !cli.allow_dev_data {
-            if let Some(repo) = enclosing_git_repo(&paths.data_dir) {
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+            if let Some(repo) = dev_data_repo(&paths.data_dir, home.as_deref()) {
                 return Err(crate::error::AppError::Message(format!(
                     "refusing --run-jobs: data dir {} is inside git repo {} (dev-only data). \
                      Use ~/Library/Application Support/com.jobtracker.local, or pass --allow-dev-data.",
@@ -493,7 +523,51 @@ mod tests {
 
 #[cfg(test)]
 mod dev_data_guard_tests {
-    use super::enclosing_git_repo;
+    use super::{dev_data_repo, enclosing_git_repo};
+    use crate::cli::args::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn home_dir_git_root_is_allowed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(home.join(".git")).unwrap();
+        let other = home.join("some/data");
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(dev_data_repo(&other, Some(&home)).is_none());
+        // git root above home is also ignored
+        let home2 = tmp.path().join("home/nested-user");
+        std::fs::create_dir_all(home2.join("x")).unwrap();
+        assert!(dev_data_repo(&home2.join("x"), Some(&home2)).is_none());
+    }
+
+    #[test]
+    fn application_support_is_allowed_even_under_home_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(home.join(".git")).unwrap();
+        let app = home.join("Library/Application Support/com.jobtracker.local");
+        std::fs::create_dir_all(&app).unwrap();
+        assert!(dev_data_repo(&app, Some(&home)).is_none());
+    }
+
+    #[test]
+    fn project_repo_data_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(home.join(".git")).unwrap();
+        let repo = home.join("repos/Job-Tracker");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("data")).unwrap();
+        let found = dev_data_repo(&repo.join("data"), Some(&home)).unwrap();
+        assert_eq!(found, repo.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn allow_dev_data_flag_bypasses() {
+        let cli = Cli::try_parse_from(["job-tracker", "--run-jobs", "--allow-dev-data"]).unwrap();
+        assert!(cli.allow_dev_data);
+    }
 
     #[test]
     fn detects_data_dir_inside_git_repo() {
