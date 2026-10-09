@@ -1,100 +1,52 @@
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const label = "com.jobtracker.local.jobs";
-const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${label}.plist`);
+import { renderPlist, resolveLaunchdConfig } from "./launchd-plist";
+
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * Prefer the packaged Tauri binary with `--run-jobs`. Fall back to the debug
- * cargo target.
+ * Install + load the hourly jobs LaunchAgent.
+ * Binary preference: /Applications/Job Tracker.app, then repo release bundle,
+ * release bin, debug bin. Data dir: Application Support (same DB as the GUI and
+ * jt) unless JOB_TRACKER_DATA_DIR is explicitly set.
  */
-function resolveRunner(): {
-  programArguments: string[];
-  workingDirectory: string;
-  logPath: string;
-  dataDir: string;
-} {
-  const dataDir = process.env.JOB_TRACKER_DATA_DIR
-    ? path.resolve(process.env.JOB_TRACKER_DATA_DIR)
-    : path.join(os.homedir(), "Library", "Application Support", "com.jobtracker.local");
-  const logPath = path.join(dataDir, "jobs-worker.log");
+const config = resolveLaunchdConfig({
+  homeDir: os.homedir(),
+  projectRoot,
+  envDataDir: process.env.JOB_TRACKER_DATA_DIR || undefined,
+  exists: (p) => fs.existsSync(p),
+});
+const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${config.label}.plist`);
 
-  const releaseApp = path.join(
-    projectRoot,
-    "src-tauri/target/release/bundle/macos/Job Tracker.app/Contents/MacOS/job-tracker",
-  );
-  const releaseBin = path.join(projectRoot, "src-tauri/target/release/job-tracker");
-  const debugBin = path.join(projectRoot, "src-tauri/target/debug/job-tracker");
-
-  for (const binary of [releaseApp, releaseBin, debugBin]) {
-    if (fs.existsSync(binary)) {
-      return {
-        programArguments: [binary, "--run-jobs", "--data-dir", dataDir],
-        workingDirectory: projectRoot,
-        logPath,
-        dataDir,
-      };
-    }
-  }
-
-  throw new Error(
-    "Tauri binary not found. Run `npm run tauri:build` (or `npm run tauri:dev` once) then re-run jobs:install.",
+if (config.dataDirInsideRepo) {
+  console.warn(
+    `WARNING: data dir ${config.dataDir} is inside the repo. The repo data/ folder is dev-only; ` +
+      "the GUI and jt use ~/Library/Application Support/com.jobtracker.local. Unset JOB_TRACKER_DATA_DIR unless this is intentional.",
   );
 }
-
-const { programArguments, workingDirectory, logPath, dataDir } = resolveRunner();
-
-const programArgsXml = programArguments
-  .map((arg) => `      <string>${arg}</string>`)
-  .join("\n");
-
-const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>${label}</string>
-    <key>ProgramArguments</key>
-    <array>
-${programArgsXml}
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${workingDirectory}</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-      <key>JOB_TRACKER_DATA_DIR</key>
-      <string>${dataDir}</string>
-    </dict>
-    <key>StartInterval</key>
-    <integer>3600</integer>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>${logPath}</string>
-    <key>StandardErrorPath</key>
-    <string>${logPath}</string>
-  </dict>
-</plist>
-`;
 
 fs.mkdirSync(path.dirname(plistPath), { recursive: true });
-fs.mkdirSync(path.dirname(logPath), { recursive: true });
+fs.mkdirSync(config.dataDir, { recursive: true });
 
 // Unload any previous agent before rewriting so it cannot keep writing an old tree.
-try {
-  execSync(`launchctl unload "${plistPath}"`, { stdio: "ignore" });
-} catch {
-  // not loaded
-}
+spawnSync("launchctl", ["unload", plistPath], { stdio: "ignore" });
 
-fs.writeFileSync(plistPath, plist);
-
+fs.writeFileSync(plistPath, renderPlist(config));
 console.log(`Wrote ${plistPath}`);
-console.log(`Program: ${programArguments.join(" ")}`);
-console.log("Load it with:");
-console.log(`  launchctl unload ${plistPath} 2>/dev/null; launchctl load ${plistPath}`);
-console.log(`The worker runs once per hour and logs to ${logPath}`);
+console.log(`Program: ${config.programArguments.join(" ")}`);
+console.log(`Data dir: ${config.dataDir}`);
+
+const load = spawnSync("launchctl", ["load", "-w", plistPath], { encoding: "utf8" });
+const loadOutput = `${load.stdout ?? ""}${load.stderr ?? ""}`.trim();
+if (load.status === 0 && !/error|failed/i.test(loadOutput)) {
+  console.log(`Loaded ${config.label}. It runs at load and hourly; logs: ${config.logPath}`);
+} else {
+  console.warn(
+    `WARNING: plist written but launchctl load failed (exit ${load.status ?? "?"}${loadOutput ? `: ${loadOutput}` : ""}).`,
+  );
+  console.warn(`Load it manually: launchctl unload "${plistPath}" 2>/dev/null; launchctl load -w "${plistPath}"`);
+}

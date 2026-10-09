@@ -12,6 +12,15 @@ use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::active_csv_path;
 use crate::jobs::service::delete_closed_jobs;
 
+/// Returns the nearest ancestor (inclusive) of `dir` containing a `.git` entry.
+pub(crate) fn enclosing_git_repo(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let start = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    start
+        .ancestors()
+        .find(|p| p.join(".git").exists())
+        .map(|p| p.to_path_buf())
+}
+
 fn open_cli_connection(paths: &DataPaths) -> AppResult<Connection> {
     paths.ensure_dirs()?;
     let conn = Connection::open(&paths.db_path)?;
@@ -39,6 +48,16 @@ pub async fn run_cli(cli: Cli) -> AppResult<()> {
     let quiet = cli.quiet;
 
     if cli.run_jobs {
+        if !cfg!(debug_assertions) && !cli.allow_dev_data {
+            if let Some(repo) = enclosing_git_repo(&paths.data_dir) {
+                return Err(crate::error::AppError::Message(format!(
+                    "refusing --run-jobs: data dir {} is inside git repo {} (dev-only data). \
+                     Use ~/Library/Application Support/com.jobtracker.local, or pass --allow-dev-data.",
+                    paths.data_dir.display(),
+                    repo.display()
+                )));
+            }
+        }
         return handlers::handle_sync(&paths, json, quiet).await;
     }
 
@@ -478,5 +497,28 @@ mod tests {
         let cleared_csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
         let cleared_rows = crate::jobs::csv::parse_csv(&cleared_csv);
         assert_eq!(cleared_rows[1][appeal_idx], "");
+    }
+}
+
+#[cfg(test)]
+mod dev_data_guard_tests {
+    use super::enclosing_git_repo;
+
+    #[test]
+    fn detects_data_dir_inside_git_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(repo.join("data")).unwrap();
+        let found = enclosing_git_repo(&repo.join("data")).unwrap();
+        assert_eq!(found, repo.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn ignores_data_dir_outside_git_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("Application Support/com.jobtracker.local");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(enclosing_git_repo(&dir).is_none());
     }
 }

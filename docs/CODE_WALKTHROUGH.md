@@ -307,12 +307,12 @@ flowchart LR
 
 ### Hourly LaunchAgent: `scripts/install-launchd.ts`
 
-| Lines | What happens |
-| --- | --- |
-| 6-8 | Chooses the fixed LaunchAgent label, the user LaunchAgents plist path, and the current repository root. |
-| 14-46 | Chooses the packaged app binary first, then release binary, then debug binary; adds `--run-jobs --data-dir`. Fails with a useful build instruction if none exist. |
-| 50-81 | Builds a plist with runner arguments, working directory, data-dir environment variable, hourly `StartInterval`, `RunAtLoad`, and shared stdout/stderr worker log. |
-| 83-98 | Ensures parent directories, unloads an old agent, writes the plist, and prints the load command. |
+Plist generation is pure and unit-tested in `scripts/launchd-plist.ts` (`desktop/src/lib/launchd-plist.test.ts`):
+
+- `resolveLaunchdConfig` picks the binary (`/Applications/Job Tracker.app` first, then repo release bundle, release bin, debug bin) and the data dir (`~/Library/Application Support/com.jobtracker.local` unless `JOB_TRACKER_DATA_DIR` is set), and flags data dirs inside the repo.
+- `renderPlist` emits `--run-jobs --data-dir <dir>`, `JOB_TRACKER_DATA_DIR`, `WorkingDirectory` = data dir, hourly `StartInterval`, `RunAtLoad`, and a shared `jobs-worker.log`.
+
+`install-launchd.ts` warns on repo data dirs, unloads the old agent, writes the plist, and runs `launchctl load -w` (reporting failures with the manual command). The LaunchAgent, GUI and packaged `jt` therefore share the Application Support DB; repo `data/` is dev-only. In release builds `cli/mod.rs` refuses `--run-jobs` when the data dir is inside a git repo unless `--allow-dev-data` / `JOB_TRACKER_ALLOW_DEV_DATA` is set.
 
 `scripts/rebuild-app.ts` locks rebuilds, builds the Tauri bundle, replaces `/Applications/Job Tracker.app`, retargets the LaunchAgent unless `--skip-jobs` is given, and relaunches the app only if it was running. `scripts/install-cli.ts` locates or builds a binary and creates `jt` and `job-tracker` symlinks under `~/.local/bin`.
 

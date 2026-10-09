@@ -92,15 +92,16 @@ Hourly work must run even when the UI is closed. Prefer a LaunchAgent that invok
 ```bash
 npm run app:rebuild
 # or: npm run tauri:build && npm run jobs:install
-launchctl unload ~/Library/LaunchAgents/com.jobtracker.local.jobs.plist 2>/dev/null
-launchctl load ~/Library/LaunchAgents/com.jobtracker.local.jobs.plist
+launchctl list | grep com.jobtracker.local.jobs   # verify it is loaded
 ```
 
-The installer unloads any previous `com.jobtracker.local.jobs` plist, then retargets it to:
+The installer unloads any previous `com.jobtracker.local.jobs` plist, rewrites it, and loads it (`launchctl load -w`; a load failure is reported with the manual command). Binary preference: `/Applications/Job Tracker.app/Contents/MacOS/job-tracker`, then the repo release bundle, release bin, debug bin:
 
 ```text
-…/job-tracker --run-jobs --data-dir <JOB_TRACKER_DATA_DIR or repo data/>
+…/job-tracker --run-jobs --data-dir ~/Library/Application Support/com.jobtracker.local
 ```
+
+The LaunchAgent, the GUI and packaged `jt` all use the **same Application Support DB**. Repo `data/` is dev-only. `JOB_TRACKER_DATA_DIR` overrides the installer default (it warns if that path is inside the repo), and release builds refuse `--run-jobs` against a data dir inside a git repo unless `--allow-dev-data` / `JOB_TRACKER_ALLOW_DEV_DATA=1` is given. `app:rebuild` keeps `rebuild.log`/`rebuild.lock` in repo `data/` but does not pass that path to `jobs:install`.
 
 One-shot from the repo:
 

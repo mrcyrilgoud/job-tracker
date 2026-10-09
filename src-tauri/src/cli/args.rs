@@ -34,6 +34,13 @@ pub struct Cli {
     #[arg(long, help = "Run the background jobs cycle (LaunchAgent worker mode)")]
     pub run_jobs: bool,
 
+    #[arg(
+        long,
+        env = "JOB_TRACKER_ALLOW_DEV_DATA",
+        help = "Allow --run-jobs against a data dir inside a git repo (release builds refuse by default)"
+    )]
+    pub allow_dev_data: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
