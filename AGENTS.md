@@ -29,7 +29,7 @@ Resolution order (`src-tauri/src/db/paths.rs`):
 2. Debug/`cargo` builds: repo `data/` when found
 3. Release / packaged `jt`: `~/Library/Application Support/com.jobtracker.local/`
 
-The live Mac GUI uses Application Support. Repo `data/job-tracker.db` is a separate tree and can be stale. **Default for agent work against the real pipeline:**
+The live Mac GUI, packaged `jt`, and the hourly LaunchAgent (`com.jobtracker.local.jobs`, installed by `npm run jobs:install`) all use Application Support. Repo `data/` is dev-only (plus `rebuild.log`/`rebuild.lock`); release `--run-jobs` refuses a data dir inside a git repo unless `--allow-dev-data` is passed. Repo `data/job-tracker.db` is a separate tree and can be stale. **Default for agent work against the real pipeline:**
 
 ```bash
 # packaged jt already defaults here; only set if you need an override

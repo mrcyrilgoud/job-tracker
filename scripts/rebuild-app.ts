@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const projectRoot = process.cwd();
+// rebuild.log / rebuild.lock live here (repo data/ by default). This is NOT the
+// jobs DB location: jobs:install gets the caller's env untouched, so it defaults
+// to Application Support unless JOB_TRACKER_DATA_DIR was explicitly set.
 const dataDir = process.env.JOB_TRACKER_DATA_DIR
   ? path.resolve(process.env.JOB_TRACKER_DATA_DIR)
   : path.join(projectRoot, "data");
@@ -198,6 +201,7 @@ function main(): void {
   }
 
   if (!skipJobs) {
+    // Never inject the rebuild log dir as JOB_TRACKER_DATA_DIR; pass env through as-is.
     const jobsCode = runLogged("npm run jobs:install", "jobs:install");
     if (jobsCode !== 0) {
       notify("Job Tracker rebuild failed", `jobs:install failed — see ${logPath}`);
