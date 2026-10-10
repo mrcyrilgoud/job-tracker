@@ -219,7 +219,7 @@ This module owns SQL queries and business rules, leaving page components and Tau
 | 845-1016 | `update_job` | Validates fields, moves a job between companies when necessary, updates only supplied data, and appends the appropriate events. |
 | 1018-1084 | delete/archive/restore | Permanently deletes a job's dependent records or changes it to/from `archived` with timeline evidence. |
 
-Note: `closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate, and permanent deletion is only the explicit Delete action.
+Note: `closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate. Permanent deletion is `jt delete` or the explicit Delete action in the app.
 | 1087-1164 | watch triage | Converts new watch discoveries to wishlist records, records a dismissal without allowing sync to recreate it, and permits a dismissed source role to return to review. |
 | 1166-1316 | events/counts/favorites | Adds timeline entries, calculates pipeline statistics, and updates favorite state. |
 | 1318-1439 | activity/settings | Creates the seven-day activity chart and persists role keyword/location settings in `app_settings`. |
@@ -301,7 +301,7 @@ flowchart LR
 
 ### CLI
 
-`cli/args.rs:4-39` defines global `--data-dir`, `--json`, `--quiet`, and `--run-jobs` flags. Lines 41-83 enumerate commands: list, get, add, update, note, description, stats, watches, and sync. Each following `Args` struct gives Clap its validation and help text.
+`cli/args.rs` defines global `--data-dir`, `--json`, `--quiet`, and `--run-jobs` flags, and the commands list, get, add, update, delete, note, description, stats, watches, and sync. Each following `Args` struct gives Clap its validation and help text. `jt delete` permanently removes jobs (full id, unique prefix, or URL) and refreshes the CSV mirror; `--status closed` still keeps the job.
 
 `cli/mod.rs:12-20` opens the CLI's own WAL connection and runs migrations. `run_cli` (22-91) resolves data paths, sends `--run-jobs` directly to the full-cycle handler, defaults no subcommand to `list`, and dispatches every subcommand to `cli/handlers.rs`. The handlers reuse the same service modules as Tauri, so terminal and GUI behavior share persistence rules.
 
