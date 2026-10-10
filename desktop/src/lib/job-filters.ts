@@ -11,6 +11,21 @@ export function parseSalaryBound(value: string | null): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+export function validateSalaryRange(salaryMin: string, salaryMax: string): string | null {
+  const minimum = salaryMin.trim();
+  const maximum = salaryMax.trim();
+  const parsedMinimum = minimum ? parseSalaryBound(minimum) : undefined;
+  const parsedMaximum = maximum ? parseSalaryBound(maximum) : undefined;
+
+  if ((minimum && parsedMinimum === undefined) || (maximum && parsedMaximum === undefined)) {
+    return "Enter whole-dollar amounts of 0 or more.";
+  }
+  if (parsedMinimum !== undefined && parsedMaximum !== undefined && parsedMinimum > parsedMaximum) {
+    return "Minimum income must not exceed maximum income.";
+  }
+  return null;
+}
+
 export function filterDraftFromUrl(
   search: string | null,
   postingState: string | null,

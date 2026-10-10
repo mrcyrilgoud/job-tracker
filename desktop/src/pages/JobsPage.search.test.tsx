@@ -382,6 +382,52 @@ describe("JobsPage live search suggestions", () => {
     expect(host.querySelector<HTMLSelectElement>("#posting-state")?.value).toBe("");
   });
 
+  it("validates annual income bounds before applying them", async () => {
+    await mount();
+    const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Filters"]')!;
+    await act(async () => trigger.click());
+
+    const minimum = host.querySelector<HTMLInputElement>("#salary-min")!;
+    const maximum = host.querySelector<HTMLInputElement>("#salary-max")!;
+    expect(host.querySelector('[role="dialog"] legend')?.textContent).toBe("Annual income (USD)");
+    expect(minimum.step).toBe("1");
+
+    await act(async () => {
+      typeInto(minimum, "180000");
+      typeInto(maximum, "120000");
+      host.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click();
+    });
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Minimum income must not exceed maximum income.");
+    expect(host.querySelector('[data-testid="location-search"]')?.textContent).toBe("");
+
+    await act(async () => {
+      typeInto(minimum, "-1");
+      host.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click();
+    });
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Enter whole-dollar amounts of 0 or more.");
+
+    await act(async () => {
+      typeInto(minimum, "100.50");
+      host.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click();
+    });
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Enter whole-dollar amounts of 0 or more.");
+
+    await act(async () => typeInto(maximum, "200000"));
+    await act(async () => typeInto(minimum, "180000"));
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[role="dialog"] button[type="submit"]')!.click();
+      await Promise.resolve();
+    });
+
+    const applied = new URLSearchParams(host.querySelector('[data-testid="location-search"]')?.textContent ?? "");
+    expect(applied.get("salaryMin")).toBe("180000");
+    expect(applied.get("salaryMax")).toBe("200000");
+    expect(apiMocks.listJobsPage.mock.calls.some(([filters]) =>
+      filters?.salaryMin === 180000 && filters?.salaryMax === 200000,
+    )).toBe(true);
+  });
+
   it("closes on outside click, keeps drafts, and Clear all resets the full jobs view", async () => {
     await mount("/?search=engineer&status=applied&companyId=company-1&view=board&salaryMin=100000&postingState=active");
     const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Filters, 2 active"]')!;

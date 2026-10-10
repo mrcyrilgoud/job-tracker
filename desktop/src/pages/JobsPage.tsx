@@ -22,6 +22,7 @@ import {
   filterCompaniesBySearch,
   filterDraftFromUrl,
   parseSalaryBound,
+  validateSalaryRange,
 } from "@/lib/job-filters";
 import { jobStatuses, type JobListSummary, type JobPageCursor, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
@@ -62,6 +63,7 @@ export function JobsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
+  const [filterError, setFilterError] = useState<string | null>(null);
   const [liveSearch, setLiveSearch] = useState(search ?? "");
   const [appliedSearch, setAppliedSearch] = useState(search ?? "");
   const [searchMenuOpen, setSearchMenuOpen] = useState(false);
@@ -116,6 +118,7 @@ export function JobsPage() {
   useEffect(() => {
     setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
     setLiveSearch(search ?? "");
+    setFilterError(null);
   }, [postingState, search, salaryMinParam, salaryMaxParam]);
 
   useEffect(() => {
@@ -563,6 +566,12 @@ export function JobsPage() {
     const nextPosting = filterDraft.postingState;
     const nextSalaryMin = filterDraft.salaryMin.trim();
     const nextSalaryMax = filterDraft.salaryMax.trim();
+    const salaryError = validateSalaryRange(nextSalaryMin, nextSalaryMax);
+    if (salaryError) {
+      setFilterError(salaryError);
+      return;
+    }
+    setFilterError(null);
     if (isFavoriteFilter) next.set("favorites", "true");
     if (isArchivedFilter) next.set("archived", "true");
     if (status) next.set("status", status);
@@ -722,7 +731,7 @@ export function JobsPage() {
           </div>
 
           <div className="flex items-center">
-            <form onSubmit={handleFilterSubmit} className="flex w-full flex-wrap items-center gap-2">
+            <form noValidate onSubmit={handleFilterSubmit} className="flex w-full flex-wrap items-center gap-2">
               <div
                 className="relative min-w-0 w-full max-w-sm flex-1"
                 onBlur={(event) => {
@@ -842,7 +851,7 @@ export function JobsPage() {
                   >
                     <h2 id="jobs-filter-heading" className="mb-4 text-sm font-semibold text-[var(--foreground)]">Filters</h2>
                     <fieldset>
-                      <legend className="field-label">Salary per year (USD)</legend>
+                      <legend className="field-label">Annual income (USD)</legend>
                       <div className="grid grid-cols-2 gap-3">
                         <label htmlFor="salary-min" className="text-xs font-medium text-[var(--muted)]">
                           Minimum
@@ -851,10 +860,15 @@ export function JobsPage() {
                             id="salary-min"
                             type="number"
                             min="0"
-                            step="1000"
+                            step="1"
                             inputMode="numeric"
                             value={filterDraft.salaryMin}
-                            onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMin: event.target.value }))}
+                            aria-invalid={filterError ? true : undefined}
+                            aria-describedby={filterError ? "salary-range-error" : undefined}
+                            onChange={(event) => {
+                              setFilterDraft((current) => ({ ...current, salaryMin: event.target.value }));
+                              setFilterError(null);
+                            }}
                             placeholder="No minimum"
                             className="field mt-1.5 text-sm"
                           />
@@ -865,16 +879,26 @@ export function JobsPage() {
                             id="salary-max"
                             type="number"
                             min="0"
-                            step="1000"
+                            step="1"
                             inputMode="numeric"
                             value={filterDraft.salaryMax}
-                            onChange={(event) => setFilterDraft((current) => ({ ...current, salaryMax: event.target.value }))}
+                            aria-invalid={filterError ? true : undefined}
+                            aria-describedby={filterError ? "salary-range-error" : undefined}
+                            onChange={(event) => {
+                              setFilterDraft((current) => ({ ...current, salaryMax: event.target.value }));
+                              setFilterError(null);
+                            }}
                             placeholder="No maximum"
                             className="field mt-1.5 text-sm"
                           />
                         </label>
                       </div>
                     </fieldset>
+                    {filterError ? (
+                      <p id="salary-range-error" role="alert" className="mt-2 text-xs text-[var(--danger)]">
+                        {filterError}
+                      </p>
+                    ) : null}
                     <label htmlFor="posting-state" className="field-label mt-4">Posting status</label>
                     <select
                       id="posting-state"
