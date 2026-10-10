@@ -3,7 +3,8 @@ use serde_json::json;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use crate::cli::args::{
-    AddArgs, DescriptionArgs, GetArgs, ListArgs, NoteArgs, UpdateArgs, WatchCommands, WatchListArgs,
+    AddArgs, DeleteArgs, DescriptionArgs, GetArgs, ListArgs, NoteArgs, UpdateArgs, WatchCommands,
+    WatchListArgs,
 };
 use crate::cli::output::{
     format_job_detail, format_jobs_table, format_stats, format_watch_positions, print_json,
@@ -15,11 +16,11 @@ use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::active_csv_path;
 use crate::jobs::metadata::resolve_job_metadata;
 use crate::jobs::service::{
-    add_job_event, archive_job, create_job_from_url_with_careers, dismiss_watch_job, get_job_by_id,
-    get_job_detail, get_pipeline_counts, get_weekly_activity, job_cols, list_jobs, map_job,
-    reset_dismissed_watch_job, resolve_title_from_url, retain_watch_positions_matching_criteria,
-    save_open_watch_job, set_job_favorite, unarchive_job, update_job, JobFilters, UpdateJobInput,
-    JOB_COL_COUNT,
+    add_job_event, archive_job, create_job_from_url_with_careers, delete_jobs, dismiss_watch_job,
+    get_job_by_id, get_job_detail, get_pipeline_counts, get_weekly_activity, job_cols, list_jobs,
+    map_job, reset_dismissed_watch_job, resolve_title_from_url,
+    retain_watch_positions_matching_criteria, save_open_watch_job, set_job_favorite, unarchive_job,
+    update_job, JobFilters, UpdateJobInput, JOB_COL_COUNT,
 };
 use crate::models::{is_job_status, JobListItem};
 use crate::runner::run_jobs_cycle_trigger;
@@ -370,6 +371,150 @@ pub fn handle_update(
                 None => "— (1-5, 5 = most appealing)".to_string(),
             }
         );
+    }
+    Ok(())
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeletedJob {
+    id: String,
+    title: String,
+    company_name: String,
+    status: String,
+    url: String,
+}
+
+fn snapshot_job(conn: &Connection, job_id: &str) -> AppResult<DeletedJob> {
+    let job = get_job_by_id(conn, job_id)?
+        .ok_or_else(|| AppError::from(format!("No job found matching '{job_id}'")))?;
+    let company_name: String = conn
+        .query_row(
+            "SELECT name FROM companies WHERE id = ?1",
+            params![job.company_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(map_sqlite)?
+        .unwrap_or_else(|| "Unknown".to_string());
+    Ok(DeletedJob {
+        id: job.id,
+        title: job.title,
+        company_name,
+        status: job.status,
+        url: job.url,
+    })
+}
+
+fn render_deleted_jobs(jobs: &[DeletedJob]) -> String {
+    jobs.iter()
+        .map(|job| {
+            format!(
+                "  {}\n    {} — {} ({})\n    {}",
+                job.id, job.title, job.company_name, job.status, job.url
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn confirms_delete_answer(answer: &str) -> bool {
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+fn confirm_permanent_delete(
+    yes: bool,
+    count: usize,
+    preview: &str,
+    interactive: bool,
+) -> AppResult<()> {
+    if yes {
+        return Ok(());
+    }
+    if interactive {
+        eprintln!("{preview}");
+        eprint!("Permanently delete {count} job(s)? [y/N] ");
+        let _ = std::io::stderr().flush();
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if confirms_delete_answer(&answer) {
+            return Ok(());
+        }
+        return Err(AppError::from("Delete cancelled"));
+    }
+    Err(AppError::from(format!(
+        "Refusing to permanently delete {count} job(s) without --yes.\n{preview}\n  jt delete <id> [<id>...] --yes"
+    )))
+}
+
+pub fn handle_delete(
+    conn: &Connection,
+    paths: &DataPaths,
+    args: DeleteArgs,
+    json: bool,
+    quiet: bool,
+    stdin_is_terminal: bool,
+) -> AppResult<()> {
+    if args.targets.is_empty() {
+        return Err(AppError::from(
+            "At least one job id is required.\n  jt delete <id> [<id>...] --yes",
+        ));
+    }
+
+    let mut ids = Vec::new();
+    for target in &args.targets {
+        let id = resolve_target_job_id(conn, target)?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+
+    let jobs: Vec<DeletedJob> = ids
+        .iter()
+        .map(|id| snapshot_job(conn, id))
+        .collect::<AppResult<_>>()?;
+    let preview = render_deleted_jobs(&jobs);
+    let deleted_count = jobs.len();
+
+    if args.dry_run {
+        if json {
+            print_raw_json(&json!({
+                "dryRun": true,
+                "deletedCount": deleted_count,
+                "deleted": jobs,
+            }));
+        } else if !quiet {
+            println!("Would permanently delete {deleted_count} job(s):");
+            println!("{preview}");
+        }
+        return Ok(());
+    }
+
+    // `--json` is the agent path. Never block it on a terminal prompt.
+    let interactive = stdin_is_terminal && !json;
+    confirm_permanent_delete(args.yes, deleted_count, &preview, interactive)?;
+
+    conn.execute_batch("BEGIN IMMEDIATE").map_err(map_sqlite)?;
+    if let Err(err) = delete_jobs(conn, &ids) {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(err);
+    }
+    if let Err(err) = conn.execute_batch("COMMIT") {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(map_sqlite(err));
+    }
+
+    sync_csv_after_mutation(conn, paths);
+
+    if json {
+        print_raw_json(&json!({
+            "dryRun": false,
+            "deletedCount": deleted_count,
+            "deleted": jobs,
+        }));
+    } else if !quiet {
+        println!("✓ Permanently deleted {deleted_count} job(s):");
+        println!("{preview}");
     }
     Ok(())
 }
@@ -765,6 +910,23 @@ mod tests {
     use super::*;
     use crate::db::migrate::migrate;
     use crate::util::{create_id, now_iso};
+
+    #[test]
+    fn delete_confirmation_accepts_yes_and_refuses_noninteractive() {
+        assert!(confirms_delete_answer("y"));
+        assert!(confirms_delete_answer(" YES "));
+        assert!(!confirms_delete_answer("n"));
+        assert!(!confirms_delete_answer(""));
+
+        assert!(confirm_permanent_delete(true, 1, "preview", false).is_ok());
+        let refused =
+            confirm_permanent_delete(false, 2, "  job-1\n    Role — Acme (wishlist)", false)
+                .unwrap_err();
+        let message = refused.to_string();
+        assert!(message.contains("without --yes"));
+        assert!(message.contains("jt delete <id> [<id>...] --yes"));
+        assert!(message.contains("job-1"));
+    }
 
     #[test]
     fn watch_list_uses_current_job_column_layout() {

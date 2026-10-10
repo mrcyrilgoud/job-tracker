@@ -62,6 +62,13 @@ pub enum Commands {
     )]
     Update(UpdateArgs),
 
+    #[command(
+        name = "delete",
+        about = "Permanently delete one or more jobs",
+        long_about = "Permanently delete jobs from the database and refresh the CSV mirror so a later sync drops them. This does not change `update --status closed`, which keeps the job.\n\nPass --yes to delete without a prompt. In a terminal, omitting --yes asks for confirmation. `--json` and other non-interactive runs must pass --yes. If any id is missing or ambiguous, nothing is deleted."
+    )]
+    Delete(DeleteArgs),
+
     #[command(name = "note", about = "Quickly append a note and event to a job")]
     Note(NoteArgs),
 
@@ -170,7 +177,7 @@ pub struct UpdateArgs {
 
     #[arg(
         long,
-        help = "Update pipeline status (wishlist, applied, interviewing, offer, rejected, withdrawn, closed)"
+        help = "Update pipeline status (wishlist, applied, interviewing, offer, rejected, withdrawn, closed). Setting closed keeps the job"
     )]
     pub status: Option<String>,
 
@@ -236,6 +243,34 @@ pub struct UpdateArgs {
         help = "Clear the appeal score (leave the job unscored)"
     )]
     pub clear_appeal: bool,
+}
+
+#[derive(Debug, Args)]
+#[command(after_help = "Examples:\n  \
+        jt delete <job_id> --yes\n  \
+        jt delete <id-prefix> <job_url> --yes --json\n  \
+        jt delete <job_id> --dry-run")]
+pub struct DeleteArgs {
+    #[arg(
+        required = true,
+        num_args = 1..,
+        value_name = "ID",
+        help = "Job ID (full or unique prefix) or job URL. Repeat to delete several jobs"
+    )]
+    pub targets: Vec<String>,
+
+    #[arg(
+        short = 'y',
+        long = "yes",
+        help = "Delete without a confirmation prompt. Required with --json and when stdin is not a terminal"
+    )]
+    pub yes: bool,
+
+    #[arg(
+        long = "dry-run",
+        help = "Show the jobs that would be deleted without removing them"
+    )]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args)]

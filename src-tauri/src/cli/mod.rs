@@ -2,6 +2,8 @@ pub mod args;
 pub mod handlers;
 pub mod output;
 
+use std::io::IsTerminal;
+
 use rusqlite::Connection;
 
 use crate::cli::args::{Cli, Commands};
@@ -111,6 +113,11 @@ pub async fn run_cli(cli: Cli) -> AppResult<()> {
         Commands::Update(args) => {
             let conn = open_cli_connection(&paths)?;
             handlers::handle_update(&conn, &paths, args, json, quiet)?;
+        }
+        Commands::Delete(args) => {
+            let conn = open_cli_connection(&paths)?;
+            let stdin_is_terminal = std::io::stdin().is_terminal();
+            handlers::handle_delete(&conn, &paths, args, json, quiet, stdin_is_terminal)?;
         }
         Commands::Note(args) => {
             let conn = open_cli_connection(&paths)?;
@@ -271,6 +278,57 @@ mod tests {
             "--clear-appeal"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn parses_delete_args() {
+        let cli = Cli::try_parse_from([
+            "job-tracker",
+            "delete",
+            "job_abc",
+            "job_def",
+            "--yes",
+            "--json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Delete(args)) => {
+                assert_eq!(
+                    args.targets,
+                    vec!["job_abc".to_string(), "job_def".to_string()]
+                );
+                assert!(args.yes);
+                assert!(!args.dry_run);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+        assert!(cli.json);
+
+        let dry_run =
+            Cli::try_parse_from(["job-tracker", "delete", "job_abc", "--dry-run"]).unwrap();
+        match dry_run.command {
+            Some(Commands::Delete(args)) => {
+                assert!(!args.yes);
+                assert!(args.dry_run);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+
+        assert!(Cli::try_parse_from(["job-tracker", "delete"]).is_err());
+    }
+
+    #[test]
+    fn delete_help_includes_examples() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        let help = cmd
+            .find_subcommand_mut("delete")
+            .expect("delete subcommand")
+            .render_long_help()
+            .to_string();
+        assert!(help.contains("jt delete <job_id> --yes"));
+        assert!(help.contains("--dry-run"));
+        assert!(help.contains("closed"));
     }
 
     #[test]
@@ -515,6 +573,282 @@ mod tests {
         let cleared_csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
         let cleared_rows = crate::jobs::csv::parse_csv(&cleared_csv);
         assert_eq!(cleared_rows[1][appeal_idx], "");
+    }
+
+    fn insert_job(conn: &Connection, url: &str, title: &str) -> String {
+        crate::jobs::service::create_job_from_url(
+            conn,
+            url,
+            title,
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .0
+        .id
+    }
+
+    fn rename_job_id(conn: &Connection, from: &str, to: &str) {
+        conn.pragma_update(None, "foreign_keys", false).unwrap();
+        conn.execute(
+            "UPDATE job_events SET job_id = ?1 WHERE job_id = ?2",
+            rusqlite::params![to, from],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE jobs SET id = ?1 WHERE id = ?2",
+            rusqlite::params![to, from],
+        )
+        .unwrap();
+        conn.pragma_update(None, "foreign_keys", true).unwrap();
+    }
+
+    fn csv_ids(csv: &str) -> Vec<String> {
+        crate::jobs::csv::parse_csv(csv)
+            .into_iter()
+            .skip(1)
+            .filter_map(|row| row.first().cloned())
+            .collect()
+    }
+
+    fn delete_args(targets: &[&str], yes: bool, dry_run: bool) -> DeleteArgs {
+        DeleteArgs {
+            targets: targets.iter().map(|target| (*target).to_string()).collect(),
+            yes,
+            dry_run,
+        }
+    }
+
+    #[test]
+    fn delete_command_removes_jobs_from_db_and_csv() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate::migrate(&conn).unwrap();
+
+        let keep_id = insert_job(&conn, "https://example.com/jobs/keep", "Keep role");
+        let prefix_id = insert_job(&conn, "https://example.com/jobs/prefix", "Prefix role");
+        rename_job_id(&conn, &prefix_id, "pref2222-1111-1111-1111-111111111111");
+        let prefix_id = "pref2222-1111-1111-1111-111111111111".to_string();
+        let url_id = insert_job(&conn, "https://example.com/jobs/delete-by-url", "URL role");
+        let first_shared = insert_job(&conn, "https://example.com/jobs/shared-a", "Shared A");
+        let second_shared = insert_job(&conn, "https://example.com/jobs/shared-b", "Shared B");
+        rename_job_id(&conn, &first_shared, "abc11111-1111-1111-1111-111111111111");
+        rename_job_id(
+            &conn,
+            &second_shared,
+            "abc11111-2222-2222-2222-222222222222",
+        );
+        let first_shared = "abc11111-1111-1111-1111-111111111111".to_string();
+        let second_shared = "abc11111-2222-2222-2222-222222222222".to_string();
+
+        crate::jobs::csv::export_jobs_csv(&conn, &paths.jobs_csv_path, None).unwrap();
+        let before = csv_ids(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap());
+        assert!(before.contains(&prefix_id));
+        assert!(before.contains(&keep_id));
+
+        let missing = handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&["missing-job"], true, false),
+            true,
+            true,
+            false,
+        );
+        assert!(missing.unwrap_err().to_string().contains("No job found"));
+        assert!(crate::jobs::service::get_job_by_id(&conn, &keep_id)
+            .unwrap()
+            .is_some());
+
+        let ambiguous = handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&["abc11111"], true, false),
+            true,
+            true,
+            false,
+        );
+        assert!(ambiguous.unwrap_err().to_string().contains("Ambiguous"));
+        assert!(crate::jobs::service::get_job_by_id(&conn, &first_shared)
+            .unwrap()
+            .is_some());
+        assert!(crate::jobs::service::get_job_by_id(&conn, &second_shared)
+            .unwrap()
+            .is_some());
+
+        let needs_yes = handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&[&prefix_id], false, false),
+            true,
+            true,
+            true,
+        );
+        assert!(needs_yes.unwrap_err().to_string().contains("without --yes"));
+        assert!(crate::jobs::service::get_job_by_id(&conn, &prefix_id)
+            .unwrap()
+            .is_some());
+
+        handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&[&prefix_id], false, true),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(crate::jobs::service::get_job_by_id(&conn, &prefix_id)
+            .unwrap()
+            .is_some());
+
+        handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&["pref2222", "pref2222"], true, false),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(crate::jobs::service::get_job_by_id(&conn, &prefix_id)
+            .unwrap()
+            .is_none());
+        assert!(crate::jobs::service::get_job_by_id(&conn, &keep_id)
+            .unwrap()
+            .is_some());
+
+        handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&["https://example.com/jobs/delete-by-url"], true, false),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(crate::jobs::service::get_job_by_id(&conn, &url_id)
+            .unwrap()
+            .is_none());
+
+        let partial = handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&[&keep_id, "still-missing"], true, false),
+            true,
+            true,
+            false,
+        );
+        assert!(partial.is_err());
+        assert!(crate::jobs::service::get_job_by_id(&conn, &keep_id)
+            .unwrap()
+            .is_some());
+
+        handlers::handle_delete(
+            &conn,
+            &paths,
+            delete_args(&[&first_shared, &second_shared], true, false),
+            true,
+            true,
+            false,
+        )
+        .unwrap();
+        assert!(crate::jobs::service::get_job_by_id(&conn, &first_shared)
+            .unwrap()
+            .is_none());
+        assert!(crate::jobs::service::get_job_by_id(&conn, &second_shared)
+            .unwrap()
+            .is_none());
+
+        let csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
+        let remaining = csv_ids(&csv);
+        assert_eq!(remaining, vec![keep_id.clone()]);
+        assert!(!csv.contains(&prefix_id));
+        assert!(!csv.contains(&url_id));
+        assert!(!csv.contains(&first_shared));
+
+        let (_imported, exported) =
+            crate::jobs::csv::sync_jobs_csv_with_disk(&paths.db_path, &paths.jobs_csv_path)
+                .unwrap();
+        assert_eq!(exported.row_count, 1);
+        let after_sync = csv_ids(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap());
+        assert_eq!(after_sync, vec![keep_id.clone()]);
+        assert!(crate::jobs::service::get_job_by_id(&conn, &prefix_id)
+            .unwrap()
+            .is_none());
+        assert!(crate::jobs::service::get_job_by_id(&conn, &keep_id)
+            .unwrap()
+            .is_some());
+
+        crate::jobs::service::delete_job(&conn, &keep_id).unwrap();
+        assert!(
+            csv_ids(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap()).contains(&keep_id)
+        );
+        let (_imported, exported) =
+            crate::jobs::csv::sync_jobs_csv_with_disk(&paths.db_path, &paths.jobs_csv_path)
+                .unwrap();
+        assert_eq!(exported.row_count, 0);
+        assert!(csv_ids(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap()).is_empty());
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn closed_status_keeps_the_job() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate::migrate(&conn).unwrap();
+        let job_id = insert_job(&conn, "https://example.com/jobs/close-me", "Close role");
+
+        handlers::handle_update(
+            &conn,
+            &paths,
+            UpdateArgs {
+                target: job_id.clone(),
+                status: Some("closed".to_string()),
+                applied_at: None,
+                notes: None,
+                append_note: None,
+                description: None,
+                clear_description: false,
+                title: None,
+                company: None,
+                location: None,
+                favorite: false,
+                unfavorite: false,
+                archive: false,
+                unarchive: false,
+                appeal: None,
+                clear_appeal: false,
+            },
+            true,
+            true,
+        )
+        .unwrap();
+
+        let job = crate::jobs::service::get_job_by_id(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(job.status, "closed");
+        let rows =
+            crate::jobs::csv::parse_csv(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap());
+        let status_idx = rows[0]
+            .iter()
+            .position(|header| header == "status")
+            .unwrap();
+        let row = rows
+            .iter()
+            .find(|row| row.first().map(String::as_str) == Some(job_id.as_str()))
+            .unwrap();
+        assert_eq!(row[status_idx], "closed");
     }
 }
 

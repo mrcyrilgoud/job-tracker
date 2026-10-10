@@ -77,7 +77,7 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 
 ### Closed status
 
-`closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate, and permanent deletion is only the explicit Delete action.
+`closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate. Permanent deletion is `jt delete <id> --yes` (or the explicit Delete action in the app).
 
 ### Jobs CSV
 
@@ -171,6 +171,10 @@ jt add "https://boards.greenhouse.io/stripe/jobs/12345" --status wishlist --note
 # Update status or log notes
 jt update <job_id> --status applied --applied-at today --json
 jt note <job_id> "Recruiter phone screen scheduled for Friday" --json
+
+# Permanently delete (closed status keeps the job; pass --yes for agents)
+jt delete <job_id> --yes --json
+jt delete <id_prefix> <job_id_or_url> --yes --json
 
 # Overall appeal: 1 = least appealing, 5 = most. Blank means unscored.
 jt update <job_id> --appeal 5 --json
