@@ -18,7 +18,11 @@ import {
 } from "@/components/icons";
 import { JobsBoardView } from "@/components/JobsBoardView";
 import { api } from "@/lib/api";
-import { filterCompaniesBySearch, filterDraftFromUrl } from "@/lib/job-filters";
+import {
+  filterCompaniesBySearch,
+  filterDraftFromUrl,
+  parseSalaryBound,
+} from "@/lib/job-filters";
 import { jobStatuses, type JobListSummary, type JobPageCursor, type JobStatus, type WeeklyActivity } from "@/lib/schema";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import {
@@ -42,11 +46,6 @@ export function JobsPage() {
   const search = searchParams.get("search") ?? undefined;
   const salaryMinParam = searchParams.get("salaryMin");
   const salaryMaxParam = searchParams.get("salaryMax");
-  const parseSalaryBound = (value: string | null) => {
-    if (value === null || !/^\d+$/.test(value)) return undefined;
-    const parsed = Number(value);
-    return Number.isSafeInteger(parsed) ? parsed : undefined;
-  };
   const salaryMin = parseSalaryBound(salaryMinParam);
   const salaryMax = parseSalaryBound(salaryMaxParam);
   const isFavoriteFilter = searchParams.get("favorites") === "true";

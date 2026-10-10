@@ -583,21 +583,24 @@ pub fn list_open_watch_positions(
 
     let mut out = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
 
-    // Query-time watch filtering through the single engine authority (Req 8.1,
-    // 8.2, 10.1, 10.2): resolve the structured criteria per (company_id, source)
-    // via the per-call cache and keep only rows the engine includes. This is a
-    // read-only filter of the returned list — no job is mutated or deleted
-    // (Req 18). There is no explicit row cap here, so no post-filter truncation
-    // is required (had one existed, it would be applied after this retain per
-    // Req 8.3).
+    retain_watch_positions_matching_criteria(conn, &mut out)?;
+
+    Ok(out)
+}
+
+/// Keep watch positions included by the shared filter engine.
+/// Criteria lookup failures retain the existing fail-open behavior.
+pub(crate) fn retain_watch_positions_matching_criteria(
+    conn: &Connection,
+    positions: &mut Vec<JobListItem>,
+) -> AppResult<()> {
     use crate::filtering::engine::{matches, JobView};
     use crate::filtering::model::FilterCriteria;
     use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
     let aliases = load_alias_table(conn)?;
     let mut cache = CriteriaCache::new();
-
-    out.retain(|item| {
+    positions.retain(|item| {
         let criteria = cache
             .resolve(conn, &item.job.company_id, &item.job.source)
             .unwrap_or_else(|_| FilterCriteria::match_all());
@@ -611,8 +614,7 @@ pub fn list_open_watch_positions(
         )
         .included
     });
-
-    Ok(out)
+    Ok(())
 }
 
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {

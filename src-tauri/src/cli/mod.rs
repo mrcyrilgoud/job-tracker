@@ -5,7 +5,7 @@ pub mod output;
 use rusqlite::Connection;
 
 use crate::cli::args::{Cli, Commands};
-use crate::db::migrate;
+use crate::db::configure_app_connection;
 use crate::db::paths::{resolve_data_dir, DataPaths};
 use crate::error::AppResult;
 
@@ -50,10 +50,7 @@ pub(crate) fn dev_data_repo(
 fn open_cli_connection(paths: &DataPaths) -> AppResult<Connection> {
     paths.ensure_dirs()?;
     let conn = Connection::open(&paths.db_path)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "busy_timeout", 5000i32)?;
-    conn.pragma_update(None, "foreign_keys", true)?;
-    migrate::migrate(&conn)?;
+    configure_app_connection(&conn)?;
     Ok(conn)
 }
 

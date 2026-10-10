@@ -5,6 +5,12 @@ export type JobFilterDraft = {
   salaryMax: string;
 };
 
+export function parseSalaryBound(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
 export function filterDraftFromUrl(
   search: string | null,
   postingState: string | null,

@@ -15,7 +15,7 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::db::migrate;
+use crate::db::configure_app_connection;
 use crate::error::{AppError, AppResult};
 use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::{active_csv_path, csv_lock_path};
@@ -157,13 +157,7 @@ fn export_with_own_connection(
 
 fn open_export_conn(db_path: &std::path::Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(|e| AppError::from(e.to_string()))?;
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|e| AppError::from(e.to_string()))?;
-    conn.pragma_update(None, "busy_timeout", 5000i32)
-        .map_err(|e| AppError::from(e.to_string()))?;
-    conn.pragma_update(None, "foreign_keys", true)
-        .map_err(|e| AppError::from(e.to_string()))?;
-    migrate::migrate(&conn).map_err(|e| AppError::from(e.to_string()))?;
+    configure_app_connection(&conn).map_err(|e| AppError::from(e.to_string()))?;
     Ok(conn)
 }
 

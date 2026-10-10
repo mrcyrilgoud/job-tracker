@@ -1,6 +1,9 @@
 import type { JobListItem } from "@/lib/schema";
 
 import { matchesRoleSearch } from "@/lib/companies-ui";
+import { parseSalaryBound } from "@/lib/job-filters";
+
+export { parseSalaryBound };
 
 export type NewRolesFilters = {
   search: string;
@@ -19,12 +22,6 @@ export type NewRolesCompany = {
 export type NewRolesCompanyGroup = NewRolesCompany & {
   roles: JobListItem[];
 };
-
-export function parseSalaryBound(value: string | null): number | undefined {
-  if (value === null || !/^\d+$/.test(value)) return undefined;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
-}
 
 export function newRolesFiltersFromParams(params: URLSearchParams): NewRolesFilters {
   const postingState = params.get("postingState");

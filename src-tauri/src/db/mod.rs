@@ -14,6 +14,15 @@ pub mod paths;
 
 pub use paths::{resolve_data_dir, DataPaths};
 
+/// Apply the standard SQLite settings and schema used by app database handles.
+pub(crate) fn configure_app_connection(conn: &Connection) -> AppResult<()> {
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "busy_timeout", 5000i32)?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    migrate::migrate(conn)?;
+    Ok(())
+}
+
 /// Shared app state. The runner mutex is held across background-operation
 /// awaits to provide in-process single-flight.
 #[derive(Clone)]
@@ -30,10 +39,7 @@ impl AppState {
         let conn = Connection::open(&paths.db_path)
             .with_context(|| format!("open db {}", paths.db_path.display()))
             .map_err(AppError::from)?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "busy_timeout", 5000i32)?;
-        conn.pragma_update(None, "foreign_keys", true)?;
-        migrate::migrate(&conn)?;
+        configure_app_connection(&conn)?;
         let csv_export =
             CsvExportCoordinator::new(paths.db_path.clone(), paths.jobs_csv_path.clone());
         Ok(Self {

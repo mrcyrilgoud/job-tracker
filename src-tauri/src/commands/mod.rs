@@ -43,7 +43,7 @@ use crate::jobs::service::{
     unarchive_jobs as unarchive_jobs_service, update_job, JobFilters, LocationSettings,
     UpdateJobInput,
 };
-use crate::models::JobPageCursor;
+use crate::models::{Job, JobPageCursor};
 use crate::runner::try_lock_runner;
 use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
 use crate::runs::legacy::execute_legacy;
@@ -823,12 +823,7 @@ pub async fn approve_watch_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> AppResult<serde_json::Value> {
-    let result = state.with_db_tx(|conn| {
-        let job = approve_watch_job(conn, &job_id)?;
-        Ok(serde_json::json!({ "job": job }))
-    })?;
-    state.csv_export.mark_dirty();
-    Ok(result)
+    mutate_watch_job(&state, &job_id, approve_watch_job)
 }
 
 #[tauri::command]
@@ -836,12 +831,7 @@ pub async fn dismiss_watch_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> AppResult<serde_json::Value> {
-    let result = state.with_db_tx(|conn| {
-        let job = dismiss_watch_job(conn, &job_id)?;
-        Ok(serde_json::json!({ "job": job }))
-    })?;
-    state.csv_export.mark_dirty();
-    Ok(result)
+    mutate_watch_job(&state, &job_id, dismiss_watch_job)
 }
 
 #[tauri::command]
@@ -849,12 +839,7 @@ pub async fn save_open_watch_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> AppResult<serde_json::Value> {
-    let result = state.with_db_tx(|conn| {
-        let job = save_open_watch_job(conn, &job_id)?;
-        Ok(serde_json::json!({ "job": job }))
-    })?;
-    state.csv_export.mark_dirty();
-    Ok(result)
+    mutate_watch_job(&state, &job_id, save_open_watch_job)
 }
 
 #[tauri::command]
@@ -862,12 +847,20 @@ pub async fn reset_dismissed_watch_job_cmd(
     state: State<'_, AppState>,
     job_id: String,
 ) -> AppResult<serde_json::Value> {
-    let result = state.with_db_tx(|conn| {
-        let job = reset_dismissed_watch_job(conn, &job_id)?;
-        Ok(serde_json::json!({ "job": job }))
-    })?;
-    state.csv_export.mark_dirty();
-    Ok(result)
+    mutate_watch_job(&state, &job_id, reset_dismissed_watch_job)
+}
+
+fn mutate_watch_job(
+    state: &AppState,
+    job_id: &str,
+    operation: impl FnOnce(&Connection, &str) -> AppResult<Job>,
+) -> AppResult<serde_json::Value> {
+    let job = mark_csv_dirty_after_batch(
+        state.with_db_tx(|conn| operation(conn, job_id)),
+        |_| true,
+        || state.csv_export.mark_dirty(),
+    )?;
+    Ok(serde_json::json!({ "job": job }))
 }
 
 #[tauri::command]

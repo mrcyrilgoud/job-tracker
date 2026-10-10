@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use std::fs::OpenOptions;
 use tauri::AppHandle;
 
-use crate::db::migrate;
+use crate::db::configure_app_connection;
 use crate::db::paths::DataPaths;
 use crate::error::{AppError, AppResult};
 use crate::runs::coordinator::{RunRequest, SystemClock};
@@ -15,10 +15,7 @@ use crate::runs::RunRegistry;
 pub(crate) fn open_runner_conn(paths: &DataPaths) -> AppResult<Connection> {
     paths.ensure_dirs()?;
     let conn = Connection::open(&paths.db_path)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "busy_timeout", 5000i32)?;
-    conn.pragma_update(None, "foreign_keys", true)?;
-    migrate::migrate(&conn)?;
+    configure_app_connection(&conn)?;
     Ok(conn)
 }
 
