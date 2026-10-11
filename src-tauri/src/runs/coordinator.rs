@@ -39,8 +39,10 @@ use std::fs::File;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(test)]
 use chrono::{DateTime, SecondsFormat, Utc};
 use fs2::FileExt;
+#[cfg(test)]
 use parking_lot::Mutex as SyncMutex;
 use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::{watch, OwnedMutexGuard};
@@ -116,9 +118,11 @@ impl Clock for SystemClock {
 }
 
 /// Controllable clock for tests. Clones share the same time.
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct ManualClock(Arc<SyncMutex<DateTime<Utc>>>);
 
+#[cfg(test)]
 impl ManualClock {
     /// Start at `rfc3339`. Panics on an invalid timestamp (test helper).
     pub fn at(rfc3339: &str) -> Self {
@@ -133,14 +137,9 @@ impl ManualClock {
         let mut t = self.0.lock();
         *t += delta;
     }
-
-    pub fn set(&self, rfc3339: &str) {
-        *self.0.lock() = DateTime::parse_from_rfc3339(rfc3339)
-            .expect("ManualClock::set requires an RFC 3339 timestamp")
-            .with_timezone(&Utc);
-    }
 }
 
+#[cfg(test)]
 impl Clock for ManualClock {
     fn now(&self) -> String {
         self.0.lock().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -411,14 +410,6 @@ pub struct RunGuards {
 }
 
 impl RunGuards {
-    pub fn lock_guard(&self) -> &RunLockGuard {
-        &self.lock
-    }
-
-    pub fn registration(&self) -> &RunRegistration {
-        &self.registration
-    }
-
     /// Unregister the run, then release the flock and the in-process guard.
     pub fn release(self) {
         let Self { registration, lock } = self;
@@ -441,7 +432,6 @@ impl fmt::Debug for RunGuards {
 pub struct AcceptedParts {
     pub run_id: RunId,
     pub run_type: RunType,
-    pub trigger: Trigger,
     pub source_run_id: Option<String>,
     pub started_at: String,
     pub ledger: RunLedger,
@@ -449,12 +439,12 @@ pub struct AcceptedParts {
     pub states_at_start: HashMap<String, String>,
     pub stages: Vec<StageProgress>,
     pub last_seq: u64,
-    pub snapshot: RunSnapshot,
     pub conn: Connection,
     pub cancel_rx: watch::Receiver<bool>,
 }
 
 impl AcceptedRun {
+    #[cfg(test)]
     pub fn run_id(&self) -> &str {
         self.run_id.as_str()
     }
@@ -467,14 +457,6 @@ impl AcceptedRun {
         }
     }
 
-    pub fn lock_guard(&self) -> &RunLockGuard {
-        &self.guards.lock
-    }
-
-    pub fn registration(&self) -> &RunRegistration {
-        &self.guards.registration
-    }
-
     /// Split into data and guards, so `execute` can release the locks at a
     /// precise point (after `finalize_run`, before the terminal event) while
     /// still owning the connection.
@@ -482,7 +464,6 @@ impl AcceptedRun {
         let Self {
             run_id,
             run_type,
-            trigger,
             source_run_id,
             started_at,
             ledger,
@@ -490,16 +471,15 @@ impl AcceptedRun {
             states_at_start,
             stages,
             last_seq,
-            snapshot,
             conn,
             cancel_rx,
             guards,
+            ..
         } = self;
         (
             AcceptedParts {
                 run_id,
                 run_type,
-                trigger,
                 source_run_id,
                 started_at,
                 ledger,
@@ -507,7 +487,6 @@ impl AcceptedRun {
                 states_at_start,
                 stages,
                 last_seq,
-                snapshot,
                 conn,
                 cancel_rx,
             },
@@ -579,6 +558,7 @@ where
         }
     }
 
+    #[cfg(test)]
     pub fn with_config(mut self, config: RunConfig) -> Self {
         self.config = config;
         self
@@ -600,6 +580,7 @@ where
         &self.paths
     }
 
+    #[cfg(test)]
     pub fn registry(&self) -> &RunRegistry {
         &self.registry
     }
@@ -1975,24 +1956,6 @@ where
         snapshot.enforce_bounds();
         snapshot.enforce_bounds();
         snapshot
-    }
-
-    /// Drop handler for RunDriver. If the run is not terminal (i.e., execute_run
-    /// panicked or was aborted before reaching finalize), mark the run as Error
-    /// with runner_interrupted and close out any open postings.
-    fn mark_interrupted_if_needed(&mut self) {
-        let at = self.now();
-        // Temporarily replace the connection so we can use it in the DB operations
-        let conn = std::mem::replace(
-            &mut self.conn,
-            rusqlite::Connection::open_in_memory().unwrap(),
-        );
-
-        // Use the store function to abort the run
-        let _ = store::abort_run(&conn, &self.run_id, &at);
-
-        // Restore the connection (though it's not used after this)
-        self.conn = conn;
     }
 }
 impl<F, S, K> Drop for RunDriver<'_, F, S, K> {

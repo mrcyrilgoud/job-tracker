@@ -5,13 +5,10 @@
 //! ```text
 //! Queued    --FirstUnitStarted-->            Active
 //! Queued    --CancelAccepted-->              Canceling
-//! Queued    --RunFailed-->                   Error
 //! Active    --CancelAccepted-->              Canceling
 //! Active    --AllUnitsSettled{any_error}-->  CompletedWithErrors
 //! Active    --AllUnitsSettled{!any_error}--> Completed
-//! Active    --RunFailed-->                   Error
 //! Canceling --AllUnitsSettled-->             Canceled
-//! Canceling --RunFailed-->                   Error
 //! ```
 //!
 //! Every other (status, event) pair, including any event on a terminal
@@ -29,8 +26,6 @@ pub enum RunEvent {
     /// Every scheduled unit reached a terminal status. `any_error` is true
     /// when at least one unit (posting or stage) ended in Error (Req 1.5, 1.6, 5.6).
     AllUnitsSettled { any_error: bool },
-    /// A run-level failure prevents the run from continuing (Req 1.7).
-    RunFailed,
 }
 
 impl RunEvent {
@@ -40,7 +35,6 @@ impl RunEvent {
             Self::FirstUnitStarted => "first_unit_started",
             Self::CancelAccepted => "cancel_accepted",
             Self::AllUnitsSettled { .. } => "all_units_settled",
-            Self::RunFailed => "run_failed",
         }
     }
 }
@@ -72,7 +66,6 @@ pub fn next_status(current: RunStatus, event: RunEvent) -> Result<RunStatus, Lif
     match (current, event) {
         (S::Queued, E::FirstUnitStarted) => Ok(S::Active),
         (S::Queued | S::Active, E::CancelAccepted) => Ok(S::Canceling),
-        (S::Queued | S::Active | S::Canceling, E::RunFailed) => Ok(S::Error),
         (S::Active, E::AllUnitsSettled { any_error: true }) => Ok(S::CompletedWithErrors),
         (S::Active, E::AllUnitsSettled { any_error: false }) => Ok(S::Completed),
         (S::Canceling, E::AllUnitsSettled { .. }) => Ok(S::Canceled),
@@ -89,12 +82,11 @@ mod tests {
     use RunEvent as E;
     use RunStatus as S;
 
-    const ALL_EVENTS: [RunEvent; 5] = [
+    const ALL_EVENTS: [RunEvent; 4] = [
         E::FirstUnitStarted,
         E::CancelAccepted,
         E::AllUnitsSettled { any_error: false },
         E::AllUnitsSettled { any_error: true },
-        E::RunFailed,
     ];
 
     /// The full legal-transition table from the design state diagram.
@@ -102,13 +94,10 @@ mod tests {
         match (current, event) {
             (S::Queued, E::FirstUnitStarted) => Some(S::Active),
             (S::Queued, E::CancelAccepted) => Some(S::Canceling),
-            (S::Queued, E::RunFailed) => Some(S::Error),
             (S::Active, E::CancelAccepted) => Some(S::Canceling),
             (S::Active, E::AllUnitsSettled { any_error: false }) => Some(S::Completed),
             (S::Active, E::AllUnitsSettled { any_error: true }) => Some(S::CompletedWithErrors),
-            (S::Active, E::RunFailed) => Some(S::Error),
             (S::Canceling, E::AllUnitsSettled { .. }) => Some(S::Canceled),
-            (S::Canceling, E::RunFailed) => Some(S::Error),
             _ => None,
         }
     }
@@ -168,13 +157,6 @@ mod tests {
             next_status(S::Canceling, E::CancelAccepted),
             Err(LifecycleError::IllegalTransition { .. })
         ));
-    }
-
-    #[test]
-    fn run_failure_reaches_error_from_every_non_terminal_status() {
-        for status in [S::Queued, S::Active, S::Canceling] {
-            assert_eq!(next_status(status, E::RunFailed), Ok(S::Error));
-        }
     }
 
     #[test]

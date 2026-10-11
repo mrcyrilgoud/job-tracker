@@ -16,15 +16,17 @@
 //! before publishing or returning a value built from untrusted text.
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime};
 
 use super::ledger::{PostingEntry, RunLedger};
+#[cfg(test)]
+use super::model::JobIdentity;
 use super::model::{
-    JobIdentity, PostingCounts, PostingState, PostingStatus, RunStatus, RunType, StageName,
-    StageOutcome,
+    PostingCounts, PostingState, PostingStatus, RunStatus, RunType, StageName, StageOutcome,
 };
 
 /// Contract version carried in every event and snapshot (Req 11.7).
@@ -83,10 +85,12 @@ fn bound_opt_in_place(s: &mut Option<String>, max_bytes: usize) {
     }
 }
 
+#[cfg(test)]
 fn fits(s: &str, max_bytes: usize) -> bool {
     s.len() <= max_bytes
 }
 
+#[cfg(test)]
 fn fits_opt(s: &Option<String>, max_bytes: usize) -> bool {
     s.as_deref().map_or(true, |v| fits(v, max_bytes))
 }
@@ -142,6 +146,7 @@ fn clamp_u64(v: &mut u64) {
     *v = (*v).min(BoundedCount::MAX);
 }
 
+#[cfg(test)]
 fn counts_fit(c: &PostingCounts) -> bool {
     [c.queued, c.active, c.completed, c.error, c.canceled]
         .iter()
@@ -165,6 +170,7 @@ pub trait ContractBounds {
     /// Truncate strings and clamp counts so every bound holds.
     fn enforce_bounds(&mut self);
     /// True when every string and count is within its bound.
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool;
 }
 
@@ -221,6 +227,7 @@ impl ContractBounds for EvidenceProviderView {
         bound_in_place(&mut self.posting_id, MAX_ID_BYTES);
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         fits(&self.provider, MAX_CATEGORY_BYTES)
             && fits(&self.signal, MAX_CATEGORY_BYTES)
@@ -264,6 +271,7 @@ impl ContractBounds for EvidenceView {
         bound_opt_in_place(&mut self.failure_category, MAX_CATEGORY_BYTES);
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         fits(&self.requested_url, MAX_URL_BYTES)
             && fits_opt(&self.final_url, MAX_URL_BYTES)
@@ -301,6 +309,7 @@ pub struct PostingProgress {
 }
 
 impl PostingProgress {
+    #[cfg(test)]
     pub fn identity(&self) -> JobIdentity {
         JobIdentity {
             job_id: self.job_id.clone(),
@@ -356,6 +365,7 @@ impl ContractBounds for PostingProgress {
         }
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         fits(&self.job_id, MAX_ID_BYTES)
             && fits(&self.title, MAX_TITLE_BYTES)
@@ -401,6 +411,7 @@ impl ContractBounds for StageProgress {
         bound_opt_in_place(&mut self.error, MAX_REASON_BYTES);
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         self.current <= self.total && fits_opt(&self.error, MAX_REASON_BYTES)
     }
@@ -433,6 +444,7 @@ impl PostingOutcomes {
         ]
     }
 
+    #[cfg(test)]
     fn fits(&self) -> bool {
         [
             self.active,
@@ -479,6 +491,7 @@ impl ContractBounds for RunSummary {
         }
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         fits(&self.run_id, MAX_ID_BYTES)
             && fits_opt(&self.source_run_id, MAX_ID_BYTES)
@@ -686,6 +699,7 @@ impl ContractBounds for RunProgressEvent {
         }
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         fits(&self.run_id, MAX_ID_BYTES)
             && fits(&self.message, MAX_MESSAGE_BYTES)
@@ -752,6 +766,7 @@ impl ContractBounds for RunSnapshot {
         bound_opt_in_place(&mut self.source_run_id, MAX_ID_BYTES);
     }
 
+    #[cfg(test)]
     fn is_within_bounds(&self) -> bool {
         fits(&self.run_id, MAX_ID_BYTES)
             && fits(&self.message, MAX_MESSAGE_BYTES)
@@ -807,9 +822,11 @@ impl RunEventSink for LogSink {
 }
 
 /// Records every published event in order. For tests.
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub struct RecordingSink(Mutex<Vec<RunProgressEvent>>);
 
+#[cfg(test)]
 impl RecordingSink {
     pub fn new() -> Self {
         Self::default()
@@ -840,6 +857,7 @@ impl RecordingSink {
     }
 }
 
+#[cfg(test)]
 impl RunEventSink for RecordingSink {
     fn publish(&self, event: &RunProgressEvent) {
         self.lock().push(event.clone());

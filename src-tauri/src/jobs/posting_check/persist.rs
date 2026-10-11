@@ -172,6 +172,7 @@ pub fn apply_classified_check(
 /// latest check is Unknown, this is the conclusive state that preceded it.
 /// `None` when the job has never had a conclusive result. Retention
 /// (`store::prune_history`) always keeps the row this reads.
+#[cfg(test)]
 pub fn preceding_conclusive_state(
     conn: &Connection,
     job_id: &str,

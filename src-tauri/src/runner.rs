@@ -34,6 +34,7 @@ pub fn try_lock_runner(paths: &DataPaths) -> AppResult<std::fs::File> {
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(&paths.runner_lock_path)?;
     if lock_file.try_lock_exclusive().is_err() {
         return Err(AppError::from("operation_in_progress:runner"));

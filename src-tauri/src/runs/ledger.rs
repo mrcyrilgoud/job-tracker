@@ -55,10 +55,12 @@ impl PostingEntry {
         &self.identity.job_id
     }
 
+    #[cfg(test)]
     pub fn is_retry_eligible(&self) -> bool {
         is_retry_eligible(self.status, self.posting_state)
     }
 
+    #[cfg(test)]
     pub fn needs_attention(&self) -> bool {
         needs_attention(self.status, self.posting_state)
     }
@@ -171,6 +173,7 @@ pub fn is_retry_eligible(status: PostingStatus, state: Option<PostingState>) -> 
 }
 
 /// "Needs attention" filter (Req 9.7): Posting_State Unknown, or status Error.
+#[cfg(test)]
 pub fn needs_attention(status: PostingStatus, state: Option<PostingState>) -> bool {
     state == Some(PostingState::Unknown) || status == PostingStatus::Error
 }

@@ -21,17 +21,13 @@ impl RunId {
         Self(Uuid::new_v4().to_string())
     }
 
-    /// Wrap an existing identifier (for example one loaded from SQLite).
+    #[cfg(test)]
     pub fn from_existing(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
     }
 }
 
@@ -165,6 +161,7 @@ impl PostingStatus {
         PostingStatus::Canceled,
     ];
 
+    #[cfg(test)]
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Error | Self::Canceled)
     }
@@ -295,6 +292,7 @@ pub enum Trigger {
 }
 
 impl Trigger {
+    #[cfg(test)]
     pub const ALL: [Trigger; 5] = [
         Trigger::Desktop,
         Trigger::LegacyCommand,
@@ -313,6 +311,7 @@ impl Trigger {
         }
     }
 
+    #[cfg(test)]
     pub fn parse(s: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|v| v.as_str() == s)
     }
@@ -334,7 +333,7 @@ mod tests {
 
     #[test]
     fn run_id_is_uuid_v4_and_unique() {
-        let ids: HashSet<String> = (0..256).map(|_| RunId::new().into_string()).collect();
+        let ids: HashSet<String> = (0..256).map(|_| RunId::new().to_string()).collect();
         assert_eq!(ids.len(), 256);
         for id in &ids {
             let parsed = Uuid::parse_str(id).expect("valid uuid");
@@ -345,7 +344,7 @@ mod tests {
 
     #[test]
     fn run_id_serializes_as_plain_string() {
-        let id = RunId::from_existing("abc-123");
+        let id = RunId("abc-123".into());
         assert_eq!(serde_json::to_value(&id).unwrap(), json!("abc-123"));
         let back: RunId = serde_json::from_value(json!("abc-123")).unwrap();
         assert_eq!(back, id);

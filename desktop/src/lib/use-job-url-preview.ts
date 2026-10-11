@@ -4,17 +4,8 @@ import { api, type ConfirmedJobDiscovery, type JobUrlPreview } from "@/lib/api";
 import {
   applyJobUrlPreview,
   confirmJobUrlPreview,
-  resetJobUrlDiscovery,
+  isHttpUrl,
 } from "@/lib/job-url-preview";
-
-function isValidPostingUrl(value: string) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 function normalizeUrl(value: string) {
   return value.trim();
@@ -64,7 +55,7 @@ export function useJobUrlPreview(args: {
     setAutofillError(null);
     setAutofillStatus(null);
 
-    if (!isValidPostingUrl(postingUrl)) {
+    if (!isHttpUrl(postingUrl)) {
       setAutofillError("Enter a valid http or https posting link.");
       return;
     }
@@ -79,7 +70,7 @@ export function useJobUrlPreview(args: {
         return;
       }
       setPreview(nextPreview);
-      setConfirmedDiscovery(resetJobUrlDiscovery().confirmedDiscovery);
+      setConfirmedDiscovery(null);
       setTitle((current) =>
         applyJobUrlPreview(
           { title: current, companyName: companyRef.current, description: descriptionRef.current },
@@ -138,6 +129,5 @@ export function useJobUrlPreview(args: {
       if (!preview) return;
       setConfirmedDiscovery(confirmJobUrlPreview(preview));
     },
-    isValidPostingUrl,
   };
 }

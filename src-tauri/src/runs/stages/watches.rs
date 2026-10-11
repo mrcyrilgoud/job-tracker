@@ -54,7 +54,6 @@ pub struct WatchesStageResult {
     pub items: Vec<serde_json::Value>,
     /// `Succeeded` here always: an apply/DB failure short-circuits with `Err`
     /// before this is built, so a returned `Ok` is always a success.
-    pub outcome: StageOutcome,
     /// Final `StageProgress` (also delivered through the progress callback).
     pub progress: StageProgress,
 }
@@ -162,7 +161,6 @@ where
     progress(progress_final.clone());
     Ok(WatchesStageResult {
         items,
-        outcome: StageOutcome::Succeeded,
         progress: progress_final,
     })
 }
@@ -226,7 +224,6 @@ mod tests {
         .unwrap();
         assert_eq!(applied, vec![watch.id.clone()]);
 
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0]["watchId"], serde_json::json!(watch.id));
         assert_eq!(result.items[0]["result"]["ok"], serde_json::json!(true));
@@ -258,7 +255,6 @@ mod tests {
         .unwrap();
 
         // The stage still succeeds; the failure is recorded as an item result.
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         assert_eq!(result.items[0]["result"]["ok"], serde_json::json!(false));
         let failures: i64 = conn
             .query_row(
@@ -304,7 +300,6 @@ mod tests {
         let result = run_watches_stage(&mut conn, |p| snapshots.push(p), |_id| {})
             .await
             .unwrap();
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         assert!(result.items.is_empty());
         assert_eq!(result.progress.total, BoundedCount::from_usize(0));
         assert_eq!(snapshots.first().unwrap().outcome, StageOutcome::InProgress);

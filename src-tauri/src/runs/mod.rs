@@ -6,10 +6,6 @@
 //! then the progress contract, SQLite store, coordinator, stages, and legacy
 //! projections.
 
-// Scaffolding: most items are consumed by later tasks (coordinator, commands,
-// CLI adapters). Remove once the run model is wired into the command surface.
-#![allow(dead_code)]
-
 pub mod coordinator;
 pub mod ledger;
 pub mod legacy;
@@ -76,11 +72,6 @@ impl RunRegistry {
         }
     }
 
-    /// Registered run ids (unordered).
-    pub fn live_run_ids(&self) -> Vec<String> {
-        self.inner.lock().keys().cloned().collect()
-    }
-
     fn unregister(&self, run_id: &str) {
         self.inner.lock().remove(run_id);
     }
@@ -90,12 +81,6 @@ impl RunRegistry {
 pub struct RunRegistration {
     registry: RunRegistry,
     run_id: String,
-}
-
-impl RunRegistration {
-    pub fn run_id(&self) -> &str {
-        &self.run_id
-    }
 }
 
 impl Drop for RunRegistration {

@@ -198,6 +198,7 @@ pub enum ContentSignal {
 }
 
 impl ContentSignal {
+    #[cfg(test)]
     pub const ALL: [ContentSignal; 11] = [
         Self::TitleMatch,
         Self::CompanyMatch,
@@ -249,6 +250,7 @@ pub enum FailureCategory {
 }
 
 impl FailureCategory {
+    #[cfg(test)]
     pub const ALL: [FailureCategory; 13] = [
         Self::Timeout,
         Self::DnsTimeout,
@@ -411,15 +413,10 @@ impl CheckEvidence {
     /// True when the attempt ended with a transient failure category or a
     /// transient final HTTP status (429/5xx). A failed provider listing alone
     /// is not transient here: the page is still evaluated in that case.
+    #[cfg(test)]
     pub fn is_transient(&self) -> bool {
         self.failure.is_some_and(FailureCategory::is_transient)
             || self.http_status.is_some_and(is_transient_http_status)
-    }
-
-    /// Final URL of the attempt: `final_url` when a redirect changed it, else
-    /// `requested_url`.
-    pub fn effective_final_url(&self) -> &str {
-        self.final_url.as_deref().unwrap_or(&self.requested_url)
     }
 
     /// Normalized JSON for `posting_check_evidence.evidence_json`.

@@ -322,7 +322,7 @@ Plist generation is pure and unit-tested in `scripts/launchd-plist.ts` (`desktop
 
 `src-tauri/src/error.rs:3-15` defines application errors. Its `Serialize` implementation (17-24) converts every error to the message Tauri returns to TypeScript. `map_sqlite` (40-50) turns SQLite busy/locked errors into the actionable `database busy; retry shortly` message.
 
-The Rust unit tests live beside their modules and exercise migration, URL normalization/discovery, safe-fetch restrictions, CSV merge behavior, document validation, ATS parsing/sync, runner behavior, service rules, and CLI parsing/CRUD. The six desktop Vitest files focus on pure UI helpers and testable client behaviors. Run the checks from the repository root:
+The Rust unit tests live beside their modules and exercise migration, URL normalization/discovery, safe-fetch restrictions, CSV merge behavior, document validation, ATS parsing/sync, runner behavior, service rules, and CLI parsing/CRUD. The desktop Vitest suite covers UI helpers, components, and page behavior. Run the checks from the repository root:
 
 ```bash
 npm test
@@ -341,7 +341,7 @@ Use this as the short index for files not expanded above.
 | Job UI | `pages/JobsPage.tsx`, `NewJobPage.tsx`, `JobDetailPage.tsx`, `components/JobsBoardView.tsx`, `JobDetailClient.tsx`, `FavoriteButton.tsx` | Lists, board, creation, detail editing, and favorite controls. |
 | Company UI | `pages/CompaniesPage.tsx`, `CompanyDetailPage.tsx`, `components/CompaniesClient.tsx`, `components/companies/*`, `lib/companies-ui.ts`, `lib/use-company-actions.ts` | Company list/detail, watch controls, new-role triage, and presentation rules. |
 | Document/settings UI | `pages/DocumentsPage.tsx`, `SettingsPage.tsx`, matching client components | Library import, CSV, and monitoring preferences. |
-| UI async helpers | `use-job-url-preview.ts`, `job-url-preview.ts`, `use-pending-actions.ts`, `use-latest-async.ts` | Race-safe previews/loading and keyed pending-action feedback. |
+| UI async helpers | `use-job-url-preview.ts`, `job-url-preview.ts`, `use-pending-actions.ts` | Race-safe previews and keyed pending-action feedback. |
 | Rust app core | `main.rs`, `lib.rs`, `models.rs`, `error.rs`, `util.rs` | Process selection, Tauri builder, JSON models, errors, IDs/URLs/timestamps. |
 | Rust persistence | `db/paths.rs`, `db/mod.rs`, `db/migrate.rs`, `companies.rs`, `documents.rs` | Path policy, connections/transactions, schema, company records, document library. |
 | Rust jobs | `jobs/service.rs`, `check_active.rs`, `metadata.rs`, `board_discovery.rs`, `safe_fetch.rs`, `csv*.rs` | Job rules, guarded network fetches, URL detection, and CSV synchronization. |

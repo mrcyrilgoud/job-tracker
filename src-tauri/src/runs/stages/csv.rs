@@ -37,7 +37,6 @@ pub struct CsvStageResult {
     /// Export result for the legacy JSON projection (`csv.exported`).
     pub exported: ExportResult,
     /// `Succeeded`; a failure short-circuits with a stage-level `Err`.
-    pub outcome: StageOutcome,
     /// Final `StageProgress` (also delivered through the progress callback).
     pub progress: StageProgress,
 }
@@ -68,7 +67,6 @@ pub async fn run_csv_stage(
     Ok(CsvStageResult {
         imported,
         exported,
-        outcome: StageOutcome::Succeeded,
         progress: progress_final,
     })
 }
@@ -105,7 +103,6 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         // A fresh DB has no CSV on disk yet, so the mirror is exported, not imported.
         assert!(result.imported.is_none());
         assert!(csv_path.exists(), "CSV mirror should be written");

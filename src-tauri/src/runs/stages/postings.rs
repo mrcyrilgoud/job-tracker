@@ -82,18 +82,6 @@ pub enum WorkerMsg {
     LateAbandoned { job_id: String },
 }
 
-impl WorkerMsg {
-    pub fn job_id(&self) -> &str {
-        match self {
-            Self::Authoritative { job_id, .. }
-            | Self::Failed { job_id, .. }
-            | Self::LateStarted { job_id }
-            | Self::Supplementary { job_id, .. }
-            | Self::LateAbandoned { job_id } => job_id,
-        }
-    }
-}
-
 /// Everything a worker needs for one posting. Built by the coordinator at
 /// dispatch time from the accepted run's inputs; no DB handle.
 pub struct WorkerTask<F> {

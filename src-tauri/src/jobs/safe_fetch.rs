@@ -27,9 +27,7 @@ pub(crate) fn shared_client() -> Result<Client, String> {
                 .build()
                 .map_err(|error| error.to_string())
         })
-        .as_ref()
-        .map(Clone::clone)
-        .map_err(Clone::clone)
+        .clone()
 }
 
 /// Response headers that carry classification signals. Everything else is discarded so

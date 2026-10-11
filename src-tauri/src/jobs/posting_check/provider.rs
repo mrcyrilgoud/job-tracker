@@ -300,12 +300,9 @@ impl ProviderListingCache {
     }
 
     /// Number of boards with a cache entry (fetched or in flight).
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.lock().unwrap_or_else(|e| e.into_inner()).len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 

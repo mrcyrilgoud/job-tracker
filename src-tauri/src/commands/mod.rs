@@ -890,15 +890,17 @@ pub async fn import_document(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(input.bytes_base64.as_bytes())
         .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-    state
-        .with_db_tx(|conn| {
-            let doc = documents::import_document(
-                conn,
-                &state.paths.documents_dir,
-                &input.original_filename,
-                &input.mime_type,
-                &bytes,
-            )?;
+    let mut staged_filename = None;
+    let transaction = state.with_db_tx(|conn| {
+        let doc = documents::import_document(
+            conn,
+            &state.paths.documents_dir,
+            &input.original_filename,
+            &input.mime_type,
+            &bytes,
+        )?;
+        staged_filename = Some(doc.stored_filename.clone());
+        let value =
             if let (Some(job_id), Some(kind)) = (input.job_id.as_deref(), input.kind.as_deref()) {
                 let attachment = documents::attach_document_to_job(conn, job_id, &doc.id, kind)?;
                 crate::jobs::service::add_job_event(
@@ -907,25 +909,29 @@ pub async fn import_document(
                     "document_attached",
                     Some(&format!("Attached {} ({kind})", doc.original_filename)),
                 )?;
-                return Ok(serde_json::json!({ "document": doc, "attachment": attachment }));
+                serde_json::json!({ "document": doc.clone(), "attachment": attachment })
+            } else {
+                serde_json::json!({ "document": doc.clone() })
+            };
+        Ok((value, doc))
+    });
+
+    let (value, document) = match transaction {
+        Ok(result) => result,
+        Err(error) => {
+            if let Some(filename) = staged_filename {
+                let staged_path = state.paths.documents_dir.join(".tmp").join(filename);
+                let _ = std::fs::remove_file(staged_path);
             }
-            Ok(serde_json::json!({ "document": doc }))
-        })
-        .and_then(|value| {
-            // Finalize file only after the DB transaction commits.
-            if let Some(doc_val) = value.get("document") {
-                let doc: crate::models::Document = serde_json::from_value(doc_val.clone())
-                    .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-                state.with_db(|conn| {
-                    documents::finalize_staged_document(conn, &state.paths.documents_dir, &doc)
-                })?;
-            }
-            Ok(value)
-        })
-        .map_err(|err| {
-            // Best-effort temp cleanup if the transaction failed after staging bytes.
-            err
-        })
+            return Err(error);
+        }
+    };
+
+    // Finalize bytes only after both the document row and optional attachment commit.
+    state.with_db(|conn| {
+        documents::finalize_staged_document(conn, &state.paths.documents_dir, &document)
+    })?;
+    Ok(value)
 }
 
 #[derive(Debug, Deserialize)]

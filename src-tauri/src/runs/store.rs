@@ -20,10 +20,10 @@
 //!   `evidence_version`), because the `CheckEvidence` type lives in
 //!   `jobs::posting_check` and is not a dependency of the store.
 
-use std::collections::HashMap;
-
 use chrono::DateTime;
 use rusqlite::{params, Connection, OptionalExtension, Row};
+#[cfg(test)]
+use std::collections::HashMap;
 
 use super::model::{
     JobIdentity, PostingCounts, PostingState, PostingStatus, RunId, RunStatus, RunType, StageName,
@@ -1582,8 +1582,8 @@ pub fn prune_history(
     })
 }
 
-/// Preceding conclusive Posting_State for a job (Req 7.7), used by tests here
-/// and by `jobs::posting_check::persist::preceding_conclusive_state`.
+/// Preceding conclusive Posting_State for a job, used by history tests.
+#[cfg(test)]
 pub fn latest_conclusive_evidence_state(
     conn: &Connection,
     job_id: &str,
@@ -1606,6 +1606,7 @@ pub fn latest_conclusive_evidence_state(
 }
 
 /// Map job id → `state_at_start` for a run (input to `build_run_summary`).
+#[cfg(test)]
 pub fn states_at_start(conn: &Connection, run_id: &str) -> AppResult<HashMap<String, String>> {
     let mut stmt = conn
         .prepare("SELECT job_id, state_at_start FROM run_postings WHERE run_id = ?1")

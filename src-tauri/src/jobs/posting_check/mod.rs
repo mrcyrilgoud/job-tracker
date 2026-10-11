@@ -8,10 +8,6 @@
 //! excerpts, cookies, and URL credentials are never stored or published
 //! (Req 7.4, 7.9).
 
-// Scaffolding: most items are consumed by later tasks (classifier, evaluator,
-// coordinator). Remove once the pipeline is wired into the run coordinator.
-#![allow(dead_code)]
-
 pub mod classify;
 pub mod evidence;
 pub mod fetch;
@@ -53,6 +49,7 @@ pub struct PostingCheckInput {
 impl PostingCheckInput {
     /// Input with no stored provider data. A target can still be resolved from
     /// an ATS posting URL.
+    #[cfg(test)]
     pub fn new(identity: JobIdentity) -> Self {
         Self {
             identity,

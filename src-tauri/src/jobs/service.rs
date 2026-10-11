@@ -822,8 +822,8 @@ pub fn update_job(
         .is_new_from_watch
         .unwrap_or(existing.is_new_from_watch);
     let is_fav = updates.is_favorite.unwrap_or(existing.is_favorite);
-    let salary_min = updates.salary_min.clone().unwrap_or(existing.salary_min);
-    let salary_max = updates.salary_max.clone().unwrap_or(existing.salary_max);
+    let salary_min = updates.salary_min.unwrap_or(existing.salary_min);
+    let salary_max = updates.salary_max.unwrap_or(existing.salary_max);
     if salary_min.is_some_and(|value| value < 0)
         || salary_max.is_some_and(|value| value < 0)
         || matches!((salary_min, salary_max), (Some(minimum), Some(maximum)) if minimum > maximum)

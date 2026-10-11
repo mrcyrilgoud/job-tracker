@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const projectRoot = process.cwd();
 
@@ -24,18 +25,49 @@ function resolveBinary(): string {
   return debugBin;
 }
 
-function installSymlink(targetBin: string, aliasName: string, installDir: string) {
+export function installSymlink(
+  targetBin: string,
+  aliasName: string,
+  installDir: string,
+  projectRoot = process.cwd(),
+) {
   const destPath = path.join(installDir, aliasName);
+  const target = path.resolve(targetBin);
+  const managedTargets = [
+    "/Applications/Job Tracker.app/Contents/MacOS/job-tracker",
+    path.join(
+      projectRoot,
+      "src-tauri/target/release/bundle/macos/Job Tracker.app/Contents/MacOS/job-tracker",
+    ),
+    path.join(projectRoot, "src-tauri/target/release/job-tracker"),
+    path.join(projectRoot, "src-tauri/target/debug/job-tracker"),
+  ].map((candidate) => path.resolve(candidate));
+
   try {
-    if (fs.existsSync(destPath) || fs.lstatSync(destPath).isSymbolicLink()) {
-      fs.unlinkSync(destPath);
+    const existing = fs.lstatSync(destPath);
+    if (!existing.isSymbolicLink()) {
+      throw new Error(`Refusing to replace existing non-symlink: ${destPath}`);
     }
-  } catch {
-    // ignore
+    const existingTarget = path.resolve(installDir, fs.readlinkSync(destPath));
+    if (existingTarget !== target) {
+      if (!managedTargets.includes(existingTarget)) {
+        throw new Error(
+          `Refusing to replace unrelated symlink: ${destPath} -> ${existingTarget}`,
+        );
+      }
+      fs.unlinkSync(destPath);
+    } else {
+      console.log(`✓ ${aliasName} already points to ${target}`);
+      return;
+    }
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
+      throw error;
+    }
   }
 
-  fs.symlinkSync(targetBin, destPath);
-  console.log(`✓ Symlinked ${aliasName} -> ${targetBin}`);
+  fs.symlinkSync(target, destPath);
+  console.log(`✓ Symlinked ${aliasName} -> ${target}`);
   console.log(`  Installed to ${destPath}`);
 }
 
@@ -64,4 +96,6 @@ function main() {
   console.log("  jt --help\n");
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

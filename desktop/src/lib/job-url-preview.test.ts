@@ -10,7 +10,7 @@ import {
   formatJobSaveError,
   formatStoredPostingOption,
   isConfirmedJobDiscovery,
-  resetJobUrlDiscovery,
+  isHttpUrl,
   serializeConfirmedJobDiscovery,
   storedPostingLinksFromJobs,
   watchOptionForJobUrlPreview,
@@ -198,11 +198,11 @@ describe("applyJobUrlPreview", () => {
     ).toEqual({ careersUrl: "https://www.onebrief.com/careers" });
   });
 
-  it("clears stale discovery when the posting URL changes", () => {
-    expect(resetJobUrlDiscovery()).toEqual({
-      preview: null,
-      confirmedDiscovery: null,
-    });
+  it("accepts only absolute HTTP and HTTPS URLs", () => {
+    expect(isHttpUrl("https://example.com/jobs/1")).toBe(true);
+    expect(isHttpUrl("http://example.com/jobs/1")).toBe(true);
+    expect(isHttpUrl("javascript:alert(1)")).toBe(false);
+    expect(isHttpUrl("not a URL")).toBe(false);
   });
 
   it("turns board validation failures into an actionable watch warning", () => {

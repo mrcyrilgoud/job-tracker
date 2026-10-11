@@ -14,7 +14,7 @@ export type StoredPostingLink = {
   updatedAt: string;
 };
 
-function isHttpUrl(value: string) {
+export function isHttpUrl(value: string) {
   try {
     const parsed = new URL(value);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
@@ -116,10 +116,6 @@ export function isConfirmedJobDiscovery(
     );
   }
   return preview.careersUrl === confirmedDiscovery.careersUrl;
-}
-
-export function resetJobUrlDiscovery() {
-  return { preview: null, confirmedDiscovery: null } as const;
 }
 
 export function serializeConfirmedJobDiscovery(

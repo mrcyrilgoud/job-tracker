@@ -49,7 +49,6 @@ pub struct CareersStageResult {
     /// Item-level results in apply order, shaped for the legacy JSON
     /// projection (`{ "companyId": ..., "result": ... }`).
     pub items: Vec<serde_json::Value>,
-    pub outcome: StageOutcome,
     /// Final `StageProgress` (also delivered through the progress callback).
     pub progress: StageProgress,
 }
@@ -164,7 +163,6 @@ where
     progress(progress_final.clone());
     Ok(CareersStageResult {
         items,
-        outcome: StageOutcome::Succeeded,
         progress: progress_final,
     })
 }
@@ -229,7 +227,6 @@ mod tests {
         .unwrap();
         assert_eq!(applied, vec!["Acme".to_string()]);
 
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.items[0]["companyId"], serde_json::json!(id));
         // First snapshot captured => initial-snapshot item result.
@@ -271,7 +268,6 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         assert_eq!(
             result.items[0]["result"]["changed"],
             serde_json::json!(false)
@@ -298,7 +294,6 @@ mod tests {
         let result = run_careers_stage(&mut conn, |p| snapshots.push(p), |_name| {})
             .await
             .unwrap();
-        assert_eq!(result.outcome, StageOutcome::Succeeded);
         assert!(result.items.is_empty());
         assert_eq!(result.progress.total, BoundedCount::from_usize(0));
     }

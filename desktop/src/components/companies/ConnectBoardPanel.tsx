@@ -6,19 +6,11 @@ import {
   defaultStoredPostingUrl,
   formatInvokeError,
   formatStoredPostingOption,
+  isHttpUrl,
   storedPostingLinksFromJobs,
   type StoredPostingLink,
 } from "@/lib/job-url-preview";
 import { watchProviders, type CompanyRow, type WatchProvider } from "@/lib/schema";
-
-function isValidPostingUrl(value: string) {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Connects one company to an ATS board. Previously mounted in three places at
@@ -79,7 +71,7 @@ export function ConnectBoardPanel({
     const postingUrl = url.trim();
     const requestId = ++previewRequestId.current;
     setError(null);
-    if (!isValidPostingUrl(postingUrl)) {
+    if (!isHttpUrl(postingUrl)) {
       setError("Enter a link starting with http or https.");
       return;
     }

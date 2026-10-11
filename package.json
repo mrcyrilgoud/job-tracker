@@ -13,6 +13,7 @@
     "desktop:build": "npm --prefix desktop run build",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:desktop": "npm --prefix desktop run test",
+    "test:installer": "tsx --test scripts/install-cli.test.ts",
     "jobs:install": "tsx scripts/install-launchd.ts",
     "app:rebuild": "tsx scripts/rebuild-app.ts",
     "hooks:install": "tsx scripts/install-git-hooks.ts"

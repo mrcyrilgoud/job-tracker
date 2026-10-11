@@ -178,8 +178,7 @@ pub fn with_csv_file_lock<T>(
         .map_err(|e| AppError::from(format!("open csv lock: {e}")))?;
     file.lock_exclusive()
         .map_err(|e| AppError::from(format!("csv lock held: {e}")))?;
-    let result = f();
-    result
+    f()
 }
 
 #[cfg(test)]
