@@ -168,6 +168,13 @@ describe("reduceRun: accepted and events", () => {
     expect(s.displayed?.postingCounts.completed).toBe(1);
   });
 
+  it("reuses the posting list for an event without posting changes", () => {
+    const start = reduceRun(initialRunViewState, accepted());
+    const before = start.displayed?.postings;
+    const next = reduceRun(start, { type: "event", event: event({ seq: 2 }) });
+    expect(next.displayed?.postings).toBe(before);
+  });
+
   it("builds the displayed run from a seq=1 Queued event that beats the accepted response", () => {
     const s = reduceAll([
       { type: "event", event: event({ seq: 1, runStatus: "queued", postings: IDS.map((id) => posting(id)) }) },

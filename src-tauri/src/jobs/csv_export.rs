@@ -15,7 +15,6 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::db::configure_app_connection;
 use crate::error::{AppError, AppResult};
 use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::{active_csv_path, csv_lock_path};
@@ -136,9 +135,15 @@ impl CsvExportCoordinator {
 
     /// Run a configuration change exclusively with the exporter. Queued and
     /// future exports resolve the destination after this operation completes.
-    pub async fn with_exclusive<T>(&self, f: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+    pub async fn with_exclusive<T, F>(&self, f: F) -> AppResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> AppResult<T> + Send + 'static,
+    {
         let _guard = self.export_lock.lock().await;
-        f()
+        tokio::task::spawn_blocking(f)
+            .await
+            .map_err(|error| AppError::from(format!("CSV operation task failed: {error}")))?
     }
 }
 
@@ -156,8 +161,19 @@ fn export_with_own_connection(
 }
 
 fn open_export_conn(db_path: &std::path::Path) -> AppResult<Connection> {
+    open_csv_command_conn(db_path)
+}
+
+/// Open a migration-free connection for CSV and mirror operations. Schema
+/// migrations belong to application/CLI startup, not short-lived export work.
+pub(crate) fn open_csv_command_conn(db_path: &std::path::Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(|e| AppError::from(e.to_string()))?;
-    configure_app_connection(&conn).map_err(|e| AppError::from(e.to_string()))?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(|e| AppError::from(e.to_string()))?;
+    conn.pragma_update(None, "busy_timeout", 5000i32)
+        .map_err(|e| AppError::from(e.to_string()))?;
+    conn.pragma_update(None, "foreign_keys", true)
+        .map_err(|e| AppError::from(e.to_string()))?;
     Ok(conn)
 }
 
@@ -188,8 +204,25 @@ mod tests {
     use crate::db::paths::DataPaths;
     use crate::jobs::csv_config::set_custom_csv_path;
     use crate::jobs::service::create_job_from_url;
+    use rusqlite::OptionalExtension;
     use std::sync::atomic::AtomicUsize;
     use tempfile::tempdir;
+
+    #[test]
+    fn export_connection_does_not_run_schema_migrations() {
+        let directory = tempdir().unwrap();
+        let db_path = directory.path().join("job-tracker.db");
+        let conn = open_export_conn(&db_path).unwrap();
+        let jobs_table: Option<String> = conn
+            .query_row(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'jobs'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        assert!(jobs_table.is_none());
+    }
 
     #[tokio::test]
     async fn rapid_marks_coalesce_to_one_export() {

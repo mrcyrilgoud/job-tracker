@@ -178,9 +178,13 @@ function snapshotFromEvent(e: RunProgressEvent): RunSnapshot {
 
 /** Merge posting deltas by `jobId`, preserving ordinal order. Reports unknown ids. */
 function mergePostings(
-  current: readonly PostingProgress[],
+  current: PostingProgress[],
   delta: readonly PostingProgress[],
 ): { postings: PostingProgress[]; unknownIds: boolean } {
+  // Stage-only and terminal events carry no posting delta. Reusing the array
+  // avoids rebuilding the entire run's posting list for every such event.
+  if (delta.length === 0) return { postings: current, unknownIds: false };
+
   const byId = new Map(delta.map((p) => [p.jobId, p]));
   const postings = current.map((p) => {
     const next = byId.get(p.jobId);

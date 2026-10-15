@@ -308,6 +308,51 @@ pub struct JobFilters {
 
 pub const JOB_PAGE_SIZE: usize = 100;
 
+/// Compact projection used by watch views. Keep only fields rendered by the
+/// watch inbox/company surfaces; long job detail fields stay on `get_job`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchJobSummary {
+    pub id: String,
+    pub company_id: String,
+    pub title: String,
+    pub url: String,
+    pub status: String,
+    pub posting_state: String,
+    pub source: String,
+    pub location: Option<String>,
+    pub is_new_from_watch: bool,
+    pub watch_disposition: Option<String>,
+    pub updated_at: String,
+    pub salary_min: Option<i64>,
+    pub salary_max: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchRoleSummary {
+    pub job: WatchJobSummary,
+    pub company_name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchRolePage {
+    pub jobs: Vec<WatchRoleSummary>,
+    pub next_cursor: Option<JobPageCursor>,
+}
+
+#[derive(Clone, Default)]
+pub struct WatchRoleFilters {
+    pub company_id: Option<String>,
+    pub new_only: Option<bool>,
+    pub open_only: Option<bool>,
+    pub posting_state: Option<String>,
+    pub search: Option<String>,
+    pub salary_min: Option<i64>,
+    pub salary_max: Option<i64>,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 pub struct LocationSettings {
     pub country: String,
@@ -547,6 +592,163 @@ pub fn list_job_ids(conn: &Connection, filters: JobFilters) -> AppResult<Vec<Str
         .query_map(params_ref.as_slice(), |row| row.get(0))
         .map_err(map_sqlite)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)
+}
+
+fn watch_role_filter_sql(
+    filters: &WatchRoleFilters,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut sql = String::from(" WHERE 1=1");
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if let Some(company_id) = &filters.company_id {
+        sql.push_str(" AND j.company_id = ?");
+        values.push(Box::new(company_id.clone()));
+    }
+    if filters.new_only == Some(true) {
+        sql.push_str(" AND j.is_new_from_watch = 1");
+    }
+    if filters.open_only == Some(true) {
+        sql.push_str(
+            " AND j.posting_state = 'active' AND j.source IN ('greenhouse', 'lever', 'ashby')",
+        );
+    }
+    if let Some(posting_state) = &filters.posting_state {
+        sql.push_str(" AND j.posting_state = ?");
+        values.push(Box::new(posting_state.clone()));
+    }
+    if let Some(search) = &filters.search {
+        // Match the existing watch-view search contract: title, company, and
+        // location. URL/notes/description matches belong to the broad Jobs/CLI
+        // search, not these compact role lists.
+        sql.push_str(" AND (j.title LIKE ? OR c.name LIKE ? OR j.location LIKE ?)");
+        let pattern = format!("%{search}%");
+        for _ in 0..3 {
+            values.push(Box::new(pattern.clone()));
+        }
+    }
+    if filters.salary_min.is_some() || filters.salary_max.is_some() {
+        sql.push_str(" AND (j.salary_min IS NOT NULL OR j.salary_max IS NOT NULL)");
+        if let Some(minimum) = filters.salary_min {
+            sql.push_str(" AND COALESCE(j.salary_max, 9223372036854775807) >= ?");
+            values.push(Box::new(minimum));
+        }
+        if let Some(maximum) = filters.salary_max {
+            sql.push_str(" AND COALESCE(j.salary_min, 0) <= ?");
+            values.push(Box::new(maximum));
+        }
+    }
+    (sql, values)
+}
+
+/// Return a compact, cursor-paged watch-role view. Criteria filtering is
+/// applied while scanning narrow rows, so pagination remains correct even when
+/// a watch's structured criteria excludes most candidates.
+pub fn list_watch_roles_page(
+    conn: &Connection,
+    filters: WatchRoleFilters,
+    cursor: Option<JobPageCursor>,
+) -> AppResult<WatchRolePage> {
+    use crate::filtering::engine::{matches, JobView};
+    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::resolver::{load_alias_table, CriteriaCache};
+
+    let aliases = load_alias_table(conn)?;
+    let mut criteria_cache = CriteriaCache::new();
+    let mut scan_cursor = cursor;
+    let mut matches_for_page = Vec::with_capacity(JOB_PAGE_SIZE + 1);
+
+    loop {
+        let (mut where_sql, mut values) = watch_role_filter_sql(&filters);
+        if let Some(cursor) = &scan_cursor {
+            where_sql.push_str(" AND (j.updated_at < ? OR (j.updated_at = ? AND j.id < ?))");
+            values.push(Box::new(cursor.updated_at.clone()));
+            values.push(Box::new(cursor.updated_at.clone()));
+            values.push(Box::new(cursor.id.clone()));
+        }
+        values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
+        let sql = format!(
+            "SELECT j.id, j.company_id, j.title, j.url, j.status, j.posting_state,
+                    j.source, j.location, j.is_new_from_watch, j.watch_disposition,
+                    j.updated_at, j.salary_min, j.salary_max, c.name
+             FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
+             ORDER BY j.updated_at DESC, j.id DESC LIMIT ?"
+        );
+        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|value| value.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+        let candidates = stmt
+            .query_map(params_ref.as_slice(), |row| {
+                Ok(WatchRoleSummary {
+                    job: WatchJobSummary {
+                        id: row.get(0)?,
+                        company_id: row.get(1)?,
+                        title: row.get(2)?,
+                        url: row.get(3)?,
+                        status: row.get(4)?,
+                        posting_state: row.get(5)?,
+                        source: row.get(6)?,
+                        location: row.get(7)?,
+                        is_new_from_watch: row.get::<_, i64>(8)? != 0,
+                        watch_disposition: row.get(9)?,
+                        updated_at: row.get(10)?,
+                        salary_min: row.get(11)?,
+                        salary_max: row.get(12)?,
+                    },
+                    company_name: row.get(13)?,
+                })
+            })
+            .map_err(map_sqlite)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(map_sqlite)?;
+
+        let raw_count = candidates.len();
+        let last_candidate_cursor = candidates.last().map(|candidate| JobPageCursor {
+            updated_at: candidate.job.updated_at.clone(),
+            id: candidate.job.id.clone(),
+        });
+        for candidate in candidates {
+            let criteria = criteria_cache
+                .resolve(conn, &candidate.job.company_id, &candidate.job.source)
+                .unwrap_or_else(|_| FilterCriteria::match_all());
+            if matches(
+                &criteria,
+                &aliases,
+                JobView {
+                    title: &candidate.job.title,
+                    location: candidate.job.location.as_deref(),
+                },
+            )
+            .included
+            {
+                matches_for_page.push(candidate);
+                if matches_for_page.len() > JOB_PAGE_SIZE {
+                    break;
+                }
+            }
+        }
+
+        if matches_for_page.len() > JOB_PAGE_SIZE || raw_count < JOB_PAGE_SIZE + 1 {
+            break;
+        }
+        scan_cursor = last_candidate_cursor;
+    }
+
+    let has_more = matches_for_page.len() > JOB_PAGE_SIZE;
+    if has_more {
+        matches_for_page.truncate(JOB_PAGE_SIZE);
+    }
+    let next_cursor = has_more
+        .then(|| {
+            matches_for_page.last().map(|role| JobPageCursor {
+                updated_at: role.job.updated_at.clone(),
+                id: role.job.id.clone(),
+            })
+        })
+        .flatten();
+
+    Ok(WatchRolePage {
+        jobs: matches_for_page,
+        next_cursor,
+    })
 }
 
 /// The latest known open snapshot from a company's connected ATS boards.
@@ -1473,6 +1675,71 @@ mod tests {
         let json = serde_json::to_value(&first.jobs[0]).unwrap();
         assert!(json["job"].get("description").is_none());
         assert!(json["job"].get("notes").is_none());
+    }
+
+    #[test]
+    fn watch_role_pages_use_compact_rows_stable_cursors_and_live_search() {
+        let conn = test_connection();
+        let timestamp = "2026-01-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('watch-page-company', 'Watch Co', ?1, ?1)",
+            [timestamp],
+        )
+        .unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for index in 0..205 {
+            let id = format!("watch-page-{index:03}");
+            let url = format!("https://example.test/watch/{index}");
+            tx.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, posting_state, source,
+                                   location, is_new_from_watch, missing_from_sync_count, notes, description,
+                                   created_at, updated_at)
+                 VALUES (?1, 'watch-page-company', ?2, ?3, ?3, 'wishlist', 'active', 'greenhouse',
+                         'Remote', 1, 0, 'private note', 'long description', ?4, ?4)",
+                params![id, format!("Watch Role {index}"), url, timestamp],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        let filters = WatchRoleFilters {
+            new_only: Some(true),
+            ..WatchRoleFilters::default()
+        };
+        let first = list_watch_roles_page(&conn, filters.clone(), None).unwrap();
+        assert_eq!(first.jobs.len(), JOB_PAGE_SIZE);
+        assert_eq!(first.jobs.first().unwrap().job.id, "watch-page-204");
+        assert_eq!(first.jobs.last().unwrap().job.id, "watch-page-105");
+        let second = list_watch_roles_page(&conn, filters.clone(), first.next_cursor).unwrap();
+        assert_eq!(second.jobs.len(), JOB_PAGE_SIZE);
+        assert_eq!(second.jobs.first().unwrap().job.id, "watch-page-104");
+        let third = list_watch_roles_page(&conn, filters, second.next_cursor).unwrap();
+        assert_eq!(third.jobs.len(), 5);
+        assert!(third.next_cursor.is_none());
+
+        let json = serde_json::to_value(&first.jobs[0]).unwrap();
+        assert!(json["job"].get("url").is_some());
+        assert!(json["job"].get("description").is_none());
+        assert!(json["job"].get("notes").is_none());
+
+        let searched = list_watch_roles_page(
+            &conn,
+            WatchRoleFilters {
+                new_only: Some(true),
+                search: Some("Role 204".into()),
+                ..WatchRoleFilters::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            searched
+                .jobs
+                .iter()
+                .map(|role| role.job.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["watch-page-204"]
+        );
     }
 
     #[test]

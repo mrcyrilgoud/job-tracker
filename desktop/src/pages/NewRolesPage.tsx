@@ -1,13 +1,39 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { NewRolesInbox } from "@/components/NewRolesInbox";
 import type { TriageAction } from "@/components/companies/NewRolesList";
-import { api } from "@/lib/api";
+import { api, type WatchRoleFilters } from "@/lib/api";
+import { newRolesFiltersFromParams } from "@/lib/new-roles-filters";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
-import type { JobListItem } from "@/lib/schema";
+import type { JobListItem, WatchRoleSummary } from "@/lib/schema";
 
 export function NewRolesPage() {
-  const [roles, setRoles] = useState<JobListItem[]>([]);
+  const [roles, setRoles] = useState<WatchRoleSummary[]>([]);
+  const [searchParams] = useSearchParams();
+  const watchSearch = searchParams.get("search") ?? "";
+  const watchPostingState = searchParams.get("postingState") ?? "";
+  const watchSalaryMin = searchParams.get("salaryMin") ?? "";
+  const watchSalaryMax = searchParams.get("salaryMax") ?? "";
+  const watchFilters = useMemo<WatchRoleFilters>(() => {
+    const params = new URLSearchParams();
+    if (watchSearch) params.set("search", watchSearch);
+    if (watchPostingState) params.set("postingState", watchPostingState);
+    if (watchSalaryMin) params.set("salaryMin", watchSalaryMin);
+    if (watchSalaryMax) params.set("salaryMax", watchSalaryMax);
+    const filters = newRolesFiltersFromParams(params);
+    return {
+      // Keep the full compact queue available so the inbox can recalculate
+      // its company options after triage removes the last role in a company.
+      // The existing client-side company filter then preserves that behavior.
+      companyId: undefined,
+      newOnly: true,
+      postingState: filters.postingState || undefined,
+      search: filters.search.trim() || undefined,
+      salaryMin: filters.salaryMin,
+      salaryMax: filters.salaryMax,
+    };
+  }, [watchPostingState, watchSalaryMax, watchSalaryMin, watchSearch]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,8 +44,8 @@ export function NewRolesPage() {
     if (!opts?.quiet) setLoading(true);
     setError(null);
     try {
-      const result = await api.listJobs({ newFromWatch: true });
-      setRoles(result.jobs);
+      const result = await api.listWatchRoles(watchFilters);
+      setRoles(result);
       setHasLoaded(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load new roles";
@@ -28,7 +54,7 @@ export function NewRolesPage() {
     } finally {
       if (!opts?.quiet) setLoading(false);
     }
-  }, [reportRefreshFailed]);
+  }, [reportRefreshFailed, watchFilters]);
 
   useEffect(() => {
     void load();
@@ -92,7 +118,10 @@ export function NewRolesPage() {
 
       {hasLoaded ? (
         <NewRolesInbox
-          roles={roles}
+          // The legacy list component only reads fields present in the compact
+          // projection; keep the adapter at this boundary until that shared
+          // component can be migrated independently.
+          roles={roles as unknown as JobListItem[]}
           onTriage={(jobId, action) => void triageRole(jobId, action)}
           isPending={(jobId) => triagingId === jobId}
         />

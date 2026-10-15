@@ -2,10 +2,10 @@
 //!
 //! This is stage 2 of a Jobs_Cycle (design.md, Component 6). Unlike the
 //! postings stage, the watches/careers/csv stages run against the connection
-//! the coordinator owns: they fetch every item concurrently into a `JoinSet`
-//! (bounded to 2 permits, 30 s per fetch) and then apply the results
-//! sequentially through the existing `apply_watch_sync`, so the `!Send`
-//! `Connection` is only touched between awaits.
+//! the coordinator owns: a sliding `JoinSet` window fetches at most two unique
+//! listing URLs at once (30 s per fetch), and each completion is applied
+//! sequentially through the existing sync service, so the `!Send` `Connection`
+//! is only touched between awaits.
 //!
 //! ## Stage-level result vs item-level result
 //! A per-item *fetch* failure (network/timeout) is not a stage failure: it is
@@ -21,14 +21,15 @@
 //! The connection is owned by the caller; sequencing across stages, event
 //! publishing, and CSV mark-dirty rules all belong to the coordinator.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rusqlite::Connection;
-use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use crate::ats::sync::{apply_watch_sync, fetch_remote_jobs};
+use crate::ats::sync::{apply_watch_sync, apply_watch_sync_ref, fetch_remote_jobs};
+use crate::ats::{listing_url, AtsJob};
 use crate::error::{AppError, AppResult};
 use crate::runs::model::{StageName, StageOutcome};
 use crate::runs::progress::{BoundedCount, StageProgress};
@@ -90,34 +91,109 @@ pub async fn run_watches_stage(
     mut on_item: impl FnMut(&str),
 ) -> AppResult<WatchesStageResult> {
     let targets = load_watch_targets(conn)?;
-    run_watches_stage_with_fetch(conn, targets, &mut progress, &mut on_item, fetch_watches).await
+    run_watches_stage_live(conn, targets, &mut progress, &mut on_item).await
 }
 
-/// Production fetch step: concurrently fetch every watch's remote jobs, bounded
-/// to [`WATCHES_CONCURRENCY`] with a [`WATCHES_TIMEOUT`] per fetch. Fetch/timeout
-/// failures become an `Err(message)` item, mirroring the original runner loop.
-async fn fetch_watches(targets: Vec<WatchTarget>) -> AppResult<Vec<FetchedWatch>> {
-    let semaphore = Arc::new(Semaphore::new(WATCHES_CONCURRENCY));
-    let mut fetches = JoinSet::new();
+#[derive(Debug)]
+struct WatchFetchGroup {
+    provider: String,
+    board_slug: String,
+    watch_ids: Vec<String>,
+}
+
+type SharedWatchFetch = (Vec<String>, Arc<Result<Vec<AtsJob>, String>>);
+
+/// Group only watches that resolve to the same known public listing URL. An
+/// unsupported provider stays isolated so a malformed target keeps its own
+/// failure semantics.
+fn group_watch_targets(targets: Vec<WatchTarget>) -> Vec<WatchFetchGroup> {
+    let mut groups = Vec::new();
+    let mut by_url = HashMap::<String, usize>::new();
+
     for target in targets {
-        let semaphore = semaphore.clone();
-        fetches.spawn(async move {
-            let _permit = semaphore.acquire_owned().await.expect("watch semaphore");
-            let remote = tokio::time::timeout(
-                WATCHES_TIMEOUT,
-                fetch_remote_jobs(&target.provider, &target.board_slug),
-            )
-            .await
-            .map_err(|_| "request timed out after 30s".to_string())
-            .and_then(|result| result.map_err(|e| e.to_string()));
-            (target.watch_id, remote)
-        });
+        let Some(url) = listing_url(&target.provider, &target.board_slug) else {
+            groups.push(WatchFetchGroup {
+                provider: target.provider,
+                board_slug: target.board_slug,
+                watch_ids: vec![target.watch_id],
+            });
+            continue;
+        };
+
+        if let Some(&index) = by_url.get(&url) {
+            groups[index].watch_ids.push(target.watch_id);
+        } else {
+            by_url.insert(url, groups.len());
+            groups.push(WatchFetchGroup {
+                provider: target.provider,
+                board_slug: target.board_slug,
+                watch_ids: vec![target.watch_id],
+            });
+        }
     }
-    let mut fetched = Vec::new();
+    groups
+}
+
+fn spawn_watch_fetch(fetches: &mut JoinSet<SharedWatchFetch>, group: WatchFetchGroup) {
+    fetches.spawn(async move {
+        let remote = tokio::time::timeout(
+            WATCHES_TIMEOUT,
+            fetch_remote_jobs(&group.provider, &group.board_slug),
+        )
+        .await
+        .map_err(|_| "request timed out after 30s".to_string())
+        .and_then(|result| result.map_err(|e| e.to_string()));
+        (group.watch_ids, Arc::new(remote))
+    });
+}
+
+/// Fetches at most [`WATCHES_CONCURRENCY`] groups at once and applies each
+/// completion immediately. This keeps both task count and retained remote
+/// listing memory bounded by the active window instead of by all watches.
+async fn run_watches_stage_live(
+    conn: &mut Connection,
+    targets: Vec<WatchTarget>,
+    progress: &mut impl FnMut(StageProgress),
+    on_item: &mut impl FnMut(&str),
+) -> AppResult<WatchesStageResult> {
+    let total = targets.len();
+    progress(stage_progress(StageOutcome::InProgress, 0, total, None));
+
+    let mut groups = group_watch_targets(targets).into_iter();
+    let mut fetches = JoinSet::new();
+    for _ in 0..WATCHES_CONCURRENCY {
+        if let Some(group) = groups.next() {
+            spawn_watch_fetch(&mut fetches, group);
+        }
+    }
+
+    let mut items = Vec::with_capacity(total);
+    let mut completed = 0usize;
     while let Some(result) = fetches.join_next().await {
-        fetched.push(result.map_err(|e| AppError::from(e.to_string()))?);
+        let (watch_ids, remote) = result.map_err(|e| AppError::from(e.to_string()))?;
+        for watch_id in watch_ids {
+            let result = apply_watch_sync_ref(conn, &watch_id, remote.as_ref())?;
+            on_item(&watch_id);
+            items.push(serde_json::json!({ "watchId": watch_id, "result": result }));
+            completed += 1;
+            progress(stage_progress(
+                StageOutcome::InProgress,
+                completed,
+                total,
+                None,
+            ));
+        }
+        if let Some(group) = groups.next() {
+            spawn_watch_fetch(&mut fetches, group);
+        }
     }
-    Ok(fetched)
+
+    let progress_final = stage_progress(StageOutcome::Succeeded, total, total, None);
+    progress(progress_final.clone());
+    Ok(WatchesStageResult {
+        items,
+        progress: progress_final,
+    })
 }
 
 /// The stage body with an injectable fetch step, so tests can supply
@@ -200,6 +276,43 @@ mod tests {
             url: format!("https://boards.greenhouse.io/{slug}/jobs/{external_id}"),
             location: Some("Remote".into()),
         }
+    }
+
+    #[test]
+    fn groups_only_watches_with_the_same_known_listing_url() {
+        let groups = group_watch_targets(vec![
+            WatchTarget {
+                watch_id: "watch-a".into(),
+                provider: "greenhouse".into(),
+                board_slug: "acme".into(),
+            },
+            WatchTarget {
+                watch_id: "watch-b".into(),
+                provider: "greenhouse".into(),
+                board_slug: "acme".into(),
+            },
+            WatchTarget {
+                watch_id: "watch-c".into(),
+                provider: "lever".into(),
+                board_slug: "acme".into(),
+            },
+            WatchTarget {
+                watch_id: "watch-d".into(),
+                provider: "future-ats".into(),
+                board_slug: "acme".into(),
+            },
+            WatchTarget {
+                watch_id: "watch-e".into(),
+                provider: "future-ats".into(),
+                board_slug: "acme".into(),
+            },
+        ]);
+
+        assert_eq!(groups.len(), 4);
+        assert_eq!(groups[0].watch_ids, ["watch-a", "watch-b"]);
+        assert_eq!(groups[1].watch_ids, ["watch-c"]);
+        assert_eq!(groups[2].watch_ids, ["watch-d"]);
+        assert_eq!(groups[3].watch_ids, ["watch-e"]);
     }
 
     #[tokio::test]

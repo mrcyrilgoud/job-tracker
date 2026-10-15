@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { CompanyCard } from "@/components/companies/CompanyCard";
 import { OpenPositionsPanel } from "@/components/companies/OpenPositionsPanel";
 import { api } from "@/lib/api";
-import type { CompanyRow, JobListItem } from "@/lib/schema";
+import type { CompanyRow, JobListItem, WatchRoleSummary } from "@/lib/schema";
 import { useCompanyActions } from "@/lib/use-company-actions";
 
 /**
@@ -15,8 +15,8 @@ import { useCompanyActions } from "@/lib/use-company-actions";
 export function CompanyDetailPage() {
   const { id } = useParams();
   const [row, setRow] = useState<CompanyRow | null>(null);
-  const [newRoles, setNewRoles] = useState<JobListItem[]>([]);
-  const [openPositions, setOpenPositions] = useState<JobListItem[]>([]);
+  const [newRoles, setNewRoles] = useState<WatchRoleSummary[]>([]);
+  const [openPositions, setOpenPositions] = useState<WatchRoleSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestSequenceRef = useRef(0);
@@ -33,13 +33,13 @@ export function CompanyDetailPage() {
     try {
       const [companyResult, roleResult, positionsResult] = await Promise.all([
         api.listCompanies(),
-        api.listJobs({ companyId: id, newFromWatch: true }),
-        api.listOpenWatchPositions(id),
+        api.listWatchRoles({ companyId: id, newOnly: true }),
+        api.listWatchRoles({ companyId: id, openOnly: true }),
       ]);
       if (sequence !== requestSequenceRef.current) return;
       setRow(companyResult.companies.find((candidate) => candidate.company.id === id) ?? null);
-      setNewRoles(roleResult.jobs);
-      setOpenPositions(positionsResult.positions);
+      setNewRoles(roleResult);
+      setOpenPositions(positionsResult);
     } catch (err) {
       if (sequence !== requestSequenceRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load company");
@@ -87,7 +87,7 @@ export function CompanyDetailPage() {
 
       <CompanyCard
         row={row}
-        roles={newRoles}
+        roles={newRoles as unknown as JobListItem[]}
         solo
         showNewRoles={false}
         rolesOpen={actions.openRoles.has(row.company.id)}
@@ -106,7 +106,7 @@ export function CompanyDetailPage() {
       />
 
       <OpenPositionsPanel
-        positions={openPositions}
+        positions={openPositions as unknown as JobListItem[]}
         watches={row.watches}
         onSave={actions.saveOpenRole}
         onDismissNew={(jobId) => actions.triageRole(jobId, "skip")}

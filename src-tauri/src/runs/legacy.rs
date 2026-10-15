@@ -37,7 +37,7 @@ where
 {
     let accepted = coordinator.accept(request).map_err(rejection_error)?;
     let execution = coordinator.execute_run(accepted).await;
-    project_execution(&execution)
+    project_execution(execution)
 }
 
 /// Build a coordinator-backed legacy result. Kept generic so Tauri can use a
@@ -64,16 +64,78 @@ where
     execute_legacy(&coordinator, request).await
 }
 
-fn project_execution(execution: &RunExecution) -> AppResult<Value> {
-    let snapshot = &execution.snapshot;
+fn project_execution(execution: RunExecution) -> AppResult<Value> {
+    let RunExecution {
+        snapshot,
+        stage_items,
+    } = execution;
     match snapshot.run_type {
-        crate::runs::model::RunType::JobsCycle => {
-            jobs_cycle_summary(snapshot, &execution.stage_items)
-        }
-        crate::runs::model::RunType::PostingCheck => postings_summary(snapshot),
+        crate::runs::model::RunType::JobsCycle => jobs_cycle_summary_owned(snapshot, stage_items),
+        crate::runs::model::RunType::PostingCheck => postings_summary(&snapshot),
         crate::runs::model::RunType::CareerCheck => {
-            career_check_summary(snapshot, &execution.stage_items)
+            career_check_summary_owned(snapshot, stage_items)
         }
+    }
+}
+
+/// Owned projection used by the coordinator-backed legacy path. Moving the
+/// stage results into the JSON value avoids cloning the potentially large
+/// watches/careers arrays; the public borrowed helpers below remain available
+/// for callers that already hold a snapshot.
+fn career_check_summary_owned(snapshot: RunSnapshot, items: StageItems) -> AppResult<Value> {
+    match snapshot.run_status {
+        RunStatus::Canceled => Err(AppError::coded(
+            "run_canceled",
+            snapshot.run_id.clone(),
+            format!("Run {} was canceled", snapshot.run_id),
+        )),
+        RunStatus::Error => Err(AppError::coded(
+            "run_failed",
+            snapshot.error_reason.unwrap_or_else(|| "internal".into()),
+            "Run failed",
+        )),
+        RunStatus::Completed | RunStatus::CompletedWithErrors => Ok(json!({
+            "watches": items.watches,
+            "careers": items.careers,
+            "runId": snapshot.run_id,
+            "runStatus": snapshot.run_status,
+        })),
+        status => Err(AppError::coded(
+            "run_failed",
+            "not_terminal",
+            format!("Run ended in unexpected status {}", status.as_str()),
+        )),
+    }
+}
+
+fn jobs_cycle_summary_owned(snapshot: RunSnapshot, items: StageItems) -> AppResult<Value> {
+    match snapshot.run_status {
+        RunStatus::Canceled => Err(AppError::coded(
+            "run_canceled",
+            snapshot.run_id.clone(),
+            format!("Run {} was canceled", snapshot.run_id),
+        )),
+        RunStatus::Error => Err(AppError::coded(
+            "run_failed",
+            snapshot.error_reason.unwrap_or_else(|| "internal".into()),
+            "Run failed",
+        )),
+        RunStatus::Completed | RunStatus::CompletedWithErrors => Ok(json!({
+            "postings": snapshot.posting_counts.total(),
+            "watches": items.watches,
+            "careers": items.careers,
+            "csv": {
+                "imported": items.csv_imported,
+                "exported": items.csv_exported,
+            },
+            "runId": snapshot.run_id,
+            "runStatus": snapshot.run_status,
+        })),
+        status => Err(AppError::coded(
+            "run_failed",
+            "not_terminal",
+            format!("Run ended in unexpected status {}", status.as_str()),
+        )),
     }
 }
 
@@ -218,7 +280,7 @@ mod tests {
         }))
         .unwrap();
         snapshot.posting_counts.completed = 2;
-        let value = project_execution(&RunExecution {
+        let value = project_execution(RunExecution {
             snapshot,
             stage_items: Default::default(),
         })
@@ -244,6 +306,23 @@ mod tests {
             assert!(object.contains_key(key), "missing legacy key {key}");
         }
         assert_eq!(object["runStatus"], "completed");
+    }
+
+    #[test]
+    fn coordinator_projection_moves_stage_items_without_changing_legacy_shape() {
+        let snapshot = snapshot("jobsCycle", "completed");
+        let items = StageItems {
+            watches: vec![json!({"watchId": "w1"})],
+            careers: vec![json!({"companyId": "c1"})],
+            ..Default::default()
+        };
+        let expected = jobs_cycle_summary(&snapshot, &items).unwrap();
+        let actual = project_execution(RunExecution {
+            snapshot,
+            stage_items: items,
+        })
+        .unwrap();
+        assert_eq!(actual, expected);
     }
 
     #[test]

@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { NewRolesList, type TriageAction } from "@/components/companies/NewRolesList";
-import { matchesRoleSearch } from "@/lib/companies-ui";
-import type { JobListItem } from "@/lib/schema";
+import type { JobListItem, WatchRoleSummary } from "@/lib/schema";
 
 const COLLAPSED_COUNT = 6;
 
@@ -15,7 +14,7 @@ export function NewRolesPanel({
   onTriage,
   isPending,
 }: {
-  roles: JobListItem[];
+  roles: WatchRoleSummary[];
   onTriage: (jobId: string, action: TriageAction) => void;
   isPending: (jobId: string) => boolean;
 }) {
@@ -24,7 +23,15 @@ export function NewRolesPanel({
   const [open, setOpen] = useState(true);
 
   const matching = useMemo(
-    () => roles.filter((role) => matchesRoleSearch(role, search)),
+    () => {
+      const query = search.trim().toLowerCase();
+      if (!query) return roles;
+      return roles.filter(({ job, companyName }) =>
+        [job.title, job.location ?? "", companyName].some((field) =>
+          field.toLowerCase().includes(query),
+        ),
+      );
+    },
     [roles, search],
   );
   const visible = expanded ? matching : matching.slice(0, COLLAPSED_COUNT);
@@ -77,7 +84,9 @@ export function NewRolesPanel({
               </p>
             ) : (
               <NewRolesList
-                roles={visible}
+                // NewRolesList predates the compact watch projection but only
+                // reads its rendered fields; keep this adapter local.
+                roles={visible as unknown as JobListItem[]}
                 showCompany
                 onTriage={onTriage}
                 isPending={isPending}

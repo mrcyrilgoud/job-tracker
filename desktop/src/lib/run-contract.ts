@@ -207,7 +207,7 @@ export type RunProgressEvent = {
   stages?: StageProgress[];
   postingCounts: PostingCounts;
   postingTotal: number;
-  /** Full list when `seq === 1`, otherwise changed entries only. */
+  /** Full list when `seq === 1`; otherwise changed entries only, or omitted when unchanged. */
   postings?: PostingProgress[];
   /** Present iff `runStatus === "error"`. */
   errorReason?: string;

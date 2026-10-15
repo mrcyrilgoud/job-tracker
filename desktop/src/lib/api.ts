@@ -16,6 +16,8 @@ import type {
   JobPageCursor,
   JobStatus,
   WeeklyActivity,
+  WatchRolePage,
+  WatchRoleSummary,
   WatchProvider,
 } from "@/lib/schema";
 import {
@@ -61,6 +63,16 @@ export type JobFilters = {
   isFavorite?: boolean;
   isArchived?: boolean;
   limit?: number;
+};
+
+export type WatchRoleFilters = {
+  companyId?: string;
+  newOnly?: boolean;
+  openOnly?: boolean;
+  postingState?: string;
+  search?: string;
+  salaryMin?: number;
+  salaryMax?: number;
 };
 
 export type LocationSettings = {
@@ -169,6 +181,21 @@ export const api = {
 
   listJobsPage: (filters: JobFilters, cursor?: JobPageCursor | null) =>
     call<JobListPage>("list_jobs_page_cmd", { filters, cursor: cursor ?? null }),
+
+  listWatchRolesPage: (filters: WatchRoleFilters, cursor?: JobPageCursor | null) =>
+    call<WatchRolePage>("list_watch_roles_page_cmd", { filters, cursor: cursor ?? null }),
+
+  /** Accumulate compact cursor pages for views that preserve their existing full-list UX. */
+  listWatchRoles: async (filters: WatchRoleFilters): Promise<WatchRoleSummary[]> => {
+    const roles: WatchRoleSummary[] = [];
+    let cursor: JobPageCursor | null = null;
+    do {
+      const page = await api.listWatchRolesPage(filters, cursor);
+      roles.push(...page.jobs);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return roles;
+  },
 
   listJobIds: (filters: JobFilters) =>
     call<{ ids: string[] }>("list_job_ids_cmd", { filters }),

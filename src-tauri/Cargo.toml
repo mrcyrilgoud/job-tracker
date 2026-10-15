@@ -6,6 +6,14 @@ authors = ["Job Tracker"]
 edition = "2021"
 rust-version = "1.77.2"
 
+# Thin LTO and one codegen unit reduce the packaged Tauri binary without the
+# longer and more aggressive full-LTO build. Symbol stripping is supported by
+# the stable toolchain used by the existing release build.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
 [lib]
 name = "job_tracker_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

@@ -3,11 +3,11 @@ import { useCallback, useEffect, useState } from "react";
 import { CompaniesClient } from "@/components/CompaniesClient";
 import { api } from "@/lib/api";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
-import type { CompanyRow, JobListItem } from "@/lib/schema";
+import type { CompanyRow, JobListItem, WatchRoleSummary } from "@/lib/schema";
 
 export function CompaniesPage() {
   const [companies, setCompanies] = useState<CompanyRow[]>([]);
-  const [newRoles, setNewRoles] = useState<JobListItem[]>([]);
+  const [newRoles, setNewRoles] = useState<WatchRoleSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
@@ -20,10 +20,10 @@ export function CompaniesPage() {
       // company rows.
       const [companyResult, roleResult] = await Promise.all([
         api.listCompanies(),
-        api.listJobs({ newFromWatch: true }),
+        api.listWatchRoles({ newOnly: true }),
       ]);
       setCompanies(companyResult.companies);
-      setNewRoles(roleResult.jobs);
+      setNewRoles(roleResult);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load companies";
       setError(message);
@@ -57,7 +57,7 @@ export function CompaniesPage() {
       {loaded ? (
         <CompaniesClient
           companies={companies}
-          newRoles={newRoles}
+          newRoles={newRoles as unknown as JobListItem[]}
           onChanged={() => void load()}
         />
       ) : (

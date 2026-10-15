@@ -304,6 +304,15 @@ pub fn export_jobs_csv(
     csv_path: &Path,
     latest_note_overrides: Option<&HashMap<String, Option<String>>>,
 ) -> AppResult<ExportResult> {
+    export_jobs_csv_with_last_import_at(conn, csv_path, latest_note_overrides, None)
+}
+
+fn export_jobs_csv_with_last_import_at(
+    conn: &Connection,
+    csv_path: &Path,
+    latest_note_overrides: Option<&HashMap<String, Option<String>>>,
+    last_import_at: Option<String>,
+) -> AppResult<ExportResult> {
     let sync = read_sync_state(csv_path);
     let rows = load_job_rows(conn)?;
     let mut next_rows = HashMap::new();
@@ -373,7 +382,7 @@ pub fn export_jobs_csv(
     write_sync_state(&SyncState {
         path: csv_path.display().to_string(),
         last_export_at: Some(exported_at.clone()),
-        last_import_at: sync.last_import_at,
+        last_import_at: last_import_at.or(sync.last_import_at),
         rows: next_rows,
     })?;
 
@@ -655,11 +664,12 @@ pub fn import_jobs_csv(
     }
 
     if !dry_run {
-        let exported = export_jobs_csv(&conn, csv_path, Some(&imported_notes))?;
-        let mut next_sync = read_sync_state(csv_path);
-        next_sync.last_import_at = Some(now_iso());
-        next_sync.last_export_at = Some(exported.exported_at);
-        write_sync_state(&next_sync)?;
+        export_jobs_csv_with_last_import_at(
+            &conn,
+            csv_path,
+            Some(&imported_notes),
+            Some(now_iso()),
+        )?;
     }
 
     Ok(result)
@@ -912,16 +922,21 @@ pub fn sync_jobs_csv_with_disk(
     csv_path: &Path,
 ) -> AppResult<(Option<ImportResult>, ExportResult)> {
     let conn = open_csv_conn(db_path)?;
-    let status = get_jobs_csv_status(&conn, csv_path)?;
-    if status.exists
-        && (status.last_export_at.is_none()
-            || status
-                .file_mtime
-                .as_ref()
-                .zip(status.last_export_at.as_ref())
-                .map(|(m, e)| m > e)
-                .unwrap_or(false))
-    {
+    let sync = read_sync_state(csv_path);
+    let externally_changed = csv_path.exists()
+        && (sync.last_export_at.is_none()
+            || fs::metadata(csv_path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .map(|modified| {
+                    let modified: chrono::DateTime<chrono::Utc> = modified.into();
+                    sync.last_export_at
+                        .as_ref()
+                        .map(|exported| modified.to_rfc3339() > *exported)
+                        .unwrap_or(true)
+                })
+                .unwrap_or(false));
+    if externally_changed {
         drop(conn);
         let imported = import_jobs_csv(db_path, csv_path, None, false, ImportMode::Merge)?;
         let conn = open_csv_conn(db_path)?;

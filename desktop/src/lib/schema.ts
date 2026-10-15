@@ -194,6 +194,34 @@ export type JobListPage = {
   nextCursor: JobPageCursor | null;
 };
 
+/** Compact fields rendered by watch-role lists; detail-only job fields are omitted. */
+export type WatchRoleSummaryJob = Pick<
+  Job,
+  | "id"
+  | "companyId"
+  | "title"
+  | "url"
+  | "status"
+  | "postingState"
+  | "source"
+  | "location"
+  | "isNewFromWatch"
+  | "watchDisposition"
+  | "updatedAt"
+  | "salaryMin"
+  | "salaryMax"
+>;
+
+export type WatchRoleSummary = {
+  job: WatchRoleSummaryJob;
+  companyName: string;
+};
+
+export type WatchRolePage = {
+  jobs: WatchRoleSummary[];
+  nextCursor: JobPageCursor | null;
+};
+
 export type JobDetail = {
   job: Job;
   company: Company;

@@ -1,10 +1,10 @@
 //! Careers-page check stage (moved from `runner.rs`, unchanged semantics).
 //!
 //! Stage 3 of a Jobs_Cycle (design.md, Component 6). Like the watches stage it
-//! runs against the coordinator-owned connection: it fetches every company's
-//! careers page concurrently into a `JoinSet` (bounded to 4 permits, 30 s per
-//! fetch) and applies the results sequentially through `apply_careers_check`,
-//! so the `!Send` `Connection` is only touched between awaits.
+//! runs against the coordinator-owned connection: a sliding `JoinSet` window
+//! fetches at most four unique careers URLs at once (30 s per fetch), and each
+//! completion is applied sequentially through `apply_careers_check`, so the
+//! `!Send` `Connection` is only touched between awaits.
 //!
 //! ## Stage-level result vs item-level result
 //! A per-item *fetch* failure (network/timeout/HTTP) is not a stage failure:
@@ -18,11 +18,11 @@
 //! [`StageProgress`] at start, after each applied item, and at completion. The
 //! coordinator (task 8.2) owns the connection, sequencing, and event publishing.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rusqlite::Connection;
-use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::ats::careers::{apply_careers_check, fetch_careers_hash};
@@ -85,32 +85,104 @@ pub async fn run_careers_stage(
     mut on_item: impl FnMut(&str),
 ) -> AppResult<CareersStageResult> {
     let targets = load_careers_targets(conn)?;
-    run_careers_stage_with_fetch(conn, targets, &mut progress, &mut on_item, fetch_careers).await
+    run_careers_stage_live(conn, targets, &mut progress, &mut on_item).await
 }
 
-/// Production fetch step: concurrently fetch every careers page, bounded to
-/// [`CAREERS_CONCURRENCY`] with a [`CAREERS_TIMEOUT`] per fetch. A timeout or
-/// fetch error becomes an `Err` item, mirroring the original runner loop.
-async fn fetch_careers(targets: Vec<CareersTarget>) -> AppResult<Vec<FetchedCareers>> {
-    let semaphore = Arc::new(Semaphore::new(CAREERS_CONCURRENCY));
-    let mut fetches = JoinSet::new();
+#[derive(Debug)]
+struct CareersFetchGroup {
+    careers_url: String,
+    targets: Vec<(String, String)>,
+}
+
+type SharedCareersFetch = Arc<Result<(String, String), String>>;
+
+/// Exact URL equality is the safe deduplication boundary: each company still
+/// receives its own snapshot/apply operation, while the page and normalized
+/// text are fetched and retained only once.
+fn group_careers_targets(targets: Vec<CareersTarget>) -> Vec<CareersFetchGroup> {
+    let mut groups: Vec<CareersFetchGroup> = Vec::new();
+    let mut by_url = HashMap::<String, usize>::new();
     for target in targets {
-        let semaphore = semaphore.clone();
-        fetches.spawn(async move {
-            let _permit = semaphore.acquire_owned().await.expect("careers semaphore");
-            let fetched =
-                tokio::time::timeout(CAREERS_TIMEOUT, fetch_careers_hash(&target.careers_url))
-                    .await
-                    .map_err(|_| AppError::from("request timed out after 30s"))
-                    .and_then(|result| result);
-            (target.company_id, target.name, fetched)
-        });
+        if let Some(&index) = by_url.get(&target.careers_url) {
+            groups[index].targets.push((target.company_id, target.name));
+        } else {
+            by_url.insert(target.careers_url.clone(), groups.len());
+            groups.push(CareersFetchGroup {
+                careers_url: target.careers_url,
+                targets: vec![(target.company_id, target.name)],
+            });
+        }
     }
-    let mut fetched = Vec::new();
+    groups
+}
+
+fn spawn_careers_fetch(
+    fetches: &mut JoinSet<(Vec<(String, String)>, SharedCareersFetch)>,
+    group: CareersFetchGroup,
+) {
+    fetches.spawn(async move {
+        let fetched = tokio::time::timeout(CAREERS_TIMEOUT, fetch_careers_hash(&group.careers_url))
+            .await
+            .map_err(|_| "request timed out after 30s".to_string())
+            .and_then(|result| result.map_err(|e| e.to_string()));
+        (group.targets, Arc::new(fetched))
+    });
+}
+
+/// Keep only [`CAREERS_CONCURRENCY`] active fetch tasks and apply each result
+/// as it completes. Duplicate URLs share the result without cloning the page.
+async fn run_careers_stage_live(
+    conn: &mut Connection,
+    targets: Vec<CareersTarget>,
+    progress: &mut impl FnMut(StageProgress),
+    on_item: &mut impl FnMut(&str),
+) -> AppResult<CareersStageResult> {
+    let total = targets.len();
+    progress(stage_progress(StageOutcome::InProgress, 0, total, None));
+
+    let mut groups = group_careers_targets(targets).into_iter();
+    let mut fetches = JoinSet::new();
+    for _ in 0..CAREERS_CONCURRENCY {
+        if let Some(group) = groups.next() {
+            spawn_careers_fetch(&mut fetches, group);
+        }
+    }
+
+    let mut items = Vec::with_capacity(total);
+    let mut completed = 0usize;
     while let Some(result) = fetches.join_next().await {
-        fetched.push(result.map_err(|e| AppError::from(e.to_string()))?);
+        let (company_targets, fetched) = result.map_err(|e| AppError::from(e.to_string()))?;
+        for (company_id, name) in company_targets {
+            match fetched.as_ref() {
+                Ok((hash, text)) => {
+                    let result = apply_careers_check(conn, &company_id, &name, hash, text)?;
+                    items.push(serde_json::json!({ "companyId": company_id, "result": result }));
+                }
+                Err(error) => items.push(serde_json::json!({
+                    "companyId": company_id,
+                    "result": { "changed": false, "reason": error }
+                })),
+            }
+            on_item(&name);
+            completed += 1;
+            progress(stage_progress(
+                StageOutcome::InProgress,
+                completed,
+                total,
+                None,
+            ));
+        }
+        if let Some(group) = groups.next() {
+            spawn_careers_fetch(&mut fetches, group);
+        }
     }
-    Ok(fetched)
+
+    let progress_final = stage_progress(StageOutcome::Succeeded, total, total, None);
+    progress(progress_final.clone());
+    Ok(CareersStageResult {
+        items,
+        progress: progress_final,
+    })
 }
 
 /// The stage body with an injectable fetch step, so tests can supply
@@ -198,6 +270,31 @@ mod tests {
     fn company_with_careers(conn: &Connection, name: &str, url: &str) -> String {
         let company = create_company(conn, name, Some(url)).unwrap();
         company.id
+    }
+
+    #[test]
+    fn groups_exact_duplicate_careers_urls_without_merging_other_pages() {
+        let groups = group_careers_targets(vec![
+            CareersTarget {
+                company_id: "company-a".into(),
+                name: "Acme".into(),
+                careers_url: "https://jobs.example/careers".into(),
+            },
+            CareersTarget {
+                company_id: "company-b".into(),
+                name: "Acme Holdings".into(),
+                careers_url: "https://jobs.example/careers".into(),
+            },
+            CareersTarget {
+                company_id: "company-c".into(),
+                name: "Other".into(),
+                careers_url: "https://other.example/careers".into(),
+            },
+        ]);
+
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].targets.len(), 2);
+        assert_eq!(groups[1].targets.len(), 1);
     }
 
     #[tokio::test]

@@ -22,7 +22,6 @@
 
 use chrono::DateTime;
 use rusqlite::{params, Connection, OptionalExtension, Row};
-#[cfg(test)]
 use std::collections::HashMap;
 
 use super::model::{
@@ -1228,12 +1227,12 @@ pub fn load_snapshot(
         return Ok(None);
     };
     let rows = load_posting_rows(conn, run_id)?;
+    let evidence_by_job = load_authoritative_evidence_for_run(conn, run_id)?;
     let postings = rows
         .iter()
         .map(|row| {
             let evidence = (row.status == PostingStatus::Completed)
-                .then(|| load_authoritative_evidence(conn, run_id, &row.job_id))
-                .transpose()?
+                .then(|| evidence_by_job.get(&row.job_id))
                 .flatten()
                 .map(|stored| {
                     CheckEvidence::from_json(&stored.record.evidence_json)
@@ -1430,6 +1429,83 @@ pub fn insert_supplementary_evidence(
 }
 
 /// The authoritative evidence row for one posting of a run, if any.
+fn parse_stored_evidence(
+    (
+        id,
+        run_id,
+        job_id,
+        kind,
+        attempted_at,
+        state,
+        reason_code,
+        reason,
+        version,
+        json,
+        created_at,
+    ): (
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i64,
+        String,
+        String,
+    ),
+) -> AppResult<StoredEvidence> {
+    let kind = EvidenceKind::parse(&kind).ok_or_else(|| corrupt("evidence kind", &id, &kind))?;
+    let posting_state = PostingState::parse(&state)
+        .ok_or_else(|| corrupt("evidence posting_state", &id, &state))?;
+    Ok(StoredEvidence {
+        id,
+        run_id,
+        job_id,
+        kind,
+        record: EvidenceRecord {
+            attempted_at,
+            posting_state,
+            reason_code,
+            reason,
+            evidence_version: u32::try_from(version).unwrap_or(0),
+            evidence_json: json,
+            created_at,
+        },
+    })
+}
+
+fn evidence_row(
+    row: &Row<'_>,
+) -> rusqlite::Result<(
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+)> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+    ))
+}
+
 pub fn load_authoritative_evidence(
     conn: &Connection,
     run_id: &str,
@@ -1442,21 +1518,7 @@ pub fn load_authoritative_evidence(
              FROM posting_check_evidence
              WHERE run_id = ?1 AND job_id = ?2 AND kind = 'authoritative'",
             params![run_id, job_id],
-            |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, Option<String>>(1)?,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, String>(6)?,
-                    r.get::<_, String>(7)?,
-                    r.get::<_, i64>(8)?,
-                    r.get::<_, String>(9)?,
-                    r.get::<_, String>(10)?,
-                ))
-            },
+            evidence_row,
         )
         .optional()
         .map_err(map_sqlite)?;
@@ -1476,24 +1538,48 @@ pub fn load_authoritative_evidence(
     else {
         return Ok(None);
     };
-    let kind = EvidenceKind::parse(&kind).ok_or_else(|| corrupt("evidence kind", &id, &kind))?;
-    let posting_state = PostingState::parse(&state)
-        .ok_or_else(|| corrupt("evidence posting_state", &id, &state))?;
-    Ok(Some(StoredEvidence {
+    parse_stored_evidence((
         id,
         run_id,
         job_id,
         kind,
-        record: EvidenceRecord {
-            attempted_at,
-            posting_state,
-            reason_code,
-            reason,
-            evidence_version: u32::try_from(version).unwrap_or(0),
-            evidence_json: json,
-            created_at,
-        },
-    }))
+        attempted_at,
+        state,
+        reason_code,
+        reason,
+        version,
+        json,
+        created_at,
+    ))
+    .map(Some)
+}
+
+/// Load all authoritative evidence for a run in one query.
+///
+/// Snapshot reconstruction used to issue one evidence query per completed
+/// posting. The partial authoritative index already supports this run-scoped
+/// lookup, so keep the query count independent of the posting count.
+fn load_authoritative_evidence_for_run(
+    conn: &Connection,
+    run_id: &str,
+) -> AppResult<HashMap<String, StoredEvidence>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, run_id, job_id, kind, attempted_at, posting_state, reason_code, reason,
+                    evidence_version, evidence_json, created_at
+             FROM posting_check_evidence
+             WHERE run_id = ?1 AND kind = 'authoritative'",
+        )
+        .map_err(map_sqlite)?;
+    let rows = stmt
+        .query_map(params![run_id], evidence_row)
+        .map_err(map_sqlite)?;
+    let mut evidence = HashMap::new();
+    for row in rows {
+        let stored = parse_stored_evidence(row.map_err(map_sqlite)?)?;
+        evidence.insert(stored.job_id.clone(), stored);
+    }
+    Ok(evidence)
 }
 
 // ---------------------------------------------------------------------------
@@ -1865,6 +1951,61 @@ mod tests {
         assert!(!json.contains("null"));
         let back: RunSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn snapshot_loads_all_completed_evidence_from_one_run_query() {
+        let conn = db();
+        accept(&conn, "evidence-run", &["a", "b"], T0);
+        cas_run_status(
+            &conn,
+            "evidence-run",
+            &[RunStatus::Queued],
+            RunStatus::Active,
+            T1,
+        )
+        .unwrap();
+        assert!(try_mark_posting_active(&conn, "evidence-run", "a", T1).unwrap());
+        assert!(try_mark_posting_active(&conn, "evidence-run", "b", T1).unwrap());
+        finalize_posting(&conn, "evidence-run", &completed("a", PostingState::Active)).unwrap();
+        finalize_posting(
+            &conn,
+            "evidence-run",
+            &completed("b", PostingState::Inactive),
+        )
+        .unwrap();
+        insert_evidence(
+            &conn,
+            Some("evidence-run"),
+            "a",
+            EvidenceKind::Authoritative,
+            &evidence(PostingState::Active, T1),
+        )
+        .unwrap();
+        insert_evidence(
+            &conn,
+            Some("evidence-run"),
+            "b",
+            EvidenceKind::Authoritative,
+            &evidence(PostingState::Inactive, T2),
+        )
+        .unwrap();
+
+        let snapshot = load_snapshot(&conn, "evidence-run", false, T3)
+            .unwrap()
+            .unwrap();
+        assert!(snapshot
+            .postings
+            .iter()
+            .all(|posting| posting.evidence.is_some()));
+        assert_eq!(
+            snapshot
+                .postings
+                .iter()
+                .map(|posting| posting.evidence.as_ref().unwrap().attempted_at.as_str())
+                .collect::<Vec<_>>(),
+            [T1, T2]
+        );
     }
 
     #[test]

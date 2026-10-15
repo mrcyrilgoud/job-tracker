@@ -123,6 +123,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS jobs_posting_state_updated_at_idx ON jobs(posting_state, updated_at);
     CREATE INDEX IF NOT EXISTS jobs_is_new_from_watch_updated_at_idx ON jobs(is_new_from_watch, updated_at);
     CREATE INDEX IF NOT EXISTS jobs_watch_state_updated_at_idx ON jobs(is_new_from_watch, posting_state, updated_at);
+    CREATE INDEX IF NOT EXISTS jobs_watch_cursor_idx
+      ON jobs(is_new_from_watch, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS jobs_company_watch_cursor_idx
+      ON jobs(company_id, is_new_from_watch, updated_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS jobs_company_open_watch_cursor_idx
+      ON jobs(company_id, posting_state, source, updated_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS job_documents_document_id_idx ON job_documents(document_id);
     CREATE INDEX IF NOT EXISTS job_documents_job_id_idx ON job_documents(job_id);
     CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);
@@ -272,6 +278,8 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       PRIMARY KEY (run_id, job_id)
     );
     CREATE INDEX IF NOT EXISTS run_postings_run_status_idx ON run_postings(run_id, status);
+    CREATE INDEX IF NOT EXISTS run_postings_run_ordinal_job_idx
+      ON run_postings(run_id, ordinal, job_id);
 
     CREATE TABLE IF NOT EXISTS posting_check_evidence (
       id TEXT PRIMARY KEY NOT NULL,
@@ -556,8 +564,12 @@ mod tests {
             "runs_single_lock_owner_uidx",
             "runs_status_started_idx",
             "run_postings_run_status_idx",
+            "run_postings_run_ordinal_job_idx",
             "pce_one_authoritative_uidx",
             "pce_job_attempted_idx",
+            "jobs_watch_cursor_idx",
+            "jobs_company_watch_cursor_idx",
+            "jobs_company_open_watch_cursor_idx",
         ] {
             assert_eq!(schema_object_count(&conn, "index", index), 1, "{index}");
         }

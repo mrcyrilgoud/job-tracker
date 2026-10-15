@@ -11,6 +11,10 @@ use url::Url;
 const MAX_BYTES: usize = 1_500_000;
 const TIMEOUT_MS: u64 = 10_000;
 const MAX_REDIRECTS: usize = 5;
+/// Keep retries short and bounded: three total attempts for an idempotent GET/HEAD.
+const MAX_ATTEMPTS: usize = 3;
+const RETRY_BACKOFFS: [Duration; MAX_ATTEMPTS - 1] =
+    [Duration::from_millis(100), Duration::from_millis(250)];
 /// Upper bound for a single hostname resolution. DNS runs on the blocking pool so it
 /// never stalls a Tokio worker, and this bound keeps the 30 s evaluation budget enforceable.
 const DNS_TIMEOUT: Duration = Duration::from_secs(5);
@@ -334,6 +338,45 @@ pub async fn safe_fetch(
     method: Option<&str>,
     accept: Option<&str>,
 ) -> SafeFetchResult {
+    for attempt in 0..MAX_ATTEMPTS {
+        let result = safe_fetch_once(raw_url, method, accept).await;
+        if attempt + 1 == MAX_ATTEMPTS || !should_retry(&result) {
+            return result;
+        }
+        tokio::time::sleep(retry_backoff(attempt)).await;
+    }
+    unreachable!("the bounded safe-fetch attempt loop always returns")
+}
+
+/// Retry only failures that are plausibly transient. HTTP status failures keep
+/// their original final-attempt shape; permanent statuses and validation errors
+/// still take exactly one path through the fetcher.
+fn should_retry(result: &SafeFetchResult) -> bool {
+    matches!(result.status, 429 | 500..=599)
+        || matches!(
+            result.error_kind,
+            Some(
+                FetchErrorKind::Timeout
+                    | FetchErrorKind::DnsTimeout
+                    | FetchErrorKind::Connect
+                    | FetchErrorKind::Body
+                    | FetchErrorKind::Client
+            )
+        )
+}
+
+fn retry_backoff(attempt: usize) -> Duration {
+    RETRY_BACKOFFS
+        .get(attempt)
+        .copied()
+        .unwrap_or_else(|| RETRY_BACKOFFS[RETRY_BACKOFFS.len() - 1])
+}
+
+async fn safe_fetch_once(
+    raw_url: &str,
+    method: Option<&str>,
+    accept: Option<&str>,
+) -> SafeFetchResult {
     let method = match method.unwrap_or("GET").to_uppercase().as_str() {
         "HEAD" => Method::HEAD,
         _ => Method::GET,
@@ -630,6 +673,52 @@ mod tests {
         );
         assert_eq!(body_error_kind(true), FetchErrorKind::Timeout);
         assert_eq!(body_error_kind(false), FetchErrorKind::Body);
+    }
+
+    fn retry_result(status: u16, error_kind: Option<FetchErrorKind>) -> SafeFetchResult {
+        SafeFetchResult {
+            ok: false,
+            status,
+            final_url: "https://example.com".into(),
+            body_text: String::new(),
+            error: error_kind.map(|kind| format!("{kind:?}")),
+            requested_url: "https://example.com".into(),
+            redirect_statuses: Vec::new(),
+            error_kind,
+            signal_headers: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn retry_policy_is_limited_to_transient_statuses_and_transport_failures() {
+        for status in [429, 500, 502, 599] {
+            assert!(should_retry(&retry_result(status, None)), "HTTP {status}");
+        }
+        for kind in [
+            FetchErrorKind::Timeout,
+            FetchErrorKind::DnsTimeout,
+            FetchErrorKind::Connect,
+            FetchErrorKind::Body,
+            FetchErrorKind::Client,
+        ] {
+            assert!(should_retry(&retry_result(0, Some(kind))), "{kind:?}");
+        }
+        for result in [
+            retry_result(400, None),
+            retry_result(404, None),
+            retry_result(200, Some(FetchErrorKind::TooLarge)),
+            retry_result(0, Some(FetchErrorKind::Dns)),
+            retry_result(0, Some(FetchErrorKind::BlockedDestination)),
+        ] {
+            assert!(!should_retry(&result));
+        }
+    }
+
+    #[test]
+    fn retry_backoff_is_short_and_monotonic() {
+        assert_eq!(retry_backoff(0), Duration::from_millis(100));
+        assert_eq!(retry_backoff(1), Duration::from_millis(250));
+        assert_eq!(retry_backoff(99), Duration::from_millis(250));
     }
 
     #[test]

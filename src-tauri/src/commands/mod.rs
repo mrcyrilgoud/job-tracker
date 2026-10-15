@@ -13,7 +13,7 @@ use crate::ats::sync::{apply_watch_sync, fetch_remote_jobs};
 use crate::companies;
 use crate::db::AppState;
 use crate::documents;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::filtering::engine::{matches as engine_matches, JobView};
 use crate::filtering::model::FilterCriteria;
 use crate::filtering::resolver::{
@@ -29,7 +29,7 @@ use crate::jobs::csv_config::{
     active_csv_path, clear_custom_csv_path, csv_lock_path, get_csv_config, set_custom_csv_path,
     validate_csv_path, CsvConfig,
 };
-use crate::jobs::csv_export::with_csv_file_lock;
+use crate::jobs::csv_export::{open_csv_command_conn, with_csv_file_lock};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::posting_check::fetch::HttpPostingFetcher;
 use crate::jobs::service::{
@@ -37,11 +37,11 @@ use crate::jobs::service::{
     delete_job as delete_job_service, delete_jobs as delete_jobs_service, dismiss_watch_job,
     get_job_detail, get_location_settings, get_pipeline_counts,
     get_watch_role_keywords as service_get_keywords, get_weekly_activity, list_job_ids, list_jobs,
-    list_jobs_page, list_open_watch_positions, reset_dismissed_watch_job, resolve_title_from_url,
-    save_open_watch_job, set_job_favorite, set_location_settings,
+    list_jobs_page, list_open_watch_positions, list_watch_roles_page, reset_dismissed_watch_job,
+    resolve_title_from_url, save_open_watch_job, set_job_favorite, set_location_settings,
     set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
     unarchive_jobs as unarchive_jobs_service, update_job, JobFilters, LocationSettings,
-    UpdateJobInput,
+    UpdateJobInput, WatchRoleFilters,
 };
 use crate::models::{Job, JobPageCursor};
 use crate::runner::try_lock_runner;
@@ -52,6 +52,16 @@ use crate::runs::progress::TauriSink;
 use crate::runs::RunRegistry;
 
 pub mod runs;
+
+async fn spawn_blocking_app<T, F>(operation: F) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| AppError::from(format!("CSV operation task failed: {error}")))?
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,6 +133,47 @@ pub async fn list_job_ids_cmd(
     state.with_db(|conn| {
         let ids = list_job_ids(conn, filters.unwrap_or_default().into())?;
         Ok(serde_json::json!({ "ids": ids }))
+    })
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListWatchRolesArgs {
+    pub company_id: Option<String>,
+    pub new_only: Option<bool>,
+    pub open_only: Option<bool>,
+    pub posting_state: Option<String>,
+    pub search: Option<String>,
+    pub salary_min: Option<i64>,
+    pub salary_max: Option<i64>,
+}
+
+impl From<ListWatchRolesArgs> for WatchRoleFilters {
+    fn from(filters: ListWatchRolesArgs) -> Self {
+        Self {
+            company_id: filters.company_id,
+            new_only: filters.new_only,
+            open_only: filters.open_only,
+            posting_state: filters.posting_state,
+            search: filters.search,
+            salary_min: filters.salary_min,
+            salary_max: filters.salary_max,
+        }
+    }
+}
+
+/// Compact cursor-paged watch-role query used by New Roles, Companies, and
+/// company-detail views. Unlike `list_jobs_cmd`, this never selects long job
+/// detail columns.
+#[tauri::command]
+pub async fn list_watch_roles_page_cmd(
+    state: State<'_, AppState>,
+    filters: Option<ListWatchRolesArgs>,
+    cursor: Option<JobPageCursor>,
+) -> AppResult<serde_json::Value> {
+    state.with_db(|conn| {
+        let page = list_watch_roles_page(conn, filters.unwrap_or_default().into(), cursor)?;
+        Ok(serde_json::json!(page))
     })
 }
 
@@ -983,27 +1034,31 @@ pub async fn open_document(state: State<'_, AppState>, document_id: String) -> A
 
 #[tauri::command]
 pub async fn csv_status(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
-    state.with_db(|conn| {
-        let csv_path = active_csv_path(conn, &state.paths.jobs_csv_path)?;
-        let status = with_csv_file_lock(&csv_lock_path(&csv_path), || {
-            get_jobs_csv_status(conn, &csv_path)
-        })?;
-        Ok(serde_json::json!(status))
+    let paths = state.paths.clone();
+    let app_state = state.inner().clone();
+    let status = spawn_blocking_app(move || {
+        let csv_path = app_state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
+        let conn = open_csv_command_conn(&paths.db_path)?;
+        with_csv_file_lock(&csv_lock_path(&csv_path), || {
+            get_jobs_csv_status(&conn, &csv_path)
+        })
     })
+    .await?;
+    Ok(serde_json::json!(status))
 }
 
 #[tauri::command]
 pub async fn csv_export(state: State<'_, AppState>) -> AppResult<serde_json::Value> {
     let paths = state.paths.clone();
-    let csv_path = state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
-    let result = with_csv_file_lock(&csv_lock_path(&csv_path), || {
-        // Dedicated connection so interactive export does not hold the UI mutex for CSV I/O.
-        let conn = Connection::open(&paths.db_path)
-            .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        conn.pragma_update(None, "busy_timeout", 5000i32)
-            .map_err(|e| crate::error::AppError::from(e.to_string()))?;
-        export_jobs_csv(&conn, &csv_path, None)
-    })?;
+    let app_state = state.inner().clone();
+    let result = spawn_blocking_app(move || {
+        let csv_path = app_state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
+        let conn = open_csv_command_conn(&paths.db_path)?;
+        with_csv_file_lock(&csv_lock_path(&csv_path), || {
+            export_jobs_csv(&conn, &csv_path, None)
+        })
+    })
+    .await?;
     Ok(serde_json::json!(result))
 }
 
@@ -1026,16 +1081,16 @@ pub async fn csv_import(
     };
     // Open a dedicated connection so async import does not hold the UI mutex across awaits.
     let paths = state.paths.clone();
-    let csv_path = state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
-    let result = with_csv_file_lock(&csv_lock_path(&csv_path), || {
-        import_jobs_csv(
-            &paths.db_path,
-            &csv_path,
-            input.content.as_deref(),
-            input.dry_run.unwrap_or(false),
-            mode,
-        )
-    })?;
+    let app_state = state.inner().clone();
+    let content = input.content;
+    let dry_run = input.dry_run.unwrap_or(false);
+    let result = spawn_blocking_app(move || {
+        let csv_path = app_state.with_db(|conn| active_csv_path(conn, &paths.jobs_csv_path))?;
+        with_csv_file_lock(&csv_lock_path(&csv_path), || {
+            import_jobs_csv(&paths.db_path, &csv_path, content.as_deref(), dry_run, mode)
+        })
+    })
+    .await?;
     Ok(serde_json::json!(result))
 }
 
@@ -1091,27 +1146,27 @@ pub async fn csv_configure(
         .map_err(|_| crate::error::AppError::from("operation_in_progress:runner"))?;
     let _runner_file = try_lock_runner(&state.paths)?;
     let paths = state.paths.clone();
+    let app_state = state.inner().clone();
     state
         .csv_export
-        .with_exclusive(|| {
-            let previous = state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
-            state.with_db(|conn| set_custom_csv_path(conn, &paths.jobs_csv_path, &csv_path))?;
+        .with_exclusive(move || {
+            let previous = app_state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
+            app_state.with_db(|conn| set_custom_csv_path(conn, &paths.jobs_csv_path, &csv_path))?;
             let result = with_csv_file_lock(&csv_lock_path(&csv_path), || match mode {
                 ImportMode::Merge => {
                     import_jobs_csv(&paths.db_path, &csv_path, None, false, ImportMode::Merge)
                         .map(|_| ())
                 }
                 ImportMode::OverwriteEditable => {
-                    let conn = Connection::open(&paths.db_path)
-                        .map_err(|error| crate::error::AppError::from(error.to_string()))?;
+                    let conn = open_csv_command_conn(&paths.db_path)?;
                     export_jobs_csv(&conn, &csv_path, None).map(|_| ())
                 }
             });
             if let Err(error) = result {
-                restore_csv_config(&state, &paths, &previous)?;
+                restore_csv_config(&app_state, &paths, &previous)?;
                 return Err(error);
             }
-            state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))
+            app_state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))
         })
         .await
 }
@@ -1125,21 +1180,21 @@ pub async fn csv_reset_config(state: State<'_, AppState>) -> AppResult<CsvConfig
     let _runner_file = try_lock_runner(&state.paths)?;
     let paths = state.paths.clone();
     let default_csv_path = paths.jobs_csv_path.clone();
+    let app_state = state.inner().clone();
     state
         .csv_export
-        .with_exclusive(|| {
-            let previous = state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
-            state.with_db(|conn| clear_custom_csv_path(conn, &paths.jobs_csv_path))?;
+        .with_exclusive(move || {
+            let previous = app_state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))?;
+            app_state.with_db(|conn| clear_custom_csv_path(conn, &paths.jobs_csv_path))?;
             let result = with_csv_file_lock(&csv_lock_path(&default_csv_path), || {
-                let conn = Connection::open(&paths.db_path)
-                    .map_err(|error| crate::error::AppError::from(error.to_string()))?;
+                let conn = open_csv_command_conn(&paths.db_path)?;
                 export_jobs_csv(&conn, &default_csv_path, None).map(|_| ())
             });
             if let Err(error) = result {
-                restore_csv_config(&state, &paths, &previous)?;
+                restore_csv_config(&app_state, &paths, &previous)?;
                 return Err(error);
             }
-            state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))
+            app_state.with_db(|conn| get_csv_config(conn, &paths.jobs_csv_path))
         })
         .await
 }

@@ -77,6 +77,7 @@ pub fn run() {
             commands::list_jobs_cmd,
             commands::list_jobs_page_cmd,
             commands::list_job_ids_cmd,
+            commands::list_watch_roles_page_cmd,
             commands::get_jobs_dashboard,
             commands::preview_job_url,
             commands::create_job,

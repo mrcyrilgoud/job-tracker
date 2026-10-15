@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JobListItem } from "@/lib/schema";
 
 const apiMocks = vi.hoisted(() => ({
-  listJobs: vi.fn(),
+  listWatchRoles: vi.fn(),
   approveWatchJob: vi.fn(),
   dismissWatchJob: vi.fn(),
 }));
@@ -83,7 +83,7 @@ describe("NewRolesPage", () => {
       runMocks.callbacks.push(callback);
       return () => {};
     });
-    apiMocks.listJobs.mockResolvedValue({ jobs: [] });
+    apiMocks.listWatchRoles.mockResolvedValue([]);
     apiMocks.approveWatchJob.mockResolvedValue({ success: true });
     apiMocks.dismissWatchJob.mockResolvedValue({ success: true });
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -130,24 +130,24 @@ describe("NewRolesPage", () => {
   }
 
   it("loads every untriaged watch role without a preview limit", async () => {
-    apiMocks.listJobs.mockResolvedValue({ jobs: [role("role-1")] });
+    apiMocks.listWatchRoles.mockResolvedValue([role("role-1")]);
     await mount();
 
-    expect(apiMocks.listJobs).toHaveBeenCalledExactlyOnceWith({ newFromWatch: true });
+    expect(apiMocks.listWatchRoles).toHaveBeenCalledExactlyOnceWith({ newOnly: true });
     expect(host.textContent).toContain("Software Engineer role-1");
     expect(host.textContent).toContain("Thinking Machines Lab · San Francisco");
     expect(host.textContent).not.toContain("/year");
   });
 
   it("shows a loading state and then optional salary metadata", async () => {
-    let finishLoad!: (result: { jobs: JobListItem[] }) => void;
-    apiMocks.listJobs.mockReturnValueOnce(new Promise((resolve) => { finishLoad = resolve; }));
+    let finishLoad!: (result: JobListItem[]) => void;
+    apiMocks.listWatchRoles.mockReturnValueOnce(new Promise((resolve) => { finishLoad = resolve; }));
 
     await mount();
     expect(host.textContent).toContain("Loading new roles…");
 
     await act(async () => {
-      finishLoad({ jobs: [role("role-1", { salaryMin: 120_000, salaryMax: 180_000 })] });
+      finishLoad([role("role-1", { salaryMin: 120_000, salaryMax: 180_000 })]);
       await Promise.resolve();
     });
     expect(host.textContent).toContain("$120k–$180k/year");
@@ -160,9 +160,9 @@ describe("NewRolesPage", () => {
   });
 
   it("offers retry after an initial load error", async () => {
-    apiMocks.listJobs
+    apiMocks.listWatchRoles
       .mockRejectedValueOnce(new Error("Watch roles unavailable"))
-      .mockResolvedValueOnce({ jobs: [role("role-1")] });
+      .mockResolvedValueOnce([role("role-1")]);
     await mount();
 
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("Watch roles unavailable");
@@ -174,10 +174,10 @@ describe("NewRolesPage", () => {
   });
 
   it("saves and dismisses roles, refreshing the full queue after each action", async () => {
-    apiMocks.listJobs
-      .mockResolvedValueOnce({ jobs: [role("role-1"), role("role-2")] })
-      .mockResolvedValueOnce({ jobs: [role("role-2")] })
-      .mockResolvedValueOnce({ jobs: [] });
+    apiMocks.listWatchRoles
+      .mockResolvedValueOnce([role("role-1"), role("role-2")])
+      .mockResolvedValueOnce([role("role-2")])
+      .mockResolvedValueOnce([]);
     await mount();
 
     await act(async () => {
@@ -196,9 +196,9 @@ describe("NewRolesPage", () => {
   });
 
   it("refreshes the queue after a completed run", async () => {
-    apiMocks.listJobs
-      .mockResolvedValueOnce({ jobs: [role("role-1")] })
-      .mockResolvedValueOnce({ jobs: [role("role-2")] });
+    apiMocks.listWatchRoles
+      .mockResolvedValueOnce([role("role-1")])
+      .mockResolvedValueOnce([role("role-2")]);
     await mount();
 
     await act(async () => {
@@ -206,7 +206,7 @@ describe("NewRolesPage", () => {
       await Promise.resolve();
     });
 
-    expect(apiMocks.listJobs).toHaveBeenCalledTimes(2);
+    expect(apiMocks.listWatchRoles).toHaveBeenCalledTimes(2);
     expect(host.textContent).toContain("Software Engineer role-2");
   });
 
@@ -214,7 +214,7 @@ describe("NewRolesPage", () => {
     const roles = Array.from({ length: 8 }, (_, index) => role(`role-${index + 1}`, {
       companyId: index % 2 === 0 ? "company-1" : "company-2",
     }));
-    apiMocks.listJobs.mockResolvedValue({ jobs: roles });
+    apiMocks.listWatchRoles.mockResolvedValue(roles);
     await mount();
 
     expect(host.textContent).toContain("8 roles · 2 companies");
@@ -229,7 +229,7 @@ describe("NewRolesPage", () => {
       role("role-2", { title: "Data Designer", companyId: "company-2" }),
     ];
     roles[1]!.companyName = "Acme";
-    apiMocks.listJobs.mockResolvedValue({ jobs: roles });
+    apiMocks.listWatchRoles.mockResolvedValue(roles);
     await mount("/new-roles?search=designer&companyId=company-2&groupBy=company");
 
     expect(host.querySelector<HTMLInputElement>('[aria-label="Search new roles"]')?.value).toBe("designer");
@@ -242,12 +242,10 @@ describe("NewRolesPage", () => {
   });
 
   it("updates URL filters, preserves grouping when clearing, and supports history navigation", async () => {
-    apiMocks.listJobs.mockResolvedValue({
-      jobs: [
-        role("role-1", { title: "Software Engineer", companyId: "company-1" }),
-        role("role-2", { title: "Data Analyst", companyId: "company-2" }),
-      ],
-    });
+    apiMocks.listWatchRoles.mockResolvedValue([
+      role("role-1", { title: "Software Engineer", companyId: "company-1" }),
+      role("role-2", { title: "Data Analyst", companyId: "company-2" }),
+    ]);
     await mount("/new-roles?groupBy=company");
 
     const search = host.querySelector<HTMLInputElement>('[aria-label="Search new roles"]')!;
@@ -295,7 +293,7 @@ describe("NewRolesPage", () => {
       role("inactive", { postingState: "inactive", salaryMin: 140_000, salaryMax: 180_000 }),
       role("unknown", { postingState: "unknown", salaryMin: null, salaryMax: null }),
     ];
-    apiMocks.listJobs.mockResolvedValue({ jobs: roles });
+    apiMocks.listWatchRoles.mockResolvedValue(roles);
     await mount();
 
     await act(async () => {
@@ -322,9 +320,9 @@ describe("NewRolesPage", () => {
   });
 
   it("resets a company filter when triage removes its final queued role", async () => {
-    apiMocks.listJobs
-      .mockResolvedValueOnce({ jobs: [role("role-1", { companyId: "company-1" })] })
-      .mockResolvedValueOnce({ jobs: [role("role-2", { companyId: "company-2" })] });
+    apiMocks.listWatchRoles
+      .mockResolvedValueOnce([role("role-1", { companyId: "company-1" })])
+      .mockResolvedValueOnce([role("role-2", { companyId: "company-2" })]);
     await mount("/new-roles?companyId=company-1&search=Software&groupBy=company");
 
     await act(async () => {

@@ -28,6 +28,17 @@ pub fn apply_watch_sync(
     watch_id: &str,
     remote_jobs: Result<Vec<AtsJob>, String>,
 ) -> AppResult<serde_json::Value> {
+    apply_watch_sync_ref(conn, watch_id, &remote_jobs)
+}
+
+/// Apply a fetched listing without taking ownership of its jobs. The runner
+/// uses this form when several watch rows share one exact listing URL, so the
+/// immutable remote payload can be shared instead of cloned per watch.
+pub(crate) fn apply_watch_sync_ref(
+    conn: &Connection,
+    watch_id: &str,
+    remote_jobs: &Result<Vec<AtsJob>, String>,
+) -> AppResult<serde_json::Value> {
     let transaction = conn.unchecked_transaction().map_err(map_sqlite)?;
     match apply_watch_sync_inner(&transaction, watch_id, remote_jobs) {
         Ok(value) => {
@@ -44,7 +55,7 @@ pub fn apply_watch_sync(
 fn apply_watch_sync_inner(
     conn: &Connection,
     watch_id: &str,
-    remote_jobs: Result<Vec<AtsJob>, String>,
+    remote_jobs: &Result<Vec<AtsJob>, String>,
 ) -> AppResult<serde_json::Value> {
     let watch = get_watch(conn, watch_id)?.ok_or_else(|| AppError::from("Watch not found"))?;
     let synced_at = now_iso();
@@ -104,7 +115,7 @@ fn apply_watch_sync_inner(
     let mut created = 0usize;
     let mut reactivated = 0usize;
 
-    for remote in &remote_jobs {
+    for remote in remote_jobs {
         let canonical_url = normalize_canonical_url(&remote.url).map_err(AppError::from)?;
 
         // Compute the inclusion hint for this remote role. This is a

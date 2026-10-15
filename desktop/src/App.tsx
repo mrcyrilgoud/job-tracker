@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import { Layout } from "@/components/Layout";
@@ -6,14 +6,47 @@ import { api } from "@/lib/api";
 import { RunMonitorProvider } from "@/lib/RunMonitorContext";
 import { isDesktopShell } from "@/lib/tauri";
 import { ThemeProvider } from "@/lib/ThemeContext";
-import { CompaniesPage } from "@/pages/CompaniesPage";
-import { CompanyDetailPage } from "@/pages/CompanyDetailPage";
-import { DocumentsPage } from "@/pages/DocumentsPage";
-import { JobDetailPage } from "@/pages/JobDetailPage";
-import { JobsPage } from "@/pages/JobsPage";
-import { NewJobPage } from "@/pages/NewJobPage";
-import { NewRolesPage } from "@/pages/NewRolesPage";
-import { SettingsPage } from "@/pages/SettingsPage";
+
+// Keep the shell and monitoring state in the initial chunk. Each destination
+// is loaded only when its route is visited, so the common Jobs startup path
+// does not pay for every page's data and component graph.
+const CompaniesPage = lazy(() =>
+  import("@/pages/CompaniesPage").then(({ CompaniesPage: Page }) => ({ default: Page })),
+);
+const CompanyDetailPage = lazy(() =>
+  import("@/pages/CompanyDetailPage").then(({ CompanyDetailPage: Page }) => ({ default: Page })),
+);
+const DocumentsPage = lazy(() =>
+  import("@/pages/DocumentsPage").then(({ DocumentsPage: Page }) => ({ default: Page })),
+);
+const JobDetailPage = lazy(() =>
+  import("@/pages/JobDetailPage").then(({ JobDetailPage: Page }) => ({ default: Page })),
+);
+const JobsPage = lazy(() =>
+  import("@/pages/JobsPage").then(({ JobsPage: Page }) => ({ default: Page })),
+);
+const NewJobPage = lazy(() =>
+  import("@/pages/NewJobPage").then(({ NewJobPage: Page }) => ({ default: Page })),
+);
+const NewRolesPage = lazy(() =>
+  import("@/pages/NewRolesPage").then(({ NewRolesPage: Page }) => ({ default: Page })),
+);
+const SettingsPage = lazy(() =>
+  import("@/pages/SettingsPage").then(({ SettingsPage: Page }) => ({ default: Page })),
+);
+
+function RouteLoadingFallback() {
+  return (
+    <div className="route-loading" role="status" aria-live="polite">
+      <span className="spinner" aria-hidden="true" />
+      <span>Loading page…</span>
+    </div>
+  );
+}
+
+function LazyRoute({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<RouteLoadingFallback />}>{children}</Suspense>;
+}
 
 function BrowserOnlyNotice() {
   return (
@@ -59,14 +92,14 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route element={<Layout />}>
-              <Route index element={<JobsPage />} />
-              <Route path="jobs/new" element={<NewJobPage />} />
-              <Route path="jobs/:id" element={<JobDetailPage />} />
-              <Route path="documents" element={<DocumentsPage />} />
-              <Route path="new-roles" element={<NewRolesPage />} />
-              <Route path="companies" element={<CompaniesPage />} />
-              <Route path="companies/:id" element={<CompanyDetailPage />} />
-              <Route path="settings" element={<SettingsPage />} />
+              <Route index element={<LazyRoute><JobsPage /></LazyRoute>} />
+              <Route path="jobs/new" element={<LazyRoute><NewJobPage /></LazyRoute>} />
+              <Route path="jobs/:id" element={<LazyRoute><JobDetailPage /></LazyRoute>} />
+              <Route path="documents" element={<LazyRoute><DocumentsPage /></LazyRoute>} />
+              <Route path="new-roles" element={<LazyRoute><NewRolesPage /></LazyRoute>} />
+              <Route path="companies" element={<LazyRoute><CompaniesPage /></LazyRoute>} />
+              <Route path="companies/:id" element={<LazyRoute><CompanyDetailPage /></LazyRoute>} />
+              <Route path="settings" element={<LazyRoute><SettingsPage /></LazyRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

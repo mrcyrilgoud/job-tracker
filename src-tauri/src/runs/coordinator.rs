@@ -382,6 +382,9 @@ pub struct AcceptedRun {
     pub ledger: RunLedger,
     /// Per-posting evaluation input, index-aligned with `ledger.entries()`.
     pub inputs: Vec<PostingCheckInput>,
+    /// job id -> index into `inputs`, so dispatch does not rescan the full
+    /// input list for every posting.
+    input_indices: HashMap<String, usize>,
     /// job id → `posting_state` at accept (for the summary's state changes).
     pub states_at_start: HashMap<String, String>,
     /// Jobs_Cycle: all four stages `not_started`; Posting_Check_Run: empty.
@@ -436,6 +439,7 @@ pub struct AcceptedParts {
     pub started_at: String,
     pub ledger: RunLedger,
     pub inputs: Vec<PostingCheckInput>,
+    input_indices: HashMap<String, usize>,
     pub states_at_start: HashMap<String, String>,
     pub stages: Vec<StageProgress>,
     pub last_seq: u64,
@@ -468,6 +472,7 @@ impl AcceptedRun {
             started_at,
             ledger,
             inputs,
+            input_indices,
             states_at_start,
             stages,
             last_seq,
@@ -484,6 +489,7 @@ impl AcceptedRun {
                 started_at,
                 ledger,
                 inputs,
+                input_indices,
                 states_at_start,
                 stages,
                 last_seq,
@@ -669,9 +675,11 @@ where
         // Nothing below can fail: the ledger was validated in `plan_postings`.
         let mut identities = Vec::with_capacity(planned.len());
         let mut inputs = Vec::with_capacity(planned.len());
+        let mut input_indices = HashMap::with_capacity(planned.len());
         let mut states_at_start = HashMap::with_capacity(planned.len());
-        for p in planned {
+        for (index, p) in planned.into_iter().enumerate() {
             states_at_start.insert(p.frozen.identity.job_id.clone(), p.frozen.state_at_start);
+            input_indices.insert(p.input.identity.job_id.clone(), index);
             identities.push(p.frozen.identity);
             inputs.push(p.input);
         }
@@ -687,7 +695,7 @@ where
             &ledger,
             &stages,
         );
-        let event = event_from_snapshot(&snapshot, self.clock.now(), None);
+        let event = event_from_snapshot(&snapshot, self.clock.now(), None, true);
         self.sink.publish(&event);
         log::info!(
             "[runs] accepted {} run {} ({} postings, trigger {})",
@@ -705,6 +713,7 @@ where
             started_at,
             ledger,
             inputs,
+            input_indices,
             states_at_start,
             stages,
             last_seq: 1,
@@ -812,6 +821,7 @@ where
             conn: parts.conn,
             ledger: parts.ledger,
             inputs: std::mem::take(&mut parts.inputs),
+            input_indices: std::mem::take(&mut parts.input_indices),
             states_at_start: std::mem::take(&mut parts.states_at_start),
             stages: std::mem::take(&mut parts.stages),
             run_status: RunStatus::Queued,
@@ -870,6 +880,8 @@ struct RunDriver<'a, F, S, K> {
     ledger: RunLedger,
     /// Per-posting evaluation input, index-aligned with `ledger.entries()`.
     inputs: Vec<PostingCheckInput>,
+    /// job id -> index into `inputs`.
+    input_indices: HashMap<String, usize>,
     states_at_start: HashMap<String, String>,
     stages: Vec<StageProgress>,
     run_status: RunStatus,
@@ -914,7 +926,9 @@ where
 
     /// Look up the evaluation input for a job id (index-aligned with the ledger).
     fn input_for(&self, job_id: &str) -> Option<&PostingCheckInput> {
-        self.inputs.iter().find(|i| i.identity.job_id == job_id)
+        self.input_indices
+            .get(job_id)
+            .and_then(|&index| self.inputs.get(index))
     }
 
     /// The postings stage: dispatch every Queued posting under a bounded
@@ -1861,7 +1875,10 @@ where
         guards.release();
 
         // Publish the terminal event last (Req 1.9: done=true, summary attached).
-        let mut event = event_from_snapshot(&snapshot, finished_at, None);
+        // All posting changes have already been published as deltas. The
+        // terminal event only needs run-level state and its summary; omitting
+        // the repeated full posting list is allowed by Progress_Contract v1.
+        let mut event = event_from_snapshot(&snapshot, finished_at, None, false);
         event.seq = BoundedCount::new(terminal_seq);
         event.done = true;
         coordinator.sink().publish(&event);
@@ -2265,6 +2282,7 @@ pub(crate) fn event_from_snapshot(
     snapshot: &RunSnapshot,
     emitted_at: String,
     previous_run_status: Option<RunStatus>,
+    include_postings: bool,
 ) -> RunProgressEvent {
     let mut event = RunProgressEvent {
         version: snapshot.version,
@@ -2284,7 +2302,7 @@ pub(crate) fn event_from_snapshot(
         stages: snapshot.stages.clone(),
         posting_counts: snapshot.posting_counts,
         posting_total: snapshot.posting_total,
-        postings: Some(snapshot.postings.clone()),
+        postings: include_postings.then(|| snapshot.postings.clone()),
         error_reason: snapshot.error_reason.clone(),
         summary: snapshot.summary.clone(),
     };
@@ -2560,6 +2578,9 @@ mod tests {
         );
         assert!(j1.posting_url.contains("gh_jid=123"));
         assert_eq!(run.inputs.len(), 5);
+        assert_eq!(run.input_indices.len(), run.inputs.len());
+        assert_eq!(run.input_indices.get("j1"), Some(&0));
+        assert_eq!(run.input_indices.get("j5"), Some(&4));
         assert_eq!(run.inputs[0].identity.job_id, "j1");
         assert!(run.inputs[0].identity.posting_url.contains("token=s3cret"));
         assert_eq!(run.inputs[0].source.as_deref(), Some("greenhouse"));
@@ -3276,6 +3297,10 @@ mod execute_tests {
         assert!(term.done);
         assert_eq!(term.run_status, RunStatus::Completed);
         assert!(term.summary.is_some());
+        assert!(
+            term.postings.is_none(),
+            "terminal event must not retransmit the full list"
+        );
         assert!(
             events[..events.len() - 1].iter().all(|e| !e.done),
             "done only on the last event"

@@ -657,7 +657,8 @@ pub struct RunProgressEvent {
     pub stages: Option<Vec<StageProgress>>,
     pub posting_counts: PostingCounts,
     pub posting_total: BoundedCount,
-    /// Full list when `seq == 1`, otherwise changed entries only.
+    /// Full list when `seq == 1`; otherwise changed entries only, or absent
+    /// when the event has no posting changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postings: Option<Vec<PostingProgress>>,
     /// Present iff `run_status == Error`.
