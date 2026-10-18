@@ -43,7 +43,7 @@ use crate::jobs::service::{
     unarchive_jobs as unarchive_jobs_service, update_job, JobFilters, LocationSettings,
     UpdateJobInput, WatchRoleFilters,
 };
-use crate::models::{Job, JobPageCursor};
+use crate::models::{Job, JobListPageCursor, JobPageCursor, JobSort};
 use crate::runner::try_lock_runner;
 use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
 use crate::runs::legacy::execute_legacy;
@@ -116,10 +116,16 @@ pub async fn list_jobs_cmd(
 pub async fn list_jobs_page_cmd(
     state: State<'_, AppState>,
     filters: Option<ListJobsArgs>,
-    cursor: Option<JobPageCursor>,
+    sort: Option<JobSort>,
+    cursor: Option<JobListPageCursor>,
 ) -> AppResult<serde_json::Value> {
     state.with_db(|conn| {
-        let page = list_jobs_page(conn, filters.unwrap_or_default().into(), cursor)?;
+        let page = list_jobs_page(
+            conn,
+            filters.unwrap_or_default().into(),
+            sort.unwrap_or_default(),
+            cursor,
+        )?;
         Ok(serde_json::json!(page))
     })
 }

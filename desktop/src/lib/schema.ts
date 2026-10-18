@@ -189,9 +189,23 @@ export type JobPageCursor = {
   id: string;
 };
 
+export type JobSort =
+  | "newestPosting"
+  | "oldest"
+  | "appealHighToLow"
+  | "appealLowToHigh"
+  | "companyAz";
+
+export type JobListPageCursor = {
+  sort: JobSort;
+  sortValue: string | null;
+  appliedTab: boolean;
+  id: string;
+};
+
 export type JobListPage = {
   jobs: JobListSummary[];
-  nextCursor: JobPageCursor | null;
+  nextCursor: JobListPageCursor | null;
 };
 
 /** Compact fields rendered by watch-role lists; detail-only job fields are omitted. */

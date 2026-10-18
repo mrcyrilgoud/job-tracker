@@ -24,7 +24,14 @@ import {
   parseSalaryBound,
   validateSalaryRange,
 } from "@/lib/job-filters";
-import { jobStatuses, type JobListSummary, type JobPageCursor, type JobStatus, type WeeklyActivity } from "@/lib/schema";
+import {
+  jobStatuses,
+  type JobListPageCursor,
+  type JobListSummary,
+  type JobSort,
+  type JobStatus,
+  type WeeklyActivity,
+} from "@/lib/schema";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import {
   jobSourceLabel,
@@ -37,6 +44,14 @@ import {
 const SEARCH_DEBOUNCE_MS = 250;
 const SUGGESTION_MIN_LENGTH = 3;
 const MAX_SEARCH_SUGGESTIONS = 5;
+const DEFAULT_JOB_SORT: JobSort = "newestPosting";
+const JOB_SORTS: readonly JobSort[] = [
+  "newestPosting",
+  "oldest",
+  "appealHighToLow",
+  "appealLowToHigh",
+  "companyAz",
+];
 
 export function JobsPage() {
   const navigate = useNavigate();
@@ -52,9 +67,13 @@ export function JobsPage() {
   const isFavoriteFilter = searchParams.get("favorites") === "true";
   const isArchivedFilter = searchParams.get("archived") === "true";
   const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
+  const requestedSort = searchParams.get("sort");
+  const sort: JobSort = JOB_SORTS.includes(requestedSort as JobSort)
+    ? requestedSort as JobSort
+    : DEFAULT_JOB_SORT;
 
   const [jobs, setJobs] = useState<JobListSummary[]>([]);
-  const [nextCursor, setNextCursor] = useState<JobPageCursor | null>(null);
+  const [nextCursor, setNextCursor] = useState<JobListPageCursor | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
@@ -100,7 +119,8 @@ export function JobsPage() {
       pageKey: string;
       search: string;
       quiet: boolean;
-      cursor: JobPageCursor | null;
+      cursor: JobListPageCursor | null;
+      sort: JobSort;
       filters: {
         status?: string;
         companyId?: string;
@@ -162,6 +182,7 @@ export function JobsPage() {
       salaryMax,
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
+      sort,
   });
   const selectionScopeKey = JSON.stringify({
     isArchived: isArchivedFilter,
@@ -169,7 +190,7 @@ export function JobsPage() {
     liveSearch: liveSearch.trim(),
     appliedSearch,
   });
-  const requestKeyFor = (searchText: string) => JSON.stringify({ filtersKey, search: searchText });
+  const requestKeyFor = (searchText: string) => JSON.stringify({ filtersKey, search: searchText, sort });
   activeRequestKeyRef.current = requestKeyFor(appliedSearch);
   const selectionReady = isArchivedFilter && loadedRequestKey === activeRequestKeyRef.current;
   const selectedCount = selectedJobIds.size;
@@ -178,10 +199,10 @@ export function JobsPage() {
   );
   const someVisibleSelected = selectedCount > 0 && !allMatchingSelected;
 
-  const loadJobs = useCallback((searchText: string, quiet = true, force = false, cursor: JobPageCursor | null = null) => {
+  const loadJobs = useCallback((searchText: string, quiet = true, force = false, cursor: JobListPageCursor | null = null) => {
     const queue = jobsQueueRef.current;
     const key = requestKeyFor(searchText);
-    const pageKey = `${key}|${cursor ? `${cursor.updatedAt}:${cursor.id}` : "first"}`;
+    const pageKey = `${key}|${cursor ? JSON.stringify(cursor) : "first"}`;
     if (!force && queue.activeKey === pageKey) {
       queue.pending = null;
       if (queue.activeSequence !== null) loadSequenceRef.current = queue.activeSequence;
@@ -204,6 +225,7 @@ export function JobsPage() {
       search: searchText,
       quiet,
       cursor,
+      sort,
       filters: {
         status,
         companyId,
@@ -234,6 +256,7 @@ export function JobsPage() {
             const result = await api.listJobsPage(
               { ...request.filters, search: request.search || undefined },
               request.cursor,
+              request.sort,
             );
             if (request.sequence === loadSequenceRef.current && request.key === activeRequestKeyRef.current) {
               setJobs((previous) => {
@@ -262,7 +285,7 @@ export function JobsPage() {
       }
     };
     void drain();
-  }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, filtersKey, reportRefreshFailed]);
+  }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, sort, filtersKey, reportRefreshFailed]);
 
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore || loading) return;
@@ -520,6 +543,21 @@ export function JobsPage() {
     setSearchParams(next);
   }
 
+  function setJobSort(nextSort: JobSort) {
+    const next = new URLSearchParams(searchParams);
+    if (nextSort === DEFAULT_JOB_SORT) next.delete("sort");
+    else next.set("sort", nextSort);
+    setSearchParams(next);
+  }
+
+  function withCurrentSort(to: string) {
+    const [pathname, query = ""] = to.split("?", 2);
+    const next = new URLSearchParams(query);
+    if (sort !== DEFAULT_JOB_SORT) next.set("sort", sort);
+    const serialized = next.toString();
+    return serialized ? `${pathname}?${serialized}` : pathname;
+  }
+
   const activeStatus = jobStatuses.find((value) => value === status);
   const heading = isFavoriteFilter
     ? "Favorites Board"
@@ -581,6 +619,7 @@ export function JobsPage() {
     if (nextSalaryMin) next.set("salaryMin", nextSalaryMin);
     if (nextSalaryMax) next.set("salaryMax", nextSalaryMax);
     if (viewMode) next.set("view", viewMode);
+    if (sort !== DEFAULT_JOB_SORT) next.set("sort", sort);
     setSearchParams(next);
     if (filterPopoverOpen) {
       setFilterPopoverOpen(false);
@@ -608,13 +647,13 @@ export function JobsPage() {
             <h2 className="mb-4 text-sm font-semibold text-[var(--muted)]">Pipeline</h2>
             <div className="space-y-1">
               <SidebarLink
-                to="/"
+                to={withCurrentSort("/")}
                 active={!status && !isFavoriteFilter && !isArchivedFilter}
                 label="All active"
                 count={activeJobsCount}
               />
               <SidebarLink
-                to="/?favorites=true"
+                to={withCurrentSort("/?favorites=true")}
                 active={isFavoriteFilter}
                 label="Favorites"
                 Icon={StarIcon}
@@ -623,14 +662,14 @@ export function JobsPage() {
               {(["wishlist", "applied", "interviewing", "offer"] as const).map((key) => (
                 <SidebarLink
                   key={key}
-                  to={`/?status=${key}`}
+                  to={withCurrentSort(`/?status=${key}`)}
                   active={status === key && !isFavoriteFilter && !isArchivedFilter}
                   label={jobStatusPresentation(key).label}
                   count={counts[key] ?? 0}
                 />
               ))}
               <SidebarLink
-                to="/?archived=true"
+                to={withCurrentSort("/?archived=true")}
                 active={isArchivedFilter}
                 label="Archived"
                 Icon={ArchiveIcon}
@@ -660,7 +699,7 @@ export function JobsPage() {
               {visibleCompanies.map((company) => (
                 <SidebarLink
                   key={company.id}
-                  to={`/?companyId=${company.id}`}
+                  to={withCurrentSort(`/?companyId=${company.id}`)}
                   active={companyId === company.id}
                   label={company.name}
                 />
@@ -694,6 +733,22 @@ export function JobsPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              <label htmlFor="jobs-sort" className="flex items-center gap-2 text-xs font-medium text-[var(--muted)]">
+                <span>Sort by</span>
+                <select
+                  id="jobs-sort"
+                  aria-label="Sort jobs"
+                  value={sort}
+                  onChange={(event) => setJobSort(event.target.value as JobSort)}
+                  className="field jobs-sort-select text-sm"
+                >
+                  <option value="newestPosting">Newest posting</option>
+                  <option value="oldest">{status === "applied" ? "Oldest application" : "Oldest posting"}</option>
+                  <option value="appealHighToLow">Appeal: high to low</option>
+                  <option value="appealLowToHigh">Appeal: low to high</option>
+                  <option value="companyAz">Company: A–Z</option>
+                </select>
+              </label>
               {/* View Switcher: List vs Board */}
               <div className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-sm)]">
                 <button

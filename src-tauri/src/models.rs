@@ -141,11 +141,38 @@ pub struct JobPageCursor {
     pub id: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JobSort {
+    NewestPosting,
+    Oldest,
+    AppealHighToLow,
+    AppealLowToHigh,
+    CompanyAz,
+}
+
+impl Default for JobSort {
+    fn default() -> Self {
+        Self::NewestPosting
+    }
+}
+
+/// Sort-aware cursor used only by the main Jobs page. Watch-role paging keeps
+/// using `JobPageCursor` and its updated-at ordering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobListPageCursor {
+    pub sort: JobSort,
+    pub sort_value: Option<String>,
+    pub applied_tab: bool,
+    pub id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobListPage {
     pub jobs: Vec<JobListSummary>,
-    pub next_cursor: Option<JobPageCursor>,
+    pub next_cursor: Option<JobListPageCursor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,5 +238,25 @@ pub fn checked_appeal(score: i64) -> Result<i64, &'static str> {
         Ok(score)
     } else {
         Err(APPEAL_RANGE_MESSAGE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::JobSort;
+
+    #[test]
+    fn job_sort_uses_the_frontend_camel_case_values() {
+        for (sort, wire_value) in [
+            (JobSort::NewestPosting, "newestPosting"),
+            (JobSort::Oldest, "oldest"),
+            (JobSort::AppealHighToLow, "appealHighToLow"),
+            (JobSort::AppealLowToHigh, "appealLowToHigh"),
+            (JobSort::CompanyAz, "companyAz"),
+        ] {
+            let encoded = serde_json::to_string(&sort).unwrap();
+            assert_eq!(encoded, format!("\"{wire_value}\""));
+            assert_eq!(serde_json::from_str::<JobSort>(&encoded).unwrap(), sort);
+        }
     }
 }

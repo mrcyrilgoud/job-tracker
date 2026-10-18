@@ -191,6 +191,73 @@ describe("JobsPage live search suggestions", () => {
     expect(host.textContent).not.toContain("new roles from your watches");
   });
 
+  it("syncs sort changes to the URL and sends them with a fresh cursor on the selected tab", async () => {
+    apiMocks.listJobsPage.mockImplementation(async (_filters, _cursor, requestedSort) => ({
+      jobs: [makeJob(`sort-${requestedSort ?? "default"}`, "Sorted role")],
+      nextCursor: requestedSort === "oldest"
+        ? { sort: "oldest", sortValue: "2025-01-01T00:00:00Z", appliedTab: true, id: "cursor-role" }
+        : null,
+    }));
+    await mount("/?status=applied&view=board&search=rare&sort=oldest");
+
+    const sortSelect = host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')!;
+    expect(sortSelect.value).toBe("oldest");
+    expect(sortSelect.selectedOptions[0].textContent).toBe("Oldest application");
+    expect(apiMocks.listJobsPage.mock.calls[0]?.[2]).toBe("oldest");
+
+    await act(async () => {
+      selectValue(sortSelect, "appealLowToHigh");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const params = new URLSearchParams(host.querySelector('[data-testid="location-search"]')?.textContent ?? "");
+    expect(params.get("status")).toBe("applied");
+    expect(params.get("view")).toBe("board");
+    expect(params.get("search")).toBe("rare");
+    expect(params.get("sort")).toBe("appealLowToHigh");
+    const appealCall = apiMocks.listJobsPage.mock.calls.find(([, , requestedSort]) =>
+      requestedSort === "appealLowToHigh",
+    );
+    expect(appealCall?.[0]).toMatchObject({ status: "applied", search: "rare" });
+    expect(appealCall?.[1]).toBeNull();
+    expect(appealCall?.[2]).toBe("appealLowToHigh");
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[data-testid="history-back"]')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')?.value).toBe("oldest");
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('[data-testid="history-forward"]')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')?.value).toBe("appealLowToHigh");
+  });
+
+  it("carries the Oldest sort across tabs and relabels it for Applied", async () => {
+    await mount("/?sort=oldest");
+    const appliedLink = [...host.querySelectorAll<HTMLAnchorElement>("a")]
+      .find((link) => link.textContent?.trim().startsWith("Applied"));
+    expect(appliedLink).not.toBeNull();
+    expect(appliedLink?.getAttribute("href")).toContain("status=applied&sort=oldest");
+
+    await act(async () => {
+      appliedLink!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')?.selectedOptions[0].textContent)
+      .toBe("Oldest application");
+    const appliedSortCall = apiMocks.listJobsPage.mock.calls.find(([filters, , requestedSort]) =>
+      filters?.status === "applied" && requestedSort === "oldest",
+    );
+    expect(appliedSortCall?.[0]).toMatchObject({ status: "applied" });
+  });
+
   it("does not show suggestions before three characters and opens a selected job with the keyboard", async () => {
     await mount();
     const input = host.querySelector<HTMLInputElement>('input[aria-label="Search jobs"]')!;

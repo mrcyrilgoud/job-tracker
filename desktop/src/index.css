@@ -134,6 +134,12 @@ button {
   width: min(22rem, calc(100vw - 2rem));
 }
 
+.jobs-sort-select {
+  width: auto;
+  min-width: 12rem;
+  margin-top: 0;
+}
+
 .field::placeholder {
   color: var(--faint);
 }

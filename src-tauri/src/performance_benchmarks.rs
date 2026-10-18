@@ -22,6 +22,7 @@ mod jobs_page {
 
     use crate::db::migrate::migrate;
     use crate::jobs::service::{list_jobs_page, JobFilters};
+    use crate::models::JobSort;
 
     fn seeded_connection() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -64,12 +65,14 @@ mod jobs_page {
             ..JobFilters::default()
         };
         for _ in 0..3 {
-            std::hint::black_box(list_jobs_page(&conn, filters.clone(), None).unwrap());
+            std::hint::black_box(
+                list_jobs_page(&conn, filters.clone(), JobSort::default(), None).unwrap(),
+            );
         }
         let mut samples = Vec::with_capacity(30);
         for _ in 0..30 {
             let started = Instant::now();
-            let page = list_jobs_page(&conn, filters.clone(), None).unwrap();
+            let page = list_jobs_page(&conn, filters.clone(), JobSort::default(), None).unwrap();
             samples.push(started.elapsed());
             std::hint::black_box(page.jobs.len());
         }
@@ -82,7 +85,8 @@ mod jobs_page {
         let mut samples = Vec::with_capacity(30);
         for _ in 0..30 {
             let started = Instant::now();
-            let page = list_jobs_page(&conn, JobFilters::default(), None).unwrap();
+            let page =
+                list_jobs_page(&conn, JobFilters::default(), JobSort::default(), None).unwrap();
             samples.push(started.elapsed());
             std::hint::black_box(page.jobs.len());
         }

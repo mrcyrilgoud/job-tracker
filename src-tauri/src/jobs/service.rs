@@ -7,8 +7,8 @@ use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
     checked_appeal, is_job_status, AttachedDocument, Company, Document, Job, JobDetail,
-    JobDocument, JobEvent, JobListItem, JobListPage, JobListSummary, JobPageCursor, JobSummary,
-    WeeklyActivity, WeeklyDay,
+    JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor, JobListSummary,
+    JobPageCursor, JobSort, JobSummary, WeeklyActivity, WeeklyDay,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -308,6 +308,104 @@ pub struct JobFilters {
 
 pub const JOB_PAGE_SIZE: usize = 100;
 
+fn jobs_page_order_by(sort: JobSort, applied_tab: bool) -> &'static str {
+    match sort {
+        JobSort::NewestPosting => " ORDER BY j.created_at DESC, j.id DESC",
+        JobSort::Oldest if applied_tab => {
+            " ORDER BY (j.applied_at IS NULL) ASC, j.applied_at ASC, j.id ASC"
+        }
+        JobSort::Oldest => " ORDER BY j.created_at ASC, j.id ASC",
+        JobSort::AppealHighToLow => " ORDER BY (j.appeal IS NULL) ASC, j.appeal DESC, j.id ASC",
+        JobSort::AppealLowToHigh => " ORDER BY (j.appeal IS NULL) ASC, j.appeal ASC, j.id ASC",
+        JobSort::CompanyAz => " ORDER BY c.name COLLATE NOCASE ASC, j.id ASC",
+    }
+}
+
+fn append_jobs_page_cursor(
+    where_sql: &mut String,
+    values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    sort: JobSort,
+    applied_tab: bool,
+    cursor: &JobListPageCursor,
+) -> AppResult<()> {
+    if cursor.sort != sort || cursor.applied_tab != applied_tab {
+        return Err(AppError::from(
+            "Pagination cursor does not match the selected Jobs sort",
+        ));
+    }
+
+    match sort {
+        JobSort::NewestPosting => {
+            let value = cursor
+                .sort_value
+                .as_deref()
+                .ok_or_else(|| AppError::from("Invalid Jobs pagination cursor"))?;
+            where_sql.push_str(" AND (j.created_at < ? OR (j.created_at = ? AND j.id < ?))");
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(cursor.id.clone()));
+        }
+        JobSort::Oldest if applied_tab => {
+            if let Some(value) = &cursor.sort_value {
+                where_sql.push_str(
+                    " AND (j.applied_at IS NULL OR j.applied_at > ? OR (j.applied_at = ? AND j.id > ?))",
+                );
+                values.push(Box::new(value.clone()));
+                values.push(Box::new(value.clone()));
+                values.push(Box::new(cursor.id.clone()));
+            } else {
+                where_sql.push_str(" AND j.applied_at IS NULL AND j.id > ?");
+                values.push(Box::new(cursor.id.clone()));
+            }
+        }
+        JobSort::Oldest => {
+            let value = cursor
+                .sort_value
+                .as_deref()
+                .ok_or_else(|| AppError::from("Invalid Jobs pagination cursor"))?;
+            where_sql.push_str(" AND (j.created_at > ? OR (j.created_at = ? AND j.id > ?))");
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(cursor.id.clone()));
+        }
+        JobSort::AppealHighToLow | JobSort::AppealLowToHigh => {
+            if let Some(value) = &cursor.sort_value {
+                let score = value
+                    .parse::<i64>()
+                    .map_err(|_| AppError::from("Invalid Jobs pagination cursor"))?;
+                if sort == JobSort::AppealHighToLow {
+                    where_sql.push_str(
+                        " AND (j.appeal IS NULL OR j.appeal < ? OR (j.appeal = ? AND j.id > ?))",
+                    );
+                } else {
+                    where_sql.push_str(
+                        " AND (j.appeal IS NULL OR j.appeal > ? OR (j.appeal = ? AND j.id > ?))",
+                    );
+                }
+                values.push(Box::new(score));
+                values.push(Box::new(score));
+                values.push(Box::new(cursor.id.clone()));
+            } else {
+                where_sql.push_str(" AND j.appeal IS NULL AND j.id > ?");
+                values.push(Box::new(cursor.id.clone()));
+            }
+        }
+        JobSort::CompanyAz => {
+            let value = cursor
+                .sort_value
+                .as_deref()
+                .ok_or_else(|| AppError::from("Invalid Jobs pagination cursor"))?;
+            where_sql.push_str(
+                " AND (c.name COLLATE NOCASE > ? COLLATE NOCASE OR (c.name COLLATE NOCASE = ? COLLATE NOCASE AND j.id > ?))",
+            );
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(cursor.id.clone()));
+        }
+    }
+    Ok(())
+}
+
 /// Compact projection used by watch views. Keep only fields rendered by the
 /// watch inbox/company surfaces; long job detail fields stay on `get_job`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -522,28 +620,28 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
 pub fn list_jobs_page(
     conn: &Connection,
     filters: JobFilters,
-    cursor: Option<JobPageCursor>,
+    sort: JobSort,
+    cursor: Option<JobListPageCursor>,
 ) -> AppResult<JobListPage> {
     let (mut where_sql, mut values) = job_filter_sql(&filters);
+    let applied_tab = filters.status.as_deref() == Some("applied");
     if let Some(cursor) = &cursor {
-        where_sql.push_str(" AND (j.updated_at < ? OR (j.updated_at = ? AND j.id < ?))");
-        values.push(Box::new(cursor.updated_at.clone()));
-        values.push(Box::new(cursor.updated_at.clone()));
-        values.push(Box::new(cursor.id.clone()));
+        append_jobs_page_cursor(&mut where_sql, &mut values, sort, applied_tab, cursor)?;
     }
     values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
     let sql = format!(
         "SELECT j.id, j.title, j.status, j.applied_at, j.posting_state,
                 j.last_checked_at, j.source, j.is_new_from_watch, j.is_favorite,
-                j.updated_at, j.appeal, j.location, c.name
+                j.updated_at, j.appeal, j.location, c.name, j.created_at
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
-         ORDER BY j.updated_at DESC, j.id DESC LIMIT ?"
+         {} LIMIT ?",
+        jobs_page_order_by(sort, applied_tab)
     );
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
     let rows = stmt
         .query_map(params_ref.as_slice(), |row| {
-            Ok(JobListSummary {
+            let item = JobListSummary {
                 job: JobSummary {
                     id: row.get(0)?,
                     title: row.get(1)?,
@@ -559,22 +657,36 @@ pub fn list_jobs_page(
                     location: row.get(11)?,
                 },
                 company_name: row.get(12)?,
-            })
+            };
+            Ok((item, row.get::<_, String>(13)?))
         })
         .map_err(map_sqlite)?;
-    let mut jobs = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
-    let has_more = jobs.len() > JOB_PAGE_SIZE;
+    let mut page_rows = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
+    let has_more = page_rows.len() > JOB_PAGE_SIZE;
     if has_more {
-        jobs.pop();
+        page_rows.pop();
     }
     let next_cursor = if has_more {
-        jobs.last().map(|item| JobPageCursor {
-            updated_at: item.job.updated_at.clone(),
-            id: item.job.id.clone(),
-        })
+        page_rows
+            .last()
+            .map(|(item, created_at)| JobListPageCursor {
+                sort,
+                sort_value: match sort {
+                    JobSort::NewestPosting => Some(created_at.clone()),
+                    JobSort::Oldest if applied_tab => item.job.applied_at.clone(),
+                    JobSort::Oldest => Some(created_at.clone()),
+                    JobSort::AppealHighToLow | JobSort::AppealLowToHigh => {
+                        item.job.appeal.map(|score| score.to_string())
+                    }
+                    JobSort::CompanyAz => Some(item.company_name.clone()),
+                },
+                applied_tab,
+                id: item.job.id.clone(),
+            })
     } else {
         None
     };
+    let jobs = page_rows.into_iter().map(|(item, _)| item).collect();
     Ok(JobListPage { jobs, next_cursor })
 }
 
@@ -1627,7 +1739,7 @@ mod tests {
     }
 
     #[test]
-    fn jobs_page_uses_stable_updated_at_id_cursor_and_compact_projection() {
+    fn jobs_page_uses_stable_created_at_id_cursor_and_compact_projection() {
         let conn = test_connection();
         let timestamp = "2026-01-01T00:00:00Z";
         conn.execute(
@@ -1649,7 +1761,7 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        let first = list_jobs_page(&conn, JobFilters::default(), None).unwrap();
+        let first = list_jobs_page(&conn, JobFilters::default(), JobSort::default(), None).unwrap();
         assert_eq!(first.jobs.len(), JOB_PAGE_SIZE);
         let cursor = first
             .next_cursor
@@ -1657,11 +1769,23 @@ mod tests {
             .expect("there should be a second page");
         assert_eq!(first.jobs.first().unwrap().job.id, "page-204");
         assert_eq!(first.jobs.last().unwrap().job.id, "page-105");
-        let second = list_jobs_page(&conn, JobFilters::default(), Some(cursor)).unwrap();
+        let second = list_jobs_page(
+            &conn,
+            JobFilters::default(),
+            JobSort::default(),
+            Some(cursor),
+        )
+        .unwrap();
         assert_eq!(second.jobs.len(), JOB_PAGE_SIZE);
         assert_eq!(second.jobs.first().unwrap().job.id, "page-104");
         assert_eq!(second.jobs.last().unwrap().job.id, "page-005");
-        let third = list_jobs_page(&conn, JobFilters::default(), second.next_cursor).unwrap();
+        let third = list_jobs_page(
+            &conn,
+            JobFilters::default(),
+            JobSort::default(),
+            second.next_cursor,
+        )
+        .unwrap();
         assert_eq!(
             third
                 .jobs
@@ -1675,6 +1799,222 @@ mod tests {
         let json = serde_json::to_value(&first.jobs[0]).unwrap();
         assert!(json["job"].get("description").is_none());
         assert!(json["job"].get("notes").is_none());
+    }
+
+    #[test]
+    fn jobs_page_supports_posting_application_appeal_and_company_sorts() {
+        let conn = test_connection();
+        for (id, name) in [
+            ("company-zulu", "Zulu"),
+            ("company-alpha", "alpha"),
+            ("company-alpha-upper", "Alpha"),
+            ("company-beta", "Beta"),
+        ] {
+            conn.execute(
+                "INSERT INTO companies (id, name, created_at, updated_at) VALUES (?1, ?2, '2026-01-01', '2026-01-01')",
+                params![id, name],
+            )
+            .unwrap();
+        }
+        for (id, company, status, applied_at, created_at, appeal) in [
+            (
+                "track-old",
+                "company-zulu",
+                "wishlist",
+                None,
+                "2025-01-01T00:00:00Z",
+                Some(2_i64),
+            ),
+            (
+                "track-new",
+                "company-alpha",
+                "wishlist",
+                None,
+                "2025-04-01T00:00:00Z",
+                Some(5_i64),
+            ),
+            (
+                "applied-old",
+                "company-beta",
+                "applied",
+                Some("2025-01-10T00:00:00Z"),
+                "2025-03-01T00:00:00Z",
+                None,
+            ),
+            (
+                "applied-new",
+                "company-alpha-upper",
+                "applied",
+                Some("2025-02-02T00:00:00Z"),
+                "2024-12-01T00:00:00Z",
+                Some(1_i64),
+            ),
+            (
+                "applied-no-date",
+                "company-beta",
+                "applied",
+                None,
+                "2025-05-01T00:00:00Z",
+                Some(5_i64),
+            ),
+        ] {
+            let url = format!("https://example.test/jobs/{id}");
+            conn.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, applied_at,
+                                   posting_state, source, appeal, created_at, updated_at)
+                 VALUES (?1, ?2, ?1, ?3, ?3, ?4, ?5, 'active', 'manual', ?6, ?7, ?7)",
+                params![id, company, url, status, applied_at, appeal, created_at],
+            )
+            .unwrap();
+        }
+
+        let ids = |sort, filters: JobFilters| {
+            list_jobs_page(&conn, filters, sort, None)
+                .unwrap()
+                .jobs
+                .into_iter()
+                .map(|item| item.job.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(JobSort::NewestPosting, JobFilters::default()),
+            [
+                "applied-no-date",
+                "track-new",
+                "applied-old",
+                "track-old",
+                "applied-new"
+            ]
+        );
+        assert_eq!(
+            ids(JobSort::Oldest, JobFilters::default()),
+            [
+                "applied-new",
+                "track-old",
+                "applied-old",
+                "track-new",
+                "applied-no-date"
+            ]
+        );
+        assert_eq!(
+            ids(
+                JobSort::Oldest,
+                JobFilters {
+                    status: Some("applied".into()),
+                    ..JobFilters::default()
+                },
+            ),
+            ["applied-old", "applied-new", "applied-no-date"]
+        );
+        assert_eq!(
+            ids(JobSort::AppealHighToLow, JobFilters::default()),
+            [
+                "applied-no-date",
+                "track-new",
+                "track-old",
+                "applied-new",
+                "applied-old"
+            ]
+        );
+        assert_eq!(
+            ids(JobSort::AppealLowToHigh, JobFilters::default()),
+            [
+                "applied-new",
+                "track-old",
+                "applied-no-date",
+                "track-new",
+                "applied-old"
+            ]
+        );
+        assert_eq!(
+            ids(JobSort::CompanyAz, JobFilters::default()),
+            [
+                "applied-new",
+                "track-new",
+                "applied-no-date",
+                "applied-old",
+                "track-old"
+            ]
+        );
+    }
+
+    #[test]
+    fn jobs_page_sort_cursors_cover_duplicate_and_null_keys() {
+        let conn = test_connection();
+        let companies = [
+            ("company-a", "Alpha"),
+            ("company-b", "Beta"),
+            ("company-z", "Zulu"),
+        ];
+        for (id, name) in companies {
+            conn.execute(
+                "INSERT INTO companies (id, name, created_at, updated_at) VALUES (?1, ?2, '2026-01-01', '2026-01-01')",
+                params![id, name],
+            )
+            .unwrap();
+        }
+        let tx = conn.unchecked_transaction().unwrap();
+        for index in 0..205 {
+            let id = format!("sort-page-{index:03}");
+            let url = format!("https://example.test/sort-page/{index}");
+            let company_id = companies[index % companies.len()].0;
+            let status = if index % 2 == 0 {
+                "applied"
+            } else {
+                "wishlist"
+            };
+            let created_at = format!("2025-{:02}-01T00:00:00Z", index % 12 + 1);
+            let applied_at =
+                (index % 7 != 0).then(|| format!("2024-{:02}-01T00:00:00Z", index % 12 + 1));
+            let appeal = (index % 6 != 0).then_some((index % 5 + 1) as i64);
+            tx.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, applied_at,
+                                   posting_state, source, appeal, created_at, updated_at)
+                 VALUES (?1, ?2, ?1, ?3, ?3, ?4, ?5, 'active', 'manual', ?6, ?7, ?7)",
+                params![id, company_id, url, status, applied_at, appeal, created_at],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+
+        let cases = [
+            (JobSort::NewestPosting, JobFilters::default()),
+            (JobSort::Oldest, JobFilters::default()),
+            (
+                JobSort::Oldest,
+                JobFilters {
+                    status: Some("applied".into()),
+                    ..JobFilters::default()
+                },
+            ),
+            (JobSort::AppealHighToLow, JobFilters::default()),
+            (JobSort::AppealLowToHigh, JobFilters::default()),
+            (JobSort::CompanyAz, JobFilters::default()),
+        ];
+        for (sort, filters) in cases {
+            let mut cursor = None;
+            let mut ids = Vec::new();
+            loop {
+                let page = list_jobs_page(&conn, filters.clone(), sort, cursor).unwrap();
+                ids.extend(page.jobs.into_iter().map(|item| item.job.id));
+                cursor = page.next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
+            }
+            let unique_ids = ids.iter().collect::<HashSet<_>>();
+            let expected_count = if filters.status.as_deref() == Some("applied") {
+                103
+            } else {
+                205
+            };
+            assert_eq!(ids.len(), expected_count, "missing rows for {sort:?}");
+            assert_eq!(
+                unique_ids.len(),
+                expected_count,
+                "duplicate rows for {sort:?}"
+            );
+        }
     }
 
     #[test]
@@ -1770,7 +2110,7 @@ mod tests {
             ..JobFilters::default()
         };
         let legacy = list_jobs(&conn, filters.clone()).unwrap();
-        let page = list_jobs_page(&conn, filters.clone(), None).unwrap();
+        let page = list_jobs_page(&conn, filters.clone(), JobSort::default(), None).unwrap();
         let ids = list_job_ids(&conn, filters).unwrap();
         let mut expected = legacy
             .iter()
