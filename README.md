@@ -37,13 +37,13 @@ Refresh the packaged app **and** retarget the jobs LaunchAgent:
 npm run app:rebuild
 ```
 
-Optional one-time setup so a `git commit` that touches app code starts a background rebuild:
+Optional one-time setup so an app-path commit on the checked-out branch starts a background rebuild. Detached HEADs and dirty checkouts are skipped with a reason in `data/rebuild.log`:
 
 ```bash
 npm run hooks:install
 ```
 
-Day-to-day UI/Rust iteration still uses `npm run tauri:dev`; `app:rebuild` is for keeping the packaged `.app` (and LaunchAgent) current.
+Day-to-day UI/Rust iteration still uses `npm run tauri:dev`; `app:rebuild` is for keeping the packaged `.app` (and LaunchAgent) current. It requires a clean checkout. It stages and verifies the app before replacement, keeps the previous verified app at `/Applications/Job Tracker.app.previous`, and restores the prior app and LaunchAgent configuration if promotion or LaunchAgent loading fails. If the app was running, it is relaunched and checked after installation.
 
 ## Data directory
 
@@ -136,8 +136,8 @@ npm run desktop:build    # Vite UI typecheck + build
 | --- | --- |
 | `npm run tauri:dev` | Run the Mac app (Vite + Rust) |
 | `npm run tauri:build` | Produce `Job Tracker.app` |
-| `npm run app:rebuild` | Build packaged app, retarget LaunchAgent, notify; quit/relaunch if running |
-| `npm run hooks:install` | Install local post-commit hook (background rebuild on app-code commits) |
+| `npm run app:rebuild` | Build and verify packaged app, transactionally replace it, retarget LaunchAgent, notify |
+| `npm run hooks:install` | Install local post-commit hook (background rebuild for clean app-code commits on the checked-out branch) |
 | `npm run cli -- <cmd>` | Run Job Tracker CLI subcommands (e.g. `npm run cli -- list`, `stats`) |
 | `npm run cli:install` | Symlink `jt` and `job-tracker` into `~/.local/bin/` for global terminal access |
 | `npm run jobs` | One-shot posting / ATS / careers / CSV cycle |
@@ -199,7 +199,7 @@ export JOB_TRACKER_DATA_DIR="$HOME/Library/Application Support/com.jobtracker.lo
 jt list --status wishlist --json
 ```
 
-`app:rebuild` flags: `--skip-jobs` (build only), `--background` (used by the post-commit hook). Concurrent rebuilds use `data/rebuild.lock` and fail clearly if one is already running. Log: `data/rebuild.log`.
+`app:rebuild` flags: `--skip-jobs` (do not change the LaunchAgent), `--background` (used by the post-commit hook). Concurrent requests are serialized with an atomic `data/rebuild.lock`; the worker coalesces queued commits and rebuilds the latest clean HEAD. Requests accepted by the worker remain queued after a failure or dirty-checkout skip. A hook that sees a dirty checkout logs the skipped commit; run `npm run app:rebuild` after cleaning the checkout. Logs and pending requests live in `data/rebuild.log` and `data/rebuild-queue/`. Run deployment tooling checks with `npm run test:deployment`.
 
 ## Repo layout
 

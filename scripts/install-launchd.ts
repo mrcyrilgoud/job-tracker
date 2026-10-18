@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderPlist, resolveLaunchdConfig } from "./launchd-plist";
+import { installLaunchAgentTransaction } from "./launchd-install-transaction";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -32,21 +33,30 @@ if (config.dataDirInsideRepo) {
 fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 fs.mkdirSync(config.dataDir, { recursive: true });
 
-// Unload any previous agent before rewriting so it cannot keep writing an old tree.
-spawnSync("launchctl", ["unload", plistPath], { stdio: "ignore" });
+const uid = typeof process.getuid === "function" ? process.getuid() : -1;
+if (uid < 0) throw new Error("Could not determine the macOS GUI user for the LaunchAgent.");
 
-fs.writeFileSync(plistPath, renderPlist(config));
-console.log(`Wrote ${plistPath}`);
-console.log(`Program: ${config.programArguments.join(" ")}`);
-console.log(`Data dir: ${config.dataDir}`);
-
-const load = spawnSync("launchctl", ["load", "-w", plistPath], { encoding: "utf8" });
-const loadOutput = `${load.stdout ?? ""}${load.stderr ?? ""}`.trim();
-if (load.status === 0 && !/error|failed/i.test(loadOutput)) {
-  console.log(`Loaded ${config.label}. It runs at load and hourly; logs: ${config.logPath}`);
-} else {
-  console.warn(
-    `WARNING: plist written but launchctl load failed (exit ${load.status ?? "?"}${loadOutput ? `: ${loadOutput}` : ""}).`,
+try {
+  installLaunchAgentTransaction(
+    plistPath,
+    config.label,
+    uid,
+    renderPlist(config),
+    (args) => {
+      const result = spawnSync("launchctl", args, { encoding: "utf8" });
+      return {
+        status: result.status,
+        stdout: result.stdout,
+        stderr: result.error?.message ?? result.stderr,
+      };
+    },
   );
-  console.warn(`Load it manually: launchctl unload "${plistPath}" 2>/dev/null; launchctl load -w "${plistPath}"`);
+  console.log(`Wrote and loaded ${plistPath}`);
+  console.log(`Program: ${config.programArguments.join(" ")}`);
+  console.log(`Data dir: ${config.dataDir}`);
+  console.log(`Loaded ${config.label}. It runs at load and hourly; logs: ${config.logPath}`);
+} catch (error) {
+  console.error(`LaunchAgent installation failed: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`Review ${plistPath}; retry with npm run jobs:install after resolving the cause.`);
+  process.exitCode = 1;
 }

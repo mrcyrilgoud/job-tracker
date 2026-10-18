@@ -14,6 +14,7 @@
     "test": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
     "test:desktop": "npm --prefix desktop run test",
     "test:installer": "tsx --test scripts/install-cli.test.ts",
+    "test:deployment": "tsx --test scripts/app-promotion.test.ts scripts/rebuild-support.test.ts scripts/launchd-install-transaction.test.ts scripts/post-commit.test.ts",
     "jobs:install": "tsx scripts/install-launchd.ts",
     "app:rebuild": "tsx scripts/rebuild-app.ts",
     "hooks:install": "tsx scripts/install-git-hooks.ts"

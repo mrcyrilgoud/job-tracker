@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# post-commit: background-rebuild Job Tracker when the commit touched app paths.
+# post-commit: queue a background Job Tracker rebuild for app-path commits.
 # Installed via: npm run hooks:install  (copies into .git/hooks/post-commit)
 
 set -euo pipefail
@@ -7,19 +7,40 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-changed="$(
-  git diff-tree --no-commit-id --name-only -r HEAD -- \
-    desktop/ \
-    src-tauri/ \
-    package.json \
-    package-lock.json \
-    2>/dev/null || true
-)"
+log_dir="$REPO_ROOT/data"
+log_path="$log_dir/rebuild.log"
+mkdir -p "$log_dir"
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+if [[ -z "$branch" ]]; then
+  echo "Job Tracker rebuild skipped: HEAD is detached" >> "$log_path"
+  exit 0
+fi
+
+commit="$(git rev-parse HEAD)"
+changed="$(git diff-tree --root --first-parent --no-commit-id --name-only -r "$commit" -- \
+  desktop/ src-tauri/ package.json package-lock.json)"
 
 if [[ -z "${changed//[[:space:]]/}" ]]; then
   exit 0
 fi
 
-mkdir -p data
-echo "Job Tracker rebuild started in background (data/rebuild.log)"
-nohup npm run app:rebuild -- --background >> data/rebuild.log 2>&1 &
+if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+  echo "Job Tracker rebuild skipped for $commit: checkout is dirty; run npm run app:rebuild after cleaning it" >> "$log_path"
+  exit 0
+fi
+
+npm_bin="$(command -v npm || true)"
+if [[ -z "$npm_bin" ]]; then
+  echo "Job Tracker rebuild skipped for $commit: npm was not found in PATH=$PATH" >> "$log_path"
+  exit 0
+fi
+
+nohup_bin="$(command -v nohup || true)"
+if [[ -z "$nohup_bin" ]]; then
+  echo "Job Tracker rebuild skipped for $commit: nohup was not found in PATH=$PATH" >> "$log_path"
+  exit 0
+fi
+
+echo "Job Tracker rebuild queued for $branch@$commit ($log_path)"
+JOB_TRACKER_NPM_BIN="$npm_bin" "$nohup_bin" "$npm_bin" run app:rebuild -- --background --request-commit "$commit" --request-branch "$branch" >> "$log_path" 2>&1 < /dev/null &
