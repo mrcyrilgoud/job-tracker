@@ -6,9 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
-    checked_appeal, is_job_status, AttachedDocument, Company, Document, Job, JobDetail,
-    JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor, JobListSummary,
-    JobPageCursor, JobSort, JobSummary, WeeklyActivity, WeeklyDay,
+    checked_appeal, is_job_status, AppliedJobSort, AppliedJobSortDirection, AppliedJobSortField,
+    AttachedDocument, Company, Document, Job, JobDetail, JobDocument, JobEvent, JobListItem,
+    JobListPage, JobListPageCursor, JobListSummary, JobPageCursor, JobSort, JobSummary,
+    WeeklyActivity, WeeklyDay,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -308,12 +309,69 @@ pub struct JobFilters {
 
 pub const JOB_PAGE_SIZE: usize = 100;
 
-fn jobs_page_order_by(sort: JobSort, applied_tab: bool) -> &'static str {
+fn applied_sort_from_legacy_sort(sort: JobSort) -> AppliedJobSort {
+    let (field, direction) = match sort {
+        JobSort::NewestPosting => (
+            AppliedJobSortField::PostingDate,
+            AppliedJobSortDirection::Descending,
+        ),
+        JobSort::Oldest => (
+            AppliedJobSortField::AppliedAt,
+            AppliedJobSortDirection::Ascending,
+        ),
+        JobSort::AppealHighToLow => (
+            AppliedJobSortField::Appeal,
+            AppliedJobSortDirection::Descending,
+        ),
+        JobSort::AppealLowToHigh => (
+            AppliedJobSortField::Appeal,
+            AppliedJobSortDirection::Ascending,
+        ),
+        JobSort::CompanyAz => (
+            AppliedJobSortField::CompanyName,
+            AppliedJobSortDirection::Ascending,
+        ),
+    };
+    AppliedJobSort { field, direction }
+}
+
+fn jobs_page_order_by(
+    sort: JobSort,
+    applied_tab: bool,
+    applied_sort: Option<AppliedJobSort>,
+) -> &'static str {
+    if applied_tab {
+        let applied_sort = applied_sort.unwrap_or_else(|| applied_sort_from_legacy_sort(sort));
+        return match (applied_sort.field, applied_sort.direction) {
+            (AppliedJobSortField::AppliedAt, AppliedJobSortDirection::Ascending) => {
+                " ORDER BY (j.applied_at IS NULL) ASC, j.applied_at ASC, j.id ASC"
+            }
+            (AppliedJobSortField::AppliedAt, AppliedJobSortDirection::Descending) => {
+                " ORDER BY (j.applied_at IS NULL) ASC, j.applied_at DESC, j.id ASC"
+            }
+            (AppliedJobSortField::PostingDate, AppliedJobSortDirection::Ascending) => {
+                " ORDER BY j.created_at ASC, j.id ASC"
+            }
+            (AppliedJobSortField::PostingDate, AppliedJobSortDirection::Descending) => {
+                " ORDER BY j.created_at DESC, j.id ASC"
+            }
+            (AppliedJobSortField::Appeal, AppliedJobSortDirection::Ascending) => {
+                " ORDER BY (j.appeal IS NULL) ASC, j.appeal ASC, j.id ASC"
+            }
+            (AppliedJobSortField::Appeal, AppliedJobSortDirection::Descending) => {
+                " ORDER BY (j.appeal IS NULL) ASC, j.appeal DESC, j.id ASC"
+            }
+            (AppliedJobSortField::CompanyName, AppliedJobSortDirection::Ascending) => {
+                " ORDER BY c.name COLLATE NOCASE ASC, j.id ASC"
+            }
+            (AppliedJobSortField::CompanyName, AppliedJobSortDirection::Descending) => {
+                " ORDER BY c.name COLLATE NOCASE DESC, j.id ASC"
+            }
+        };
+    }
+
     match sort {
         JobSort::NewestPosting => " ORDER BY j.created_at DESC, j.id DESC",
-        JobSort::Oldest if applied_tab => {
-            " ORDER BY (j.applied_at IS NULL) ASC, j.applied_at ASC, j.id ASC"
-        }
         JobSort::Oldest => " ORDER BY j.created_at ASC, j.id ASC",
         JobSort::AppealHighToLow => " ORDER BY (j.appeal IS NULL) ASC, j.appeal DESC, j.id ASC",
         JobSort::AppealLowToHigh => " ORDER BY (j.appeal IS NULL) ASC, j.appeal ASC, j.id ASC",
@@ -321,17 +379,110 @@ fn jobs_page_order_by(sort: JobSort, applied_tab: bool) -> &'static str {
     }
 }
 
+fn append_applied_sort_cursor(
+    where_sql: &mut String,
+    values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    applied_sort: AppliedJobSort,
+    cursor: &JobListPageCursor,
+) -> AppResult<()> {
+    match applied_sort.field {
+        AppliedJobSortField::AppliedAt => {
+            if let Some(value) = &cursor.sort_value {
+                let comparison = match applied_sort.direction {
+                    AppliedJobSortDirection::Ascending => ">",
+                    AppliedJobSortDirection::Descending => "<",
+                };
+                where_sql.push_str(&format!(
+                    " AND (j.applied_at IS NULL OR j.applied_at {comparison} ? OR (j.applied_at = ? AND j.id > ?))"
+                ));
+                values.push(Box::new(value.clone()));
+                values.push(Box::new(value.clone()));
+                values.push(Box::new(cursor.id.clone()));
+            } else {
+                where_sql.push_str(" AND j.applied_at IS NULL AND j.id > ?");
+                values.push(Box::new(cursor.id.clone()));
+            }
+        }
+        AppliedJobSortField::PostingDate => {
+            let value = cursor
+                .sort_value
+                .as_deref()
+                .ok_or_else(|| AppError::from("Invalid Jobs pagination cursor"))?;
+            let comparison = match applied_sort.direction {
+                AppliedJobSortDirection::Ascending => ">",
+                AppliedJobSortDirection::Descending => "<",
+            };
+            where_sql.push_str(&format!(
+                " AND (j.created_at {comparison} ? OR (j.created_at = ? AND j.id > ?))"
+            ));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(cursor.id.clone()));
+        }
+        AppliedJobSortField::Appeal => {
+            if let Some(value) = &cursor.sort_value {
+                let score = value
+                    .parse::<i64>()
+                    .map_err(|_| AppError::from("Invalid Jobs pagination cursor"))?;
+                let comparison = match applied_sort.direction {
+                    AppliedJobSortDirection::Ascending => ">",
+                    AppliedJobSortDirection::Descending => "<",
+                };
+                where_sql.push_str(&format!(
+                    " AND (j.appeal IS NULL OR j.appeal {comparison} ? OR (j.appeal = ? AND j.id > ?))"
+                ));
+                values.push(Box::new(score));
+                values.push(Box::new(score));
+                values.push(Box::new(cursor.id.clone()));
+            } else {
+                where_sql.push_str(" AND j.appeal IS NULL AND j.id > ?");
+                values.push(Box::new(cursor.id.clone()));
+            }
+        }
+        AppliedJobSortField::CompanyName => {
+            let value = cursor
+                .sort_value
+                .as_deref()
+                .ok_or_else(|| AppError::from("Invalid Jobs pagination cursor"))?;
+            let comparison = match applied_sort.direction {
+                AppliedJobSortDirection::Ascending => ">",
+                AppliedJobSortDirection::Descending => "<",
+            };
+            where_sql.push_str(&format!(
+                " AND (c.name COLLATE NOCASE {comparison} ? COLLATE NOCASE OR (c.name COLLATE NOCASE = ? COLLATE NOCASE AND j.id > ?))"
+            ));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(value.to_string()));
+            values.push(Box::new(cursor.id.clone()));
+        }
+    }
+    Ok(())
+}
+
 fn append_jobs_page_cursor(
     where_sql: &mut String,
     values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
     sort: JobSort,
     applied_tab: bool,
+    applied_sort: Option<AppliedJobSort>,
     cursor: &JobListPageCursor,
 ) -> AppResult<()> {
-    if cursor.sort != sort || cursor.applied_tab != applied_tab {
+    if cursor.sort != sort
+        || cursor.applied_tab != applied_tab
+        || cursor.applied_sort != applied_sort
+    {
         return Err(AppError::from(
             "Pagination cursor does not match the selected Jobs sort",
         ));
+    }
+
+    if applied_tab {
+        return append_applied_sort_cursor(
+            where_sql,
+            values,
+            applied_sort.unwrap_or_else(|| applied_sort_from_legacy_sort(sort)),
+            cursor,
+        );
     }
 
     match sort {
@@ -344,19 +495,6 @@ fn append_jobs_page_cursor(
             values.push(Box::new(value.to_string()));
             values.push(Box::new(value.to_string()));
             values.push(Box::new(cursor.id.clone()));
-        }
-        JobSort::Oldest if applied_tab => {
-            if let Some(value) = &cursor.sort_value {
-                where_sql.push_str(
-                    " AND (j.applied_at IS NULL OR j.applied_at > ? OR (j.applied_at = ? AND j.id > ?))",
-                );
-                values.push(Box::new(value.clone()));
-                values.push(Box::new(value.clone()));
-                values.push(Box::new(cursor.id.clone()));
-            } else {
-                where_sql.push_str(" AND j.applied_at IS NULL AND j.id > ?");
-                values.push(Box::new(cursor.id.clone()));
-            }
         }
         JobSort::Oldest => {
             let value = cursor
@@ -621,12 +759,22 @@ pub fn list_jobs_page(
     conn: &Connection,
     filters: JobFilters,
     sort: JobSort,
+    requested_applied_sort: Option<AppliedJobSort>,
     cursor: Option<JobListPageCursor>,
 ) -> AppResult<JobListPage> {
     let (mut where_sql, mut values) = job_filter_sql(&filters);
     let applied_tab = filters.status.as_deref() == Some("applied");
+    let applied_sort = applied_tab
+        .then(|| requested_applied_sort.unwrap_or_else(|| applied_sort_from_legacy_sort(sort)));
     if let Some(cursor) = &cursor {
-        append_jobs_page_cursor(&mut where_sql, &mut values, sort, applied_tab, cursor)?;
+        append_jobs_page_cursor(
+            &mut where_sql,
+            &mut values,
+            sort,
+            applied_tab,
+            applied_sort,
+            cursor,
+        )?;
     }
     values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
     let sql = format!(
@@ -635,7 +783,7 @@ pub fn list_jobs_page(
                 j.updated_at, j.appeal, j.location, c.name, j.created_at
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
          {} LIMIT ?",
-        jobs_page_order_by(sort, applied_tab)
+        jobs_page_order_by(sort, applied_tab, applied_sort)
     );
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
     let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
@@ -671,14 +819,24 @@ pub fn list_jobs_page(
             .last()
             .map(|(item, created_at)| JobListPageCursor {
                 sort,
-                sort_value: match sort {
-                    JobSort::NewestPosting => Some(created_at.clone()),
-                    JobSort::Oldest if applied_tab => item.job.applied_at.clone(),
-                    JobSort::Oldest => Some(created_at.clone()),
-                    JobSort::AppealHighToLow | JobSort::AppealLowToHigh => {
-                        item.job.appeal.map(|score| score.to_string())
+                applied_sort,
+                sort_value: if let Some(applied_sort) = applied_sort {
+                    match applied_sort.field {
+                        AppliedJobSortField::AppliedAt => item.job.applied_at.clone(),
+                        AppliedJobSortField::PostingDate => Some(created_at.clone()),
+                        AppliedJobSortField::Appeal => {
+                            item.job.appeal.map(|score| score.to_string())
+                        }
+                        AppliedJobSortField::CompanyName => Some(item.company_name.clone()),
                     }
-                    JobSort::CompanyAz => Some(item.company_name.clone()),
+                } else {
+                    match sort {
+                        JobSort::NewestPosting | JobSort::Oldest => Some(created_at.clone()),
+                        JobSort::AppealHighToLow | JobSort::AppealLowToHigh => {
+                            item.job.appeal.map(|score| score.to_string())
+                        }
+                        JobSort::CompanyAz => Some(item.company_name.clone()),
+                    }
                 },
                 applied_tab,
                 id: item.job.id.clone(),
@@ -1761,7 +1919,8 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        let first = list_jobs_page(&conn, JobFilters::default(), JobSort::default(), None).unwrap();
+        let first =
+            list_jobs_page(&conn, JobFilters::default(), JobSort::default(), None, None).unwrap();
         assert_eq!(first.jobs.len(), JOB_PAGE_SIZE);
         let cursor = first
             .next_cursor
@@ -1773,6 +1932,7 @@ mod tests {
             &conn,
             JobFilters::default(),
             JobSort::default(),
+            None,
             Some(cursor),
         )
         .unwrap();
@@ -1783,6 +1943,7 @@ mod tests {
             &conn,
             JobFilters::default(),
             JobSort::default(),
+            None,
             second.next_cursor,
         )
         .unwrap();
@@ -1868,8 +2029,8 @@ mod tests {
             .unwrap();
         }
 
-        let ids = |sort, filters: JobFilters| {
-            list_jobs_page(&conn, filters, sort, None)
+        let ids = |sort, applied_sort, filters: JobFilters| {
+            list_jobs_page(&conn, filters, sort, applied_sort, None)
                 .unwrap()
                 .jobs
                 .into_iter()
@@ -1877,7 +2038,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(
-            ids(JobSort::NewestPosting, JobFilters::default()),
+            ids(JobSort::NewestPosting, None, JobFilters::default()),
             [
                 "applied-no-date",
                 "track-new",
@@ -1887,7 +2048,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            ids(JobSort::Oldest, JobFilters::default()),
+            ids(JobSort::Oldest, None, JobFilters::default()),
             [
                 "applied-new",
                 "track-old",
@@ -1899,6 +2060,7 @@ mod tests {
         assert_eq!(
             ids(
                 JobSort::Oldest,
+                None,
                 JobFilters {
                     status: Some("applied".into()),
                     ..JobFilters::default()
@@ -1907,7 +2069,7 @@ mod tests {
             ["applied-old", "applied-new", "applied-no-date"]
         );
         assert_eq!(
-            ids(JobSort::AppealHighToLow, JobFilters::default()),
+            ids(JobSort::AppealHighToLow, None, JobFilters::default()),
             [
                 "applied-no-date",
                 "track-new",
@@ -1917,7 +2079,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            ids(JobSort::AppealLowToHigh, JobFilters::default()),
+            ids(JobSort::AppealLowToHigh, None, JobFilters::default()),
             [
                 "applied-new",
                 "track-old",
@@ -1927,7 +2089,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            ids(JobSort::CompanyAz, JobFilters::default()),
+            ids(JobSort::CompanyAz, None, JobFilters::default()),
             [
                 "applied-new",
                 "track-new",
@@ -1935,6 +2097,100 @@ mod tests {
                 "applied-old",
                 "track-old"
             ]
+        );
+
+        let applied_filters = JobFilters {
+            status: Some("applied".into()),
+            ..JobFilters::default()
+        };
+        let applied_sort = |field, direction| Some(AppliedJobSort { field, direction });
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::AppliedAt,
+                    AppliedJobSortDirection::Ascending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-old", "applied-new", "applied-no-date"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::AppliedAt,
+                    AppliedJobSortDirection::Descending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-new", "applied-old", "applied-no-date"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::PostingDate,
+                    AppliedJobSortDirection::Ascending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-new", "applied-old", "applied-no-date"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::PostingDate,
+                    AppliedJobSortDirection::Descending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-no-date", "applied-old", "applied-new"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::Appeal,
+                    AppliedJobSortDirection::Ascending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-new", "applied-no-date", "applied-old"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::Appeal,
+                    AppliedJobSortDirection::Descending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-no-date", "applied-new", "applied-old"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::CompanyName,
+                    AppliedJobSortDirection::Ascending
+                ),
+                applied_filters.clone(),
+            ),
+            ["applied-new", "applied-no-date", "applied-old"]
+        );
+        assert_eq!(
+            ids(
+                JobSort::NewestPosting,
+                applied_sort(
+                    AppliedJobSortField::CompanyName,
+                    AppliedJobSortDirection::Descending
+                ),
+                applied_filters,
+            ),
+            ["applied-no-date", "applied-old", "applied-new"]
         );
     }
 
@@ -1977,25 +2233,41 @@ mod tests {
         }
         tx.commit().unwrap();
 
-        let cases = [
-            (JobSort::NewestPosting, JobFilters::default()),
-            (JobSort::Oldest, JobFilters::default()),
-            (
-                JobSort::Oldest,
-                JobFilters {
-                    status: Some("applied".into()),
-                    ..JobFilters::default()
-                },
-            ),
-            (JobSort::AppealHighToLow, JobFilters::default()),
-            (JobSort::AppealLowToHigh, JobFilters::default()),
-            (JobSort::CompanyAz, JobFilters::default()),
+        let applied_filters = JobFilters {
+            status: Some("applied".into()),
+            ..JobFilters::default()
+        };
+        let mut cases = vec![
+            (JobSort::NewestPosting, None, JobFilters::default()),
+            (JobSort::Oldest, None, JobFilters::default()),
+            (JobSort::Oldest, None, applied_filters.clone()),
+            (JobSort::AppealHighToLow, None, JobFilters::default()),
+            (JobSort::AppealLowToHigh, None, JobFilters::default()),
+            (JobSort::CompanyAz, None, JobFilters::default()),
         ];
-        for (sort, filters) in cases {
+        for field in [
+            AppliedJobSortField::AppliedAt,
+            AppliedJobSortField::PostingDate,
+            AppliedJobSortField::Appeal,
+            AppliedJobSortField::CompanyName,
+        ] {
+            for direction in [
+                AppliedJobSortDirection::Ascending,
+                AppliedJobSortDirection::Descending,
+            ] {
+                cases.push((
+                    JobSort::NewestPosting,
+                    Some(AppliedJobSort { field, direction }),
+                    applied_filters.clone(),
+                ));
+            }
+        }
+        for (sort, applied_sort, filters) in cases {
             let mut cursor = None;
             let mut ids = Vec::new();
             loop {
-                let page = list_jobs_page(&conn, filters.clone(), sort, cursor).unwrap();
+                let page =
+                    list_jobs_page(&conn, filters.clone(), sort, applied_sort, cursor).unwrap();
                 ids.extend(page.jobs.into_iter().map(|item| item.job.id));
                 cursor = page.next_cursor;
                 if cursor.is_none() {
@@ -2013,6 +2285,24 @@ mod tests {
                 unique_ids.len(),
                 expected_count,
                 "duplicate rows for {sort:?}"
+            );
+
+            let (where_sql, values) = job_filter_sql(&filters);
+            let sql = format!(
+                "SELECT j.id FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}{}",
+                jobs_page_order_by(sort, filters.status.as_deref() == Some("applied"), applied_sort)
+            );
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                values.iter().map(|value| value.as_ref()).collect();
+            let mut statement = conn.prepare(&sql).unwrap();
+            let expected = statement
+                .query_map(params_ref.as_slice(), |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(
+                ids, expected,
+                "cursor order differed for {sort:?} {applied_sort:?}"
             );
         }
     }
@@ -2110,7 +2400,7 @@ mod tests {
             ..JobFilters::default()
         };
         let legacy = list_jobs(&conn, filters.clone()).unwrap();
-        let page = list_jobs_page(&conn, filters.clone(), JobSort::default(), None).unwrap();
+        let page = list_jobs_page(&conn, filters.clone(), JobSort::default(), None, None).unwrap();
         let ids = list_job_ids(&conn, filters).unwrap();
         let mut expected = legacy
             .iter()

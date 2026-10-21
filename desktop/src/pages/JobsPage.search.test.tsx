@@ -191,22 +191,40 @@ describe("JobsPage live search suggestions", () => {
     expect(host.textContent).not.toContain("new roles from your watches");
   });
 
-  it("syncs sort changes to the URL and sends them with a fresh cursor on the selected tab", async () => {
-    apiMocks.listJobsPage.mockImplementation(async (_filters, _cursor, requestedSort) => ({
+  it("defaults Applied to date applied descending and syncs its field and order to the URL", async () => {
+    apiMocks.listJobsPage.mockImplementation(async (_filters, _cursor, requestedSort, requestedAppliedSort) => ({
       jobs: [makeJob(`sort-${requestedSort ?? "default"}`, "Sorted role")],
-      nextCursor: requestedSort === "oldest"
-        ? { sort: "oldest", sortValue: "2025-01-01T00:00:00Z", appliedTab: true, id: "cursor-role" }
+      nextCursor: requestedAppliedSort?.field === "appeal"
+        ? {
+          sort: "newestPosting",
+          appliedSort: requestedAppliedSort,
+          sortValue: "5",
+          appliedTab: true,
+          id: "cursor-role",
+        }
         : null,
     }));
-    await mount("/?status=applied&view=board&search=rare&sort=oldest");
+    await mount("/?status=applied&view=board&search=rare");
 
-    const sortSelect = host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')!;
-    expect(sortSelect.value).toBe("oldest");
-    expect(sortSelect.selectedOptions[0].textContent).toBe("Oldest application");
-    expect(apiMocks.listJobsPage.mock.calls[0]?.[2]).toBe("oldest");
+    const fieldSelect = host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')!;
+    const directionSelect = host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')!;
+    expect(fieldSelect.value).toBe("appliedAt");
+    expect(directionSelect.value).toBe("descending");
+    expect(host.querySelector('select[aria-label="Sort jobs"]')).toBeNull();
+    expect(apiMocks.listJobsPage.mock.calls[0]?.[3]).toEqual({
+      field: "appliedAt",
+      direction: "descending",
+    });
 
     await act(async () => {
-      selectValue(sortSelect, "appealLowToHigh");
+      selectValue(fieldSelect, "appeal");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(directionSelect.value).toBe("descending");
+
+    await act(async () => {
+      selectValue(directionSelect, "ascending");
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -215,29 +233,30 @@ describe("JobsPage live search suggestions", () => {
     expect(params.get("status")).toBe("applied");
     expect(params.get("view")).toBe("board");
     expect(params.get("search")).toBe("rare");
-    expect(params.get("sort")).toBe("appealLowToHigh");
-    const appealCall = apiMocks.listJobsPage.mock.calls.find(([, , requestedSort]) =>
-      requestedSort === "appealLowToHigh",
+    expect(params.get("appliedSort")).toBe("appeal");
+    expect(params.get("appliedOrder")).toBe("ascending");
+    const appealCall = apiMocks.listJobsPage.mock.calls.find(([, , , requestedAppliedSort]) =>
+      requestedAppliedSort?.field === "appeal" && requestedAppliedSort.direction === "ascending",
     );
     expect(appealCall?.[0]).toMatchObject({ status: "applied", search: "rare" });
     expect(appealCall?.[1]).toBeNull();
-    expect(appealCall?.[2]).toBe("appealLowToHigh");
+    expect(appealCall?.[3]).toEqual({ field: "appeal", direction: "ascending" });
 
     await act(async () => {
       host.querySelector<HTMLButtonElement>('[data-testid="history-back"]')!.click();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')?.value).toBe("oldest");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("descending");
     await act(async () => {
       host.querySelector<HTMLButtonElement>('[data-testid="history-forward"]')!.click();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')?.value).toBe("appealLowToHigh");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("ascending");
   });
 
-  it("carries the Oldest sort across tabs and relabels it for Applied", async () => {
+  it("translates legacy Applied sort values and keeps the existing sort control on other tabs", async () => {
     await mount("/?sort=oldest");
     const appliedLink = [...host.querySelectorAll<HTMLAnchorElement>("a")]
       .find((link) => link.textContent?.trim().startsWith("Applied"));
@@ -250,12 +269,41 @@ describe("JobsPage live search suggestions", () => {
       await Promise.resolve();
     });
 
-    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')?.selectedOptions[0].textContent)
-      .toBe("Oldest application");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')?.value).toBe("appliedAt");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("ascending");
     const appliedSortCall = apiMocks.listJobsPage.mock.calls.find(([filters, , requestedSort]) =>
       filters?.status === "applied" && requestedSort === "oldest",
     );
     expect(appliedSortCall?.[0]).toMatchObject({ status: "applied" });
+    expect(appliedSortCall?.[3]).toEqual({ field: "appliedAt", direction: "ascending" });
+
+    await act(async () => {
+      [...host.querySelectorAll<HTMLAnchorElement>("a")]
+        .find((link) => link.textContent?.trim().startsWith("All active"))
+        ?.click();
+      await Promise.resolve();
+    });
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')).not.toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')).toBeNull();
+  });
+
+  it("shows the tracker-date hint and uses natural directions when the Applied sort field changes", async () => {
+    await mount("/?status=applied");
+    const fieldSelect = host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')!;
+    const directionSelect = host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')!;
+
+    await act(async () => {
+      selectValue(fieldSelect, "postingDate");
+      await Promise.resolve();
+    });
+    expect(directionSelect.value).toBe("descending");
+    expect(host.textContent).toContain("Based on when the job was added to the tracker.");
+
+    await act(async () => {
+      selectValue(fieldSelect, "companyName");
+      await Promise.resolve();
+    });
+    expect(directionSelect.value).toBe("ascending");
   });
 
   it("does not show suggestions before three characters and opens a selected job with the keyboard", async () => {

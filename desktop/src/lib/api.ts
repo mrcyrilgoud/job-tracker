@@ -16,6 +16,7 @@ import type {
   JobListItem,
   JobPageCursor,
   JobSort,
+  AppliedJobSort,
   JobStatus,
   WeeklyActivity,
   WatchRolePage,
@@ -185,8 +186,14 @@ export const api = {
     filters: JobFilters,
     cursor?: JobListPageCursor | null,
     sort: JobSort = "newestPosting",
+    appliedSort?: AppliedJobSort | null,
   ) =>
-    call<JobListPage>("list_jobs_page_cmd", { filters, sort, cursor: cursor ?? null }),
+    call<JobListPage>("list_jobs_page_cmd", {
+      filters,
+      sort,
+      appliedSort: appliedSort ?? null,
+      cursor: cursor ?? null,
+    }),
 
   listWatchRolesPage: (filters: WatchRoleFilters, cursor?: JobPageCursor | null) =>
     call<WatchRolePage>("list_watch_roles_page_cmd", { filters, cursor: cursor ?? null }),

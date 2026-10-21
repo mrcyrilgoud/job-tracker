@@ -196,8 +196,18 @@ export type JobSort =
   | "appealLowToHigh"
   | "companyAz";
 
+export type AppliedJobSortField = "appliedAt" | "postingDate" | "appeal" | "companyName";
+
+export type AppliedJobSortDirection = "ascending" | "descending";
+
+export type AppliedJobSort = {
+  field: AppliedJobSortField;
+  direction: AppliedJobSortDirection;
+};
+
 export type JobListPageCursor = {
   sort: JobSort;
+  appliedSort: AppliedJobSort | null;
   sortValue: string | null;
   appliedTab: boolean;
   id: string;

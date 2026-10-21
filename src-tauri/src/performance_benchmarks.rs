@@ -66,13 +66,14 @@ mod jobs_page {
         };
         for _ in 0..3 {
             std::hint::black_box(
-                list_jobs_page(&conn, filters.clone(), JobSort::default(), None).unwrap(),
+                list_jobs_page(&conn, filters.clone(), JobSort::default(), None, None).unwrap(),
             );
         }
         let mut samples = Vec::with_capacity(30);
         for _ in 0..30 {
             let started = Instant::now();
-            let page = list_jobs_page(&conn, filters.clone(), JobSort::default(), None).unwrap();
+            let page =
+                list_jobs_page(&conn, filters.clone(), JobSort::default(), None, None).unwrap();
             samples.push(started.elapsed());
             std::hint::black_box(page.jobs.len());
         }
@@ -85,8 +86,8 @@ mod jobs_page {
         let mut samples = Vec::with_capacity(30);
         for _ in 0..30 {
             let started = Instant::now();
-            let page =
-                list_jobs_page(&conn, JobFilters::default(), JobSort::default(), None).unwrap();
+            let page = list_jobs_page(&conn, JobFilters::default(), JobSort::default(), None, None)
+                .unwrap();
             samples.push(started.elapsed());
             std::hint::black_box(page.jobs.len());
         }
