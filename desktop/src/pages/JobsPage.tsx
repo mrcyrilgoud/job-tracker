@@ -18,7 +18,12 @@ import {
 } from "@/components/icons";
 import { JobsBoardView } from "@/components/JobsBoardView";
 import { api } from "@/lib/api";
-import { appliedSortFromUrl, defaultAppliedSortDirection } from "@/lib/applied-sort";
+import {
+  DEFAULT_APPLIED_SORT,
+  DEFAULT_JOB_LIST_SORT,
+  defaultJobListSortDirection,
+  jobListSortFromUrl,
+} from "@/lib/job-list-sort";
 import {
   filterCompaniesBySearch,
   filterDraftFromUrl,
@@ -29,9 +34,9 @@ import {
   jobStatuses,
   type JobListPageCursor,
   type JobListSummary,
-  type AppliedJobSort,
-  type AppliedJobSortField,
-  type AppliedJobSortDirection,
+  type JobListSort,
+  type JobListSortField,
+  type JobListSortDirection,
   type JobSort,
   type JobStatus,
   type WeeklyActivity,
@@ -76,9 +81,9 @@ export function JobsPage() {
     ? requestedSort as JobSort
     : DEFAULT_JOB_SORT;
   const isAppliedTab = status === "applied";
-  const appliedSort = useMemo(
-    () => appliedSortFromUrl(searchParams, JOB_SORTS.includes(requestedSort as JobSort) ? sort : null),
-    [searchParams, requestedSort, sort],
+  const sortSpec = useMemo(
+    () => jobListSortFromUrl(searchParams, isAppliedTab, JOB_SORTS.includes(requestedSort as JobSort) ? sort : null),
+    [searchParams, requestedSort, sort, isAppliedTab],
   );
 
   const [jobs, setJobs] = useState<JobListSummary[]>([]);
@@ -130,7 +135,7 @@ export function JobsPage() {
       quiet: boolean;
       cursor: JobListPageCursor | null;
       sort: JobSort;
-      appliedSort: AppliedJobSort | null;
+      sortSpec: JobListSort;
       filters: {
         status?: string;
         companyId?: string;
@@ -193,7 +198,7 @@ export function JobsPage() {
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
       sort,
-      appliedSort: isAppliedTab ? appliedSort : null,
+      sortSpec,
   });
   const selectionScopeKey = JSON.stringify({
     isArchived: isArchivedFilter,
@@ -205,7 +210,7 @@ export function JobsPage() {
     filtersKey,
     search: searchText,
     sort,
-    appliedSort: isAppliedTab ? appliedSort : null,
+    sortSpec,
   });
   activeRequestKeyRef.current = requestKeyFor(appliedSearch);
   const selectionReady = isArchivedFilter && loadedRequestKey === activeRequestKeyRef.current;
@@ -242,7 +247,7 @@ export function JobsPage() {
       quiet,
       cursor,
       sort,
-      appliedSort: isAppliedTab ? appliedSort : null,
+      sortSpec,
       filters: {
         status,
         companyId,
@@ -274,7 +279,7 @@ export function JobsPage() {
               { ...request.filters, search: request.search || undefined },
               request.cursor,
               request.sort,
-              request.appliedSort,
+              request.sortSpec,
             );
             if (request.sequence === loadSequenceRef.current && request.key === activeRequestKeyRef.current) {
               setJobs((previous) => {
@@ -303,7 +308,7 @@ export function JobsPage() {
       }
     };
     void drain();
-  }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, sort, appliedSort, filtersKey, reportRefreshFailed]);
+  }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, sort, sortSpec, filtersKey, reportRefreshFailed]);
 
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore || loading) return;
@@ -561,35 +566,45 @@ export function JobsPage() {
     setSearchParams(next);
   }
 
-  function setJobSort(nextSort: JobSort) {
+  function setSortField(field: JobListSortField) {
     const next = new URLSearchParams(searchParams);
-    if (nextSort === DEFAULT_JOB_SORT) next.delete("sort");
-    else next.set("sort", nextSort);
+    writeSortToParams(next, { field, direction: defaultJobListSortDirection(field) }, isAppliedTab);
     setSearchParams(next);
   }
 
-  function setAppliedSortField(field: AppliedJobSortField) {
+  function setSortDirection(direction: JobListSortDirection) {
     const next = new URLSearchParams(searchParams);
-    next.set("appliedSort", field);
-    next.set("appliedOrder", defaultAppliedSortDirection(field));
+    writeSortToParams(next, { ...sortSpec, direction }, isAppliedTab);
     setSearchParams(next);
   }
 
-  function setAppliedSortDirection(direction: AppliedJobSortDirection) {
-    const next = new URLSearchParams(searchParams);
-    next.set("appliedSort", appliedSort.field);
-    next.set("appliedOrder", direction);
-    setSearchParams(next);
+  function writeSortToParams(params: URLSearchParams, spec: JobListSort, appliedTab: boolean) {
+    params.delete("sort");
+    params.delete("appliedSort");
+    params.delete("appliedOrder");
+    const defaultSpec = appliedTab ? DEFAULT_APPLIED_SORT : DEFAULT_JOB_LIST_SORT;
+    if (spec.field === defaultSpec.field && spec.direction === defaultSpec.direction) {
+      params.delete("sortBy");
+      params.delete("sortOrder");
+    } else {
+      params.set("sortBy", spec.field);
+      params.set("sortOrder", spec.direction);
+    }
   }
 
   function withCurrentSort(to: string) {
     const [pathname, query = ""] = to.split("?", 2);
     const next = new URLSearchParams(query);
-    if (sort !== DEFAULT_JOB_SORT) next.set("sort", sort);
-    for (const key of ["appliedSort", "appliedOrder"] as const) {
-      const value = searchParams.get(key);
-      if (value) next.set(key, value);
-    }
+    const targetAppliedTab = next.get("status") === "applied";
+    const targetSpec = targetAppliedTab
+      && requestedSort === "oldest"
+      && !searchParams.has("sortBy")
+      && !searchParams.has("appliedSort")
+      ? { field: "appliedAt", direction: "ascending" } as JobListSort
+      : !targetAppliedTab && sortSpec.field === "appliedAt"
+        ? DEFAULT_JOB_LIST_SORT
+        : sortSpec;
+    writeSortToParams(next, targetSpec, targetAppliedTab);
     const serialized = next.toString();
     return serialized ? `${pathname}?${serialized}` : pathname;
   }
@@ -655,11 +670,7 @@ export function JobsPage() {
     if (nextSalaryMin) next.set("salaryMin", nextSalaryMin);
     if (nextSalaryMax) next.set("salaryMax", nextSalaryMax);
     if (viewMode) next.set("view", viewMode);
-    if (sort !== DEFAULT_JOB_SORT) next.set("sort", sort);
-    if (isAppliedTab || searchParams.has("appliedSort")) {
-      next.set("appliedSort", appliedSort.field);
-      next.set("appliedOrder", appliedSort.direction);
-    }
+    writeSortToParams(next, sortSpec, isAppliedTab);
     setSearchParams(next);
     if (filterPopoverOpen) {
       setFilterPopoverOpen(false);
@@ -773,61 +784,40 @@ export function JobsPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-              {isAppliedTab ? (
-                <>
-                  <label htmlFor="jobs-applied-sort-field" className="jobs-sort-control">
-                    <span className="jobs-sort-label">Sort by</span>
-                    <select
-                      id="jobs-applied-sort-field"
-                      aria-label="Sort by"
-                      value={appliedSort.field}
-                      onChange={(event) => setAppliedSortField(event.target.value as AppliedJobSortField)}
-                      className="jobs-sort-select"
-                      aria-describedby={appliedSort.field === "postingDate" ? "jobs-posting-date-sort-hint" : undefined}
-                    >
-                      <option value="appliedAt">Date applied</option>
-                      <option value="postingDate">Job posting date</option>
-                      <option value="appeal">Appeal</option>
-                      <option value="companyName">Company name</option>
-                    </select>
-                  </label>
-                  <label htmlFor="jobs-applied-sort-order" className="jobs-sort-control jobs-sort-control--compact">
-                    <span className="jobs-sort-label">Order</span>
-                    <select
-                      id="jobs-applied-sort-order"
-                      aria-label="Sort order"
-                      value={appliedSort.direction}
-                      onChange={(event) => setAppliedSortDirection(event.target.value as AppliedJobSortDirection)}
-                      className="jobs-sort-select"
-                    >
-                      <option value="ascending">Ascending order</option>
-                      <option value="descending">Descending order</option>
-                    </select>
-                  </label>
-                  {appliedSort.field === "postingDate" ? (
-                    <span id="jobs-posting-date-sort-hint" className="jobs-sort-hint">
-                      Based on when the job was added to the tracker.
-                    </span>
-                  ) : null}
-                </>
-              ) : (
-                <label htmlFor="jobs-sort" className="jobs-sort-control">
-                  <span className="jobs-sort-label">Sort by</span>
-                  <select
-                    id="jobs-sort"
-                    aria-label="Sort jobs"
-                    value={sort}
-                    onChange={(event) => setJobSort(event.target.value as JobSort)}
-                    className="jobs-sort-select"
-                  >
-                    <option value="newestPosting">Newest posting</option>
-                    <option value="oldest">Oldest posting</option>
-                    <option value="appealHighToLow">Appeal: high to low</option>
-                    <option value="appealLowToHigh">Appeal: low to high</option>
-                    <option value="companyAz">Company: A–Z</option>
-                  </select>
-                </label>
-              )}
+              <label htmlFor="jobs-sort-field" className="jobs-sort-control">
+                <span className="jobs-sort-label">Sort by</span>
+                <select
+                  id="jobs-sort-field"
+                  aria-label="Sort by"
+                  value={sortSpec.field}
+                  onChange={(event) => setSortField(event.target.value as JobListSortField)}
+                  className="jobs-sort-select"
+                  aria-describedby={sortSpec.field === "postingDate" ? "jobs-posting-date-sort-hint" : undefined}
+                >
+                  {isAppliedTab ? <option value="appliedAt">Date applied</option> : null}
+                  <option value="postingDate">Date added</option>
+                  <option value="appeal">Appeal</option>
+                  <option value="companyName">Company name</option>
+                </select>
+              </label>
+              <label htmlFor="jobs-sort-order" className="jobs-sort-control jobs-sort-control--compact">
+                <span className="jobs-sort-label">Order</span>
+                <select
+                  id="jobs-sort-order"
+                  aria-label="Sort order"
+                  value={sortSpec.direction}
+                  onChange={(event) => setSortDirection(event.target.value as JobListSortDirection)}
+                  className="jobs-sort-select"
+                >
+                  <option value="ascending">Ascending order</option>
+                  <option value="descending">Descending order</option>
+                </select>
+              </label>
+              {sortSpec.field === "postingDate" ? (
+                <span id="jobs-posting-date-sort-hint" className="jobs-sort-hint">
+                  Based on when the job was added to the tracker.
+                </span>
+              ) : null}
               {/* View Switcher: List vs Board */}
               <div className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-sm)]">
                 <button

@@ -192,12 +192,12 @@ describe("JobsPage live search suggestions", () => {
   });
 
   it("defaults Applied to date applied descending and syncs its field and order to the URL", async () => {
-    apiMocks.listJobsPage.mockImplementation(async (_filters, _cursor, requestedSort, requestedAppliedSort) => ({
+    apiMocks.listJobsPage.mockImplementation(async (_filters, _cursor, requestedSort, requestedSortSpec) => ({
       jobs: [makeJob(`sort-${requestedSort ?? "default"}`, "Sorted role")],
-      nextCursor: requestedAppliedSort?.field === "appeal"
+      nextCursor: requestedSortSpec?.field === "appeal"
         ? {
           sort: "newestPosting",
-          appliedSort: requestedAppliedSort,
+          sortSpec: requestedSortSpec,
           sortValue: "5",
           appliedTab: true,
           id: "cursor-role",
@@ -233,10 +233,10 @@ describe("JobsPage live search suggestions", () => {
     expect(params.get("status")).toBe("applied");
     expect(params.get("view")).toBe("board");
     expect(params.get("search")).toBe("rare");
-    expect(params.get("appliedSort")).toBe("appeal");
-    expect(params.get("appliedOrder")).toBe("ascending");
-    const appealCall = apiMocks.listJobsPage.mock.calls.find(([, , , requestedAppliedSort]) =>
-      requestedAppliedSort?.field === "appeal" && requestedAppliedSort.direction === "ascending",
+    expect(params.get("sortBy")).toBe("appeal");
+    expect(params.get("sortOrder")).toBe("ascending");
+    const appealCall = apiMocks.listJobsPage.mock.calls.find(([, , , requestedSortSpec]) =>
+      requestedSortSpec?.field === "appeal" && requestedSortSpec.direction === "ascending",
     );
     expect(appealCall?.[0]).toMatchObject({ status: "applied", search: "rare" });
     expect(appealCall?.[1]).toBeNull();
@@ -256,12 +256,12 @@ describe("JobsPage live search suggestions", () => {
     expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("ascending");
   });
 
-  it("translates legacy Applied sort values and keeps the existing sort control on other tabs", async () => {
+  it("translates legacy Applied sort values and shows shared controls on other tabs", async () => {
     await mount("/?sort=oldest");
     const appliedLink = [...host.querySelectorAll<HTMLAnchorElement>("a")]
       .find((link) => link.textContent?.trim().startsWith("Applied"));
     expect(appliedLink).not.toBeNull();
-    expect(appliedLink?.getAttribute("href")).toContain("status=applied&sort=oldest");
+    expect(appliedLink?.getAttribute("href")).toContain("status=applied&sortBy=appliedAt&sortOrder=ascending");
 
     await act(async () => {
       appliedLink!.click();
@@ -271,8 +271,8 @@ describe("JobsPage live search suggestions", () => {
 
     expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')?.value).toBe("appliedAt");
     expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("ascending");
-    const appliedSortCall = apiMocks.listJobsPage.mock.calls.find(([filters, , requestedSort]) =>
-      filters?.status === "applied" && requestedSort === "oldest",
+    const appliedSortCall = apiMocks.listJobsPage.mock.calls.find(([filters, , , requestedSortSpec]) =>
+      filters?.status === "applied" && requestedSortSpec?.field === "appliedAt",
     );
     expect(appliedSortCall?.[0]).toMatchObject({ status: "applied" });
     expect(appliedSortCall?.[3]).toEqual({ field: "appliedAt", direction: "ascending" });
@@ -283,8 +283,50 @@ describe("JobsPage live search suggestions", () => {
         ?.click();
       await Promise.resolve();
     });
-    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')).not.toBeNull();
-    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort jobs"]')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')?.value).toBe("postingDate");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("descending");
+  });
+
+  it("keeps shared sorting through board and status navigation", async () => {
+    await mount();
+    const field = host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')!;
+    const order = host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')!;
+
+    await act(async () => {
+      selectValue(field, "companyName");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      selectValue(order, "descending");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      [...host.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.title === "Board view")!
+        .click();
+      await Promise.resolve();
+    });
+    expect(new URLSearchParams(host.querySelector('[data-testid="location-search"]')?.textContent ?? "").get("view"))
+      .toBe("board");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')?.value).toBe("companyName");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort order"]')?.value).toBe("descending");
+
+    await act(async () => {
+      [...host.querySelectorAll<HTMLAnchorElement>("a")]
+        .find((link) => link.textContent?.trim().startsWith("Applied"))!
+        .click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const params = new URLSearchParams(host.querySelector('[data-testid="location-search"]')?.textContent ?? "");
+    expect(params.get("status")).toBe("applied");
+    expect(params.get("sortBy")).toBe("companyName");
+    expect(params.get("sortOrder")).toBe("descending");
+    expect(host.querySelector<HTMLSelectElement>('select[aria-label="Sort by"]')?.value).toBe("companyName");
+    expect(apiMocks.listJobsPage.mock.calls.some(([filters, , , sortSpec]) =>
+      filters?.status === "applied" && sortSpec?.field === "companyName" && sortSpec.direction === "descending",
+    )).toBe(true);
   });
 
   it("shows the tracker-date hint and uses natural directions when the Applied sort field changes", async () => {

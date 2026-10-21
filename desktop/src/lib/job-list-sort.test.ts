@@ -4,7 +4,9 @@ import {
   appliedSortFromUrl,
   defaultAppliedSortDirection,
   DEFAULT_APPLIED_SORT,
-} from "@/lib/applied-sort";
+  DEFAULT_JOB_LIST_SORT,
+  jobListSortFromUrl,
+} from "@/lib/job-list-sort";
 
 describe("Applied sort URL state", () => {
   it("defaults to newest date applied first", () => {
@@ -37,5 +39,22 @@ describe("Applied sort URL state", () => {
       new URLSearchParams("sort=oldest&appliedSort=postingDate&appliedOrder=ascending"),
       "oldest",
     )).toEqual({ field: "postingDate", direction: "ascending" });
+  });
+
+  it("uses context defaults and rejects date applied outside Applied", () => {
+    expect(jobListSortFromUrl(new URLSearchParams(), false, null)).toEqual(DEFAULT_JOB_LIST_SORT);
+    expect(jobListSortFromUrl(new URLSearchParams("sortBy=appliedAt&sortOrder=ascending"), false, null))
+      .toEqual(DEFAULT_JOB_LIST_SORT);
+    expect(jobListSortFromUrl(new URLSearchParams("sortBy=invalid&sort=companyAz"), false, "companyAz"))
+      .toEqual(DEFAULT_JOB_LIST_SORT);
+  });
+
+  it("uses shared URL parameters and translates legacy dates by context", () => {
+    expect(jobListSortFromUrl(new URLSearchParams("sortBy=appeal&sortOrder=ascending&appliedSort=companyName"), false, null))
+      .toEqual({ field: "appeal", direction: "ascending" });
+    expect(jobListSortFromUrl(new URLSearchParams("sort=oldest"), false, "oldest"))
+      .toEqual({ field: "postingDate", direction: "ascending" });
+    expect(jobListSortFromUrl(new URLSearchParams("sort=oldest"), true, "oldest"))
+      .toEqual({ field: "appliedAt", direction: "ascending" });
   });
 });

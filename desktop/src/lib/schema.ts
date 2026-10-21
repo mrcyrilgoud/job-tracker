@@ -196,18 +196,25 @@ export type JobSort =
   | "appealLowToHigh"
   | "companyAz";
 
-export type AppliedJobSortField = "appliedAt" | "postingDate" | "appeal" | "companyName";
+export type JobListSortField = "appliedAt" | "postingDate" | "appeal" | "companyName";
 
-export type AppliedJobSortDirection = "ascending" | "descending";
+export type JobListSortDirection = "ascending" | "descending";
 
-export type AppliedJobSort = {
-  field: AppliedJobSortField;
-  direction: AppliedJobSortDirection;
+export type JobListSort = {
+  field: JobListSortField;
+  direction: JobListSortDirection;
 };
+
+/** @deprecated Use JobListSort for all Jobs-page views. */
+export type AppliedJobSortField = JobListSortField;
+/** @deprecated Use JobListSortDirection for all Jobs-page views. */
+export type AppliedJobSortDirection = JobListSortDirection;
+/** @deprecated Use JobListSort for all Jobs-page views. */
+export type AppliedJobSort = JobListSort;
 
 export type JobListPageCursor = {
   sort: JobSort;
-  appliedSort: AppliedJobSort | null;
+  sortSpec: JobListSort;
   sortValue: string | null;
   appliedTab: boolean;
   id: string;

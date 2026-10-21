@@ -153,7 +153,7 @@ pub enum JobSort {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum AppliedJobSortField {
+pub enum JobListSortField {
     AppliedAt,
     PostingDate,
     Appeal,
@@ -162,23 +162,23 @@ pub enum AppliedJobSortField {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum AppliedJobSortDirection {
+pub enum JobListSortDirection {
     Ascending,
     Descending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AppliedJobSort {
-    pub field: AppliedJobSortField,
-    pub direction: AppliedJobSortDirection,
+pub struct JobListSort {
+    pub field: JobListSortField,
+    pub direction: JobListSortDirection,
 }
 
-impl Default for AppliedJobSort {
+impl Default for JobListSort {
     fn default() -> Self {
         Self {
-            field: AppliedJobSortField::AppliedAt,
-            direction: AppliedJobSortDirection::Descending,
+            field: JobListSortField::AppliedAt,
+            direction: JobListSortDirection::Descending,
         }
     }
 }
@@ -195,7 +195,7 @@ impl Default for JobSort {
 #[serde(rename_all = "camelCase")]
 pub struct JobListPageCursor {
     pub sort: JobSort,
-    pub applied_sort: Option<AppliedJobSort>,
+    pub sort_spec: JobListSort,
     pub sort_value: Option<String>,
     pub applied_tab: bool,
     pub id: String,
@@ -276,7 +276,7 @@ pub fn checked_appeal(score: i64) -> Result<i64, &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppliedJobSort, AppliedJobSortDirection, AppliedJobSortField, JobSort};
+    use super::{JobListSort, JobListSortDirection, JobListSortField, JobSort};
 
     #[test]
     fn job_sort_uses_the_frontend_camel_case_values() {
@@ -295,15 +295,15 @@ mod tests {
 
     #[test]
     fn applied_job_sort_uses_the_frontend_camel_case_values() {
-        let sort = AppliedJobSort {
-            field: AppliedJobSortField::CompanyName,
-            direction: AppliedJobSortDirection::Ascending,
+        let sort = JobListSort {
+            field: JobListSortField::CompanyName,
+            direction: JobListSortDirection::Ascending,
         };
         let encoded = serde_json::to_value(sort).unwrap();
         assert_eq!(encoded["field"], "companyName");
         assert_eq!(encoded["direction"], "ascending");
         assert_eq!(
-            serde_json::from_value::<AppliedJobSort>(encoded).unwrap(),
+            serde_json::from_value::<JobListSort>(encoded).unwrap(),
             sort
         );
     }
