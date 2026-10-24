@@ -1,3 +1,6 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
@@ -8,27 +11,36 @@ use crate::util::{create_id, now_iso};
 const CAREERS_HASH_VERSION: &str = "v2:";
 
 fn normalize_careers_text(html: &str) -> String {
-    let no_script = regex::Regex::new(r"(?is)<script[\s\S]*?</script>")
-        .unwrap()
+    static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
+    static STYLE_RE: OnceLock<Regex> = OnceLock::new();
+    static MAIN_RE: OnceLock<Regex> = OnceLock::new();
+    static CHROME_RE: OnceLock<Regex> = OnceLock::new();
+    static TAGS_RE: OnceLock<Regex> = OnceLock::new();
+
+    let no_script = SCRIPT_RE
+        .get_or_init(|| Regex::new(r"(?is)<script[\s\S]*?</script>").unwrap())
         .replace_all(html, " ");
-    let no_style = regex::Regex::new(r"(?is)<style[\s\S]*?</style>")
-        .unwrap()
+    let no_style = STYLE_RE
+        .get_or_init(|| Regex::new(r"(?is)<style[\s\S]*?</style>").unwrap())
         .replace_all(&no_script, " ");
     // A main region is the strongest signal that the page is describing the
     // employer's careers content. Many marketing sites do not use one, so
     // fall back to the document after removing common site chrome.
-    let main = regex::Regex::new(r"(?is)<main\b[^>]*>(.*?)</main>")
-        .unwrap()
+    let main = MAIN_RE
+        .get_or_init(|| Regex::new(r"(?is)<main\b[^>]*>(.*?)</main>").unwrap())
         .captures(&no_style)
         .and_then(|captures| captures.get(1).map(|content| content.as_str()))
         .unwrap_or(&no_style);
-    let without_chrome = regex::Regex::new(
-        r"(?is)<nav\b[^>]*>.*?</nav>|<header\b[^>]*>.*?</header>|<footer\b[^>]*>.*?</footer>|<aside\b[^>]*>.*?</aside>",
-    )
-    .unwrap()
-    .replace_all(main, " ");
-    let no_tags = regex::Regex::new(r"(?is)<[^>]+>")
-        .unwrap()
+    let without_chrome = CHROME_RE
+        .get_or_init(|| {
+            Regex::new(
+                r"(?is)<nav\b[^>]*>.*?</nav>|<header\b[^>]*>.*?</header>|<footer\b[^>]*>.*?</footer>|<aside\b[^>]*>.*?</aside>",
+            )
+            .unwrap()
+        })
+        .replace_all(main, " ");
+    let no_tags = TAGS_RE
+        .get_or_init(|| Regex::new(r"(?is)<[^>]+>").unwrap())
         .replace_all(&without_chrome, " ");
     no_tags
         .split_whitespace()
@@ -61,24 +73,44 @@ pub fn apply_careers_check(
     content_hash: &str,
     normalized_text: &str,
 ) -> AppResult<serde_json::Value> {
-    let previous: Option<(String, String)> = conn
+    let previous: Option<(String, String, String)> = conn
         .query_row(
-            "SELECT content_hash, captured_at FROM careers_page_snapshots WHERE company_id = ?1 ORDER BY captured_at DESC LIMIT 1",
+            "SELECT id, content_hash, captured_at FROM careers_page_snapshots WHERE company_id = ?1 ORDER BY captured_at DESC, id DESC LIMIT 1",
             params![company_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(map_sqlite)?;
 
     let captured_at = now_iso();
+    if let Some((prev_id, prev_hash, _)) = &previous {
+        if prev_hash == content_hash {
+            conn.execute(
+                "UPDATE careers_page_snapshots SET captured_at = ?1 WHERE id = ?2",
+                params![captured_at, prev_id],
+            )
+            .map_err(map_sqlite)?;
+            return Ok(serde_json::json!({
+                "changed": false,
+                "reason": "No change detected"
+            }));
+        }
+    }
+
+    let snapshot_id = create_id();
     let text_slice: String = normalized_text.chars().take(20_000).collect();
     conn.execute(
         "INSERT INTO careers_page_snapshots (id, company_id, content_hash, normalized_text, captured_at) VALUES (?1,?2,?3,?4,?5)",
-        params![create_id(), company_id, content_hash, text_slice, captured_at],
+        params![snapshot_id, company_id, content_hash, text_slice, captured_at],
+    )
+    .map_err(map_sqlite)?;
+    conn.execute(
+        "DELETE FROM careers_page_snapshots WHERE company_id = ?1 AND id != ?2",
+        params![company_id, snapshot_id],
     )
     .map_err(map_sqlite)?;
 
-    let Some((prev_hash, _)) = previous else {
+    let Some((_, prev_hash, _)) = previous else {
         return Ok(serde_json::json!({
             "changed": false,
             "reason": "Initial snapshot captured"
@@ -91,13 +123,6 @@ pub fn apply_careers_check(
         return Ok(serde_json::json!({
             "changed": false,
             "reason": "Careers content baseline refreshed"
-        }));
-    }
-
-    if prev_hash == content_hash {
-        return Ok(serde_json::json!({
-            "changed": false,
-            "reason": "No change detected"
         }));
     }
 
@@ -173,6 +198,48 @@ mod tests {
             })
             .unwrap();
         assert_eq!(reviews, 0);
+    }
+
+    #[test]
+    fn unchanged_and_updated_checks_keep_single_snapshot_per_company() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES ('company', 'Acme', NULL, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        let initial =
+            apply_careers_check(&conn, "company", "Acme", "v2:hash-1", "initial text").unwrap();
+        assert_eq!(initial["changed"], false);
+
+        let unchanged =
+            apply_careers_check(&conn, "company", "Acme", "v2:hash-1", "initial text").unwrap();
+        assert_eq!(unchanged["changed"], false);
+        assert_eq!(unchanged["reason"], "No change detected");
+
+        let count_after_unchanged: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM careers_page_snapshots WHERE company_id = 'company'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after_unchanged, 1);
+
+        let changed =
+            apply_careers_check(&conn, "company", "Acme", "v2:hash-2", "updated text").unwrap();
+        assert_eq!(changed["changed"], true);
+
+        let count_after_change: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM careers_page_snapshots WHERE company_id = 'company'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after_change, 1);
     }
 }
 

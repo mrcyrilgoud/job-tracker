@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::service::{
-    add_job_event, create_job_from_url, get_job_by_id, job_cols, map_job, update_job,
+    add_job_event, create_job_from_url, get_job_by_id, job_cols, map_job, update_job_row,
     UpdateJobInput, JOB_COL_COUNT,
 };
 use crate::models::{is_job_status, Job};
@@ -168,46 +168,37 @@ pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
     let mut row = Vec::new();
     let mut field = String::new();
     let mut in_quotes = false;
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let char = chars[i];
-        let next = chars.get(i + 1).copied();
+    let mut chars = text.chars().peekable();
+    while let Some(char) = chars.next() {
         if in_quotes {
-            if char == '"' && next == Some('"') {
+            if char == '"' && chars.peek() == Some(&'"') {
+                chars.next();
                 field.push('"');
-                i += 2;
                 continue;
             } else if char == '"' {
                 in_quotes = false;
             } else {
                 field.push(char);
             }
-            i += 1;
             continue;
         }
         if char == '"' {
             in_quotes = true;
-            i += 1;
             continue;
         }
         if char == ',' {
             row.push(std::mem::take(&mut field));
-            i += 1;
             continue;
         }
         if char == '\n' {
             row.push(std::mem::take(&mut field));
             rows.push(std::mem::take(&mut row));
-            i += 1;
             continue;
         }
         if char == '\r' {
-            i += 1;
             continue;
         }
         field.push(char);
-        i += 1;
     }
     if !field.is_empty() || !row.is_empty() {
         row.push(field);
@@ -255,6 +246,20 @@ fn write_sync_state(state: &SyncState) -> AppResult<()> {
     }
     fs::rename(&temp_path, &sync_path)?;
     Ok(())
+}
+
+fn count_exportable_jobs(conn: &Connection) -> AppResult<usize> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+             WHERE j.is_new_from_watch = 0
+               AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?;
+    Ok(usize::try_from(count).unwrap_or(0))
 }
 
 fn load_job_rows(conn: &Connection) -> AppResult<Vec<(Job, String)>> {
@@ -410,7 +415,7 @@ pub fn get_jobs_csv_status(conn: &Connection, csv_path: &Path) -> AppResult<CsvS
             row_count_csv = Some(parsed.len().saturating_sub(1));
         }
     }
-    let row_count_db = load_job_rows(conn)?.len();
+    let row_count_db = count_exportable_jobs(conn)?;
     let drift = exists
         && (sync.last_export_at.is_none()
             || file_mtime
@@ -515,6 +520,12 @@ fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
 
 fn open_csv_conn(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(map_sqlite)?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(map_sqlite)?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(map_sqlite)?;
+    conn.pragma_update(None, "temp_store", "MEMORY")
+        .map_err(map_sqlite)?;
     conn.pragma_update(None, "busy_timeout", 5000i32)
         .map_err(map_sqlite)?;
     conn.pragma_update(None, "foreign_keys", true)
@@ -587,83 +598,123 @@ pub fn import_jobs_csv(
     let mut imported_notes: HashMap<String, Option<String>> = HashMap::new();
     let conn = open_csv_conn(db_path)?;
 
-    for (i, row) in parsed.iter().skip(1).enumerate() {
-        let row_number = i + 2;
-        let get = |name: &str| -> String {
-            header_map
-                .get(name)
-                .and_then(|idx| row.get(*idx))
-                .cloned()
-                .unwrap_or_default()
-        };
-        let appeal_in_file = header_map.contains_key("appeal");
-        let appeal = if appeal_in_file {
-            match parse_appeal_cell(&get("appeal")) {
-                Ok(value) => value,
-                Err(message) => {
+    if !dry_run {
+        conn.execute_batch("BEGIN IMMEDIATE").map_err(map_sqlite)?;
+    }
+
+    let import_loop = (|| -> AppResult<()> {
+        for (i, row) in parsed.iter().skip(1).enumerate() {
+            let row_number = i + 2;
+            let get = |name: &str| -> String {
+                header_map
+                    .get(name)
+                    .and_then(|idx| row.get(*idx))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            let appeal_in_file = header_map.contains_key("appeal");
+            let appeal = if appeal_in_file {
+                match parse_appeal_cell(&get("appeal")) {
+                    Ok(value) => value,
+                    Err(message) => {
+                        result.summary.skipped += 1;
+                        result.errors.push(serde_json::json!({
+                            "row": row_number,
+                            "message": message
+                        }));
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
+            let csv_fields = EditableFields {
+                url: get("url").trim().to_string(),
+                title: get("title").trim().to_string(),
+                company: get("company").trim().to_string(),
+                status: get("status").trim().to_string(),
+                applied_at: normalize_nullable(Some(&get("applied_at"))),
+                notes: normalize_nullable(Some(&get("notes"))),
+                location: normalize_nullable(Some(&get("location"))),
+                latest_note: normalize_nullable(Some(&get("latest_note"))),
+                appeal,
+                appeal_in_file,
+            };
+            let id = normalize_nullable(Some(&get("id")));
+            let key = id.clone().unwrap_or_else(|| {
+                if csv_fields.url.is_empty() {
+                    format!("row-{row_number}")
+                } else {
+                    csv_fields.url.clone()
+                }
+            });
+
+            if !dry_run {
+                conn.execute_batch("SAVEPOINT csv_row")
+                    .map_err(map_sqlite)?;
+            }
+            match process_row(
+                &conn,
+                &sync,
+                &mut result,
+                &mut seen_job_ids,
+                &mut imported_notes,
+                row_number,
+                &key,
+                id.as_deref(),
+                &csv_fields,
+                dry_run,
+                &mode,
+            ) {
+                Ok(()) => {
+                    if !dry_run {
+                        conn.execute_batch("RELEASE SAVEPOINT csv_row")
+                            .map_err(map_sqlite)?;
+                    }
+                }
+                Err(e) => {
+                    if !dry_run {
+                        let _ = conn
+                            .execute_batch("ROLLBACK TO SAVEPOINT csv_row; RELEASE SAVEPOINT csv_row");
+                    }
                     result.summary.skipped += 1;
                     result.errors.push(serde_json::json!({
                         "row": row_number,
-                        "message": message
+                        "message": e.to_string()
                     }));
-                    continue;
                 }
             }
-        } else {
-            None
-        };
-        let csv_fields = EditableFields {
-            url: get("url").trim().to_string(),
-            title: get("title").trim().to_string(),
-            company: get("company").trim().to_string(),
-            status: get("status").trim().to_string(),
-            applied_at: normalize_nullable(Some(&get("applied_at"))),
-            notes: normalize_nullable(Some(&get("notes"))),
-            location: normalize_nullable(Some(&get("location"))),
-            latest_note: normalize_nullable(Some(&get("latest_note"))),
-            appeal,
-            appeal_in_file,
-        };
-        let id = normalize_nullable(Some(&get("id")));
-        let key = id.clone().unwrap_or_else(|| {
-            if csv_fields.url.is_empty() {
-                format!("row-{row_number}")
-            } else {
-                csv_fields.url.clone()
-            }
-        });
+        }
 
-        match process_row(
-            &conn,
-            &sync,
-            &mut result,
-            &mut seen_job_ids,
-            &mut imported_notes,
-            row_number,
-            &key,
-            id.as_deref(),
-            &csv_fields,
-            dry_run,
-            &mode,
-        ) {
-            Ok(()) => {}
-            Err(e) => {
-                result.summary.skipped += 1;
-                result.errors.push(serde_json::json!({
-                    "row": row_number,
-                    "message": e.to_string()
-                }));
+        if !sync.rows.is_empty() {
+            let mut exists_stmt = conn
+                .prepare_cached("SELECT 1 FROM jobs WHERE id = ?1")
+                .map_err(map_sqlite)?;
+            for job_id in sync.rows.keys() {
+                if !seen_job_ids.contains(job_id)
+                    && exists_stmt
+                        .query_row(params![job_id], |r| r.get::<_, i64>(0))
+                        .optional()
+                        .map_err(map_sqlite)?
+                        .is_some()
+                {
+                    result.summary.missing_from_csv += 1;
+                }
             }
         }
-    }
 
-    for job_id in sync.rows.keys() {
-        if !seen_job_ids.contains(job_id) && get_job_by_id(&conn, job_id)?.is_some() {
-            result.summary.missing_from_csv += 1;
+        Ok(())
+    })();
+
+    if let Err(err) = import_loop {
+        if !dry_run {
+            let _ = conn.execute_batch("ROLLBACK");
         }
+        return Err(err);
     }
 
     if !dry_run {
+        conn.execute_batch("COMMIT").map_err(map_sqlite)?;
         export_jobs_csv_with_last_import_at(
             &conn,
             csv_path,
@@ -735,7 +786,7 @@ fn process_row(
                 }));
             }
             if csv_fields.appeal.is_some() {
-                update_job(
+                update_job_row(
                     conn,
                     &created.0.id,
                     UpdateJobInput {
@@ -889,7 +940,7 @@ fn process_row(
             if apply_fields.iter().any(|f| f == "appeal") {
                 updates.appeal = Some(csv_fields.appeal);
             }
-            update_job(conn, &existing.id, updates)?;
+            update_job_row(conn, &existing.id, updates)?;
         }
         result.summary.updated += 1;
         result.changes.push(serde_json::json!({
@@ -945,7 +996,7 @@ pub fn sync_jobs_csv_with_disk(
             exported_at: read_sync_state(csv_path)
                 .last_export_at
                 .unwrap_or_else(now_iso),
-            row_count: load_job_rows(&conn)?.len(),
+            row_count: count_exportable_jobs(&conn)?,
         };
         return Ok((Some(imported), exported));
     }

@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use scraper::{Html, Selector};
 use serde::Serialize;
 use serde_json::Value;
@@ -61,8 +63,10 @@ pub fn extract_job_metadata(html: &str) -> JobMetadata {
 }
 
 fn extract_json_ld(document: &Html) -> Option<JobMetadata> {
-    let selector = Selector::parse("script[type]").ok()?;
-    for element in document.select(&selector) {
+    static SCRIPT_TYPE_SEL: OnceLock<Selector> = OnceLock::new();
+    let selector = SCRIPT_TYPE_SEL
+        .get_or_init(|| Selector::parse("script[type]").expect("static selector must parse"));
+    for element in document.select(selector) {
         let is_json_ld = element
             .value()
             .attr("type")
@@ -133,8 +137,10 @@ fn company_name(posting: &serde_json::Map<String, Value>) -> Option<String> {
 }
 
 fn meta_content(document: &Html, attribute: &str, expected: &str) -> Option<String> {
-    let selector = Selector::parse("meta").ok()?;
-    document.select(&selector).find_map(|element| {
+    static META_SEL: OnceLock<Selector> = OnceLock::new();
+    let selector =
+        META_SEL.get_or_init(|| Selector::parse("meta").expect("static selector must parse"));
+    document.select(selector).find_map(|element| {
         let matches = element
             .value()
             .attr(attribute)
@@ -147,9 +153,11 @@ fn meta_content(document: &Html, attribute: &str, expected: &str) -> Option<Stri
 }
 
 fn html_title(document: &Html) -> Option<String> {
-    let selector = Selector::parse("title").ok()?;
+    static TITLE_SEL: OnceLock<Selector> = OnceLock::new();
+    let selector =
+        TITLE_SEL.get_or_init(|| Selector::parse("title").expect("static selector must parse"));
     document
-        .select(&selector)
+        .select(selector)
         .next()
         .and_then(|element| normalize(&element.text().collect::<String>()))
 }

@@ -423,7 +423,7 @@ impl PostingRow {
 
 fn load_posting_rows(conn: &Connection, run_id: &str) -> AppResult<Vec<PostingRow>> {
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT job_id, job_title, company_name, posting_url, state_at_start, status,
                     posting_state, reason_code, reason, failure_category
              FROM run_postings WHERE run_id = ?1 ORDER BY ordinal, job_id",
@@ -1564,7 +1564,7 @@ fn load_authoritative_evidence_for_run(
     run_id: &str,
 ) -> AppResult<HashMap<String, StoredEvidence>> {
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id, run_id, job_id, kind, attempted_at, posting_state, reason_code, reason,
                     evidence_version, evidence_json, created_at
              FROM posting_check_evidence
@@ -1663,6 +1663,19 @@ pub fn prune_history(
                 params![now, SUPPLEMENTARY_RETENTION_DAYS],
             )
             .map_err(map_sqlite)?;
+
+        c.execute(
+            "DELETE FROM careers_page_snapshots WHERE id IN (
+               SELECT id FROM (
+                 SELECT id,
+                   ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY captured_at DESC, id DESC) AS rn
+                 FROM careers_page_snapshots
+               )
+               WHERE rn > 1
+             )",
+            [],
+        )
+        .map_err(map_sqlite)?;
 
         Ok(report)
     })

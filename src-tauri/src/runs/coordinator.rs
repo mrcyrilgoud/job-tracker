@@ -1329,10 +1329,17 @@ where
         // Design decision 3 / Req 5.4: the CAS is the only way a posting starts,
         // and it also requires the run to still be Queued/Active. A lost CAS
         // means a cancel was committed (in this process or another).
+        let _ = self.conn.execute_batch("SAVEPOINT dispatch_posting");
         match store::try_mark_posting_active(&self.conn, &self.run_id, &job_id, &at) {
             Ok(true) => {}
-            Ok(false) => return DispatchOutcome::CancelObserved,
+            Ok(false) => {
+                let _ = self.conn.execute_batch("RELEASE SAVEPOINT dispatch_posting");
+                return DispatchOutcome::CancelObserved;
+            }
             Err(err) => {
+                let _ = self
+                    .conn
+                    .execute_batch("ROLLBACK TO SAVEPOINT dispatch_posting; RELEASE SAVEPOINT dispatch_posting");
                 log::warn!("[runs] try_mark_posting_active failed for {job_id}: {err}");
                 self.fail_run(&format!("could not start posting {job_id}: {err}"));
                 return DispatchOutcome::Skipped;
@@ -1361,6 +1368,7 @@ where
         };
 
         if self.run_failure.is_some() {
+            let _ = self.conn.execute_batch("RELEASE SAVEPOINT dispatch_posting");
             drop(permit);
             return DispatchOutcome::Skipped;
         }
@@ -1371,12 +1379,14 @@ where
             PostingStatus::Active,
             TransitionDetail::started(at.clone()),
         ) {
+            let _ = self.conn.execute_batch("RELEASE SAVEPOINT dispatch_posting");
             log::warn!("[runs] ledger active transition failed for {job_id}: {err}");
             self.fail_run(&format!(
                 "run ledger disagreed while starting posting {job_id}: {err}"
             ));
         }
         self.publish_event(run_transition, std::slice::from_ref(&job_id), None);
+        let _ = self.conn.execute_batch("RELEASE SAVEPOINT dispatch_posting");
 
         // Build and spawn the DB-free worker.
         let Some(input) = self.input_for(&job_id).cloned() else {
@@ -1475,12 +1485,16 @@ where
             evidence.attempted_at.clone()
         };
 
+        let next_seq = self.last_seq + 1;
+        let stages_opt = self.run_type.has_stages().then(|| self.stages.clone());
         let result = self.finalize_posting_tx(
             job_id,
             &evidence,
             &classification,
             &attempted_at,
             &finished_at,
+            next_seq,
+            stages_opt.as_deref(),
         );
         match result {
             Ok(()) => {
@@ -1504,9 +1518,11 @@ where
                     ));
                 }
                 let view = EvidenceView::from(&evidence);
-                self.publish_posting_deltas(
+                self.publish_event_with_persist(
+                    None,
                     &[job_id.to_string()],
                     Some((job_id.to_string(), view)),
+                    false,
                 );
             }
             Err(err) => {
@@ -1531,6 +1547,8 @@ where
         classification: &Classification,
         attempted_at: &str,
         finished_at: &str,
+        next_seq: u64,
+        stages: Option<&[StageProgress]>,
     ) -> AppResult<()> {
         self.conn
             .execute_batch("BEGIN IMMEDIATE")
@@ -1556,6 +1574,14 @@ where
                     finished_at: finished_at.to_string(),
                 },
             )?;
+            if let Err(err) =
+                store::update_run_progress(&self.conn, &self.run_id, next_seq, stages, finished_at)
+            {
+                log::warn!(
+                    "[runs] update_run_progress failed for {}: {err}",
+                    self.run_id
+                );
+            }
             Ok(())
         })();
         match result {
@@ -1683,6 +1709,16 @@ where
         changed: &[String],
         evidence: Option<(String, EvidenceView)>,
     ) {
+        self.publish_event_with_persist(previous_run_status, changed, evidence, true);
+    }
+
+    fn publish_event_with_persist(
+        &mut self,
+        previous_run_status: Option<RunStatus>,
+        changed: &[String],
+        evidence: Option<(String, EvidenceView)>,
+        persist_progress: bool,
+    ) {
         self.last_seq += 1;
         let seq = self.last_seq;
         let emitted_at = self.now();
@@ -1692,18 +1728,20 @@ where
         let legacy =
             store::legacy_progress(self.run_type, self.run_status, &self.stages, &counts, None);
 
-        // Persist the seq (and stages) so the DB snapshot agrees with events.
-        if let Err(err) = store::update_run_progress(
-            &self.conn,
-            &self.run_id,
-            seq,
-            stages_opt.as_deref(),
-            &emitted_at,
-        ) {
-            log::warn!(
-                "[runs] update_run_progress failed for {}: {err}",
-                self.run_id
-            );
+        if persist_progress {
+            // Persist the seq (and stages) so the DB snapshot agrees with events.
+            if let Err(err) = store::update_run_progress(
+                &self.conn,
+                &self.run_id,
+                seq,
+                stages_opt.as_deref(),
+                &emitted_at,
+            ) {
+                log::warn!(
+                    "[runs] update_run_progress failed for {}: {err}",
+                    self.run_id
+                );
+            }
         }
 
         let postings = self.delta_postings(changed, evidence);

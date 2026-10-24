@@ -47,7 +47,7 @@ export function ConnectBoardPanel({
     async function loadStoredLinks() {
       setLinksLoading(true);
       try {
-        const result = await api.listJobs({ companyId });
+        const result = await api.listJobs({ companyId, limit: 20 });
         if (cancelled) return;
         const links = storedPostingLinksFromJobs(result.jobs);
         setStoredLinks(links);

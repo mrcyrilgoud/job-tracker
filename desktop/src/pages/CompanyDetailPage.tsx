@@ -15,7 +15,6 @@ import { useCompanyActions } from "@/lib/use-company-actions";
 export function CompanyDetailPage() {
   const { id } = useParams();
   const [row, setRow] = useState<CompanyRow | null>(null);
-  const [newRoles, setNewRoles] = useState<WatchRoleSummary[]>([]);
   const [openPositions, setOpenPositions] = useState<WatchRoleSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,14 +30,12 @@ export function CompanyDetailPage() {
     }
     setError(null);
     try {
-      const [companyResult, roleResult, positionsResult] = await Promise.all([
+      const [companyResult, positionsResult] = await Promise.all([
         api.listCompanies(),
-        api.listWatchRoles({ companyId: id, newOnly: true }),
         api.listWatchRoles({ companyId: id, openOnly: true }),
       ]);
       if (sequence !== requestSequenceRef.current) return;
       setRow(companyResult.companies.find((candidate) => candidate.company.id === id) ?? null);
-      setNewRoles(roleResult);
       setOpenPositions(positionsResult);
     } catch (err) {
       if (sequence !== requestSequenceRef.current) return;
@@ -87,7 +84,7 @@ export function CompanyDetailPage() {
 
       <CompanyCard
         row={row}
-        roles={newRoles as unknown as JobListItem[]}
+        roles={[]}
         solo
         showNewRoles={false}
         rolesOpen={actions.openRoles.has(row.company.id)}

@@ -18,9 +18,9 @@ use crate::jobs::metadata::resolve_job_metadata;
 use crate::jobs::service::{
     add_job_event, archive_job, create_job_from_url_with_careers, delete_jobs, dismiss_watch_job,
     get_job_by_id, get_job_detail, get_pipeline_counts, get_weekly_activity, job_cols, list_jobs,
-    map_job, reset_dismissed_watch_job, resolve_title_from_url,
-    retain_watch_positions_matching_criteria, save_open_watch_job, set_job_favorite, unarchive_job,
-    update_job, JobFilters, UpdateJobInput, JOB_COL_COUNT,
+    map_job, reset_dismissed_watch_job, retain_watch_positions_matching_criteria,
+    save_open_watch_job, set_job_favorite, title_from_metadata, unarchive_job, update_job,
+    JobFilters, UpdateJobInput, JOB_COL_COUNT,
 };
 use crate::models::{is_job_status, JobListItem};
 use crate::runner::run_jobs_cycle_trigger;
@@ -182,7 +182,7 @@ pub async fn handle_add(
         let title = if let Some(t) = args.title.filter(|s| !s.trim().is_empty()) {
             t
         } else {
-            resolve_title_from_url(url, None).await
+            title_from_metadata(url, meta.as_ref())
         };
         let company = if let Some(c) = args.company.filter(|s| !s.trim().is_empty()) {
             Some(c)

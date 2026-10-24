@@ -42,6 +42,7 @@ use crate::error::{map_sqlite, AppError, AppResult};
 use crate::util::now_iso;
 
 use super::aliases::AliasTable;
+use super::engine::CompiledCriteria;
 use super::model::{self, FilterCriteria, MatchMode};
 
 /// Schema version this resolver knows how to read. Stored criteria carrying any
@@ -226,6 +227,7 @@ fn watch_ids_for(conn: &Connection, company_id: &str, source: &str) -> AppResult
 #[derive(Debug, Default)]
 pub struct CriteriaCache {
     map: HashMap<(String, String), FilterCriteria>,
+    compiled_map: HashMap<(String, String), CompiledCriteria>,
 }
 
 impl CriteriaCache {
@@ -250,6 +252,30 @@ impl CriteriaCache {
         let resolved = resolve_effective_criteria(conn, company_id, source)?;
         self.map.insert(key, resolved.clone());
         Ok(resolved)
+    }
+
+    /// Resolve and precompile the effective criteria for `(company_id, source)`
+    /// against `aliases`, caching the compiled representation for the remainder
+    /// of the call. Falls open to [`CompiledCriteria::match_all`] on resolution
+    /// error.
+    pub fn resolve_compiled(
+        &mut self,
+        conn: &Connection,
+        aliases: &AliasTable,
+        company_id: &str,
+        source: &str,
+    ) -> &CompiledCriteria {
+        let key = (company_id.to_string(), source.to_string());
+        if !self.compiled_map.contains_key(&key) {
+            let criteria = self
+                .resolve(conn, company_id, source)
+                .unwrap_or_else(|_| FilterCriteria::match_all());
+            let compiled = CompiledCriteria::compile(&criteria, aliases);
+            self.compiled_map.insert(key.clone(), compiled);
+        }
+        self.compiled_map
+            .get(&key)
+            .expect("compiled criteria just inserted")
     }
 }
 

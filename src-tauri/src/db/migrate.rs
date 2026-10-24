@@ -132,6 +132,18 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS job_documents_document_id_idx ON job_documents(document_id);
     CREATE INDEX IF NOT EXISTS job_documents_job_id_idx ON job_documents(job_id);
     CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);
+    CREATE INDEX IF NOT EXISTS companies_name_nocase_idx
+      ON companies(name COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS jobs_pipeline_created_cursor_idx
+      ON jobs(is_new_from_watch, created_at DESC, id ASC);
+    CREATE INDEX IF NOT EXISTS jobs_status_created_cursor_idx
+      ON jobs(status, is_new_from_watch, created_at DESC, id ASC);
+    CREATE INDEX IF NOT EXISTS careers_page_snapshots_company_captured_idx
+      ON careers_page_snapshots(company_id, captured_at DESC);
+    CREATE INDEX IF NOT EXISTS careers_page_reviews_status_created_idx
+      ON careers_page_reviews(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS careers_page_reviews_company_id_idx
+      ON careers_page_reviews(company_id);
     "#,
     )?;
 
@@ -156,6 +168,13 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         .prepare("PRAGMA table_info(jobs)")?
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<Result<Vec<_>, _>>()?;
+
+    if table_columns.iter().any(|name| name == "applied_at") {
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS jobs_applied_cursor_idx ON jobs(status, is_new_from_watch, applied_at DESC, id ASC)",
+            [],
+        )?;
+    }
 
     let has_disposition = table_columns.iter().any(|name| name == "watch_disposition");
     if !has_disposition {
@@ -570,6 +589,13 @@ mod tests {
             "jobs_watch_cursor_idx",
             "jobs_company_watch_cursor_idx",
             "jobs_company_open_watch_cursor_idx",
+            "companies_name_nocase_idx",
+            "jobs_pipeline_created_cursor_idx",
+            "jobs_status_created_cursor_idx",
+            "jobs_applied_cursor_idx",
+            "careers_page_snapshots_company_captured_idx",
+            "careers_page_reviews_status_created_idx",
+            "careers_page_reviews_company_id_idx",
         ] {
             assert_eq!(schema_object_count(&conn, "index", index), 1, "{index}");
         }
@@ -644,5 +670,49 @@ mod tests {
         // check_job_posting rows have no run id and are unconstrained.
         insert("e4", None, "authoritative").unwrap();
         insert("e5", None, "authoritative").unwrap();
+    }
+
+    #[test]
+    fn jobs_page_default_and_applied_sorts_use_cursor_indexes_without_temp_btree() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+
+        let explain = |sql: &str| -> Vec<String> {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        let pipeline_plan = explain(
+            "SELECT j.id FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+             WHERE j.is_new_from_watch = 0
+             ORDER BY j.created_at DESC, j.id ASC LIMIT 101",
+        )
+        .join(" | ");
+        assert!(
+            pipeline_plan.contains("jobs_pipeline_created_cursor_idx"),
+            "expected jobs_pipeline_created_cursor_idx in plan: {pipeline_plan}"
+        );
+        assert!(
+            !pipeline_plan.contains("TEMP B-TREE"),
+            "unexpected temp B-tree in pipeline plan: {pipeline_plan}"
+        );
+
+        let status_plan = explain(
+            "SELECT j.id FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+             WHERE j.status = 'wishlist' AND j.is_new_from_watch = 0
+             ORDER BY j.created_at DESC, j.id ASC LIMIT 101",
+        )
+        .join(" | ");
+        assert!(
+            status_plan.contains("jobs_status_created_cursor_idx"),
+            "expected jobs_status_created_cursor_idx in plan: {status_plan}"
+        );
+        assert!(
+            !status_plan.contains("TEMP B-TREE"),
+            "unexpected temp B-tree in status plan: {status_plan}"
+        );
     }
 }

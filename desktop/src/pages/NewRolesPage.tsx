@@ -1,39 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
 
 import { NewRolesInbox } from "@/components/NewRolesInbox";
 import type { TriageAction } from "@/components/companies/NewRolesList";
 import { api, type WatchRoleFilters } from "@/lib/api";
-import { newRolesFiltersFromParams } from "@/lib/new-roles-filters";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
 import type { JobListItem, WatchRoleSummary } from "@/lib/schema";
 
+const WATCH_NEW_ONLY_FILTERS: WatchRoleFilters = { newOnly: true };
+
 export function NewRolesPage() {
   const [roles, setRoles] = useState<WatchRoleSummary[]>([]);
-  const [searchParams] = useSearchParams();
-  const watchSearch = searchParams.get("search") ?? "";
-  const watchPostingState = searchParams.get("postingState") ?? "";
-  const watchSalaryMin = searchParams.get("salaryMin") ?? "";
-  const watchSalaryMax = searchParams.get("salaryMax") ?? "";
-  const watchFilters = useMemo<WatchRoleFilters>(() => {
-    const params = new URLSearchParams();
-    if (watchSearch) params.set("search", watchSearch);
-    if (watchPostingState) params.set("postingState", watchPostingState);
-    if (watchSalaryMin) params.set("salaryMin", watchSalaryMin);
-    if (watchSalaryMax) params.set("salaryMax", watchSalaryMax);
-    const filters = newRolesFiltersFromParams(params);
-    return {
-      // Keep the full compact queue available so the inbox can recalculate
-      // its company options after triage removes the last role in a company.
-      // The existing client-side company filter then preserves that behavior.
-      companyId: undefined,
-      newOnly: true,
-      postingState: filters.postingState || undefined,
-      search: filters.search.trim() || undefined,
-      salaryMin: filters.salaryMin,
-      salaryMax: filters.salaryMax,
-    };
-  }, [watchPostingState, watchSalaryMax, watchSalaryMin, watchSearch]);
   const [loading, setLoading] = useState(true);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +20,7 @@ export function NewRolesPage() {
     if (!opts?.quiet) setLoading(true);
     setError(null);
     try {
-      const result = await api.listWatchRoles(watchFilters);
+      const result = await api.listWatchRoles(WATCH_NEW_ONLY_FILTERS);
       setRoles(result);
       setHasLoaded(true);
     } catch (err) {
@@ -54,7 +30,7 @@ export function NewRolesPage() {
     } finally {
       if (!opts?.quiet) setLoading(false);
     }
-  }, [reportRefreshFailed, watchFilters]);
+  }, [reportRefreshFailed]);
 
   useEffect(() => {
     void load();
@@ -74,7 +50,7 @@ export function NewRolesPage() {
       } else {
         await api.dismissWatchJob(jobId);
       }
-      await load();
+      setRoles((prev) => prev.filter((item) => item.job.id !== jobId));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update this role");
     } finally {

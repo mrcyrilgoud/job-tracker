@@ -13,6 +13,8 @@
 //!
 //! `term_matches` (task 3.2) and `matches` (task 3.3) build on these.
 
+use std::collections::HashSet;
+
 use super::aliases::AliasTable;
 use super::model::{FilterCriteria, MatchMode, RemoteMode};
 
@@ -92,47 +94,14 @@ pub(crate) fn tokenize(normalized: &str) -> Vec<String> {
 ///     as an ordered, contiguous run within `haystack_tokens` (Req 1.2).
 /// - `Substring` mode (Req 1.3): matches iff `haystack_norm` contains the
 ///   normalized needle as a contiguous substring, regardless of token boundaries.
+#[cfg(test)]
 pub(crate) fn term_matches(
     haystack_tokens: &[String],
     haystack_norm: &str,
     needle: &str,
     mode: MatchMode,
 ) -> bool {
-    let needle_norm = normalize(needle);
-    // Req 1.6 / 2.3: an empty-after-normalization term matches nothing.
-    if needle_norm.is_empty() {
-        return false;
-    }
-
-    match mode {
-        MatchMode::Substring => {
-            // Req 1.3: contiguous substring anywhere, ignoring token boundaries.
-            haystack_norm.contains(&needle_norm)
-        }
-        MatchMode::Word => {
-            let needle_tokens = tokenize(&needle_norm);
-            // A needle that tokenizes to nothing cannot match.
-            if needle_tokens.is_empty() {
-                return false;
-            }
-            // Req 1.7: zero-token haystack yields no Word-mode match.
-            if haystack_tokens.is_empty() {
-                return false;
-            }
-            if needle_tokens.len() == 1 {
-                // Req 1.1: single token matches a whole token only.
-                haystack_tokens.iter().any(|tok| tok == &needle_tokens[0])
-            } else {
-                // Req 1.2: multi-word needle matches as an ordered contiguous run.
-                if needle_tokens.len() > haystack_tokens.len() {
-                    return false;
-                }
-                haystack_tokens
-                    .windows(needle_tokens.len())
-                    .any(|window| window == needle_tokens.as_slice())
-            }
-        }
-    }
+    CompiledTerm::new(needle, mode).matches(haystack_tokens, haystack_norm, mode)
 }
 
 /// True when the location text carries no specific, non-remote place name.
@@ -151,6 +120,230 @@ fn loc_has_no_place(loc_tokens: &[String], aliases: &AliasTable) -> bool {
         .collect::<Vec<_>>();
 
     remaining.is_empty() || aliases.is_country_name(&remaining.join(" "))
+}
+
+/// Pre-normalized and pre-tokenized needle term for repeated matching across a
+/// batch of candidate jobs without re-running `normalize`/`tokenize` per row.
+#[derive(Debug, Clone)]
+struct CompiledTerm {
+    raw: String,
+    normalized: String,
+    tokens: Vec<String>,
+}
+
+impl CompiledTerm {
+    fn new(raw: &str, mode: MatchMode) -> Self {
+        let normalized = normalize(raw);
+        let tokens = if mode == MatchMode::Word && !normalized.is_empty() {
+            tokenize(&normalized)
+        } else {
+            Vec::new()
+        };
+        Self {
+            raw: raw.to_string(),
+            normalized,
+            tokens,
+        }
+    }
+
+    fn matches(&self, haystack_tokens: &[String], haystack_norm: &str, mode: MatchMode) -> bool {
+        if self.normalized.is_empty() {
+            return false;
+        }
+        match mode {
+            MatchMode::Substring => haystack_norm.contains(&self.normalized),
+            MatchMode::Word => {
+                if self.tokens.is_empty() || haystack_tokens.is_empty() {
+                    return false;
+                }
+                if self.tokens.len() == 1 {
+                    haystack_tokens.iter().any(|tok| tok == &self.tokens[0])
+                } else {
+                    if self.tokens.len() > haystack_tokens.len() {
+                        return false;
+                    }
+                    haystack_tokens
+                        .windows(self.tokens.len())
+                        .any(|window| window == self.tokens.as_slice())
+                }
+            }
+        }
+    }
+}
+
+/// Pre-expanded and pre-tokenized representation of [`FilterCriteria`] + [`AliasTable`].
+///
+/// Building this once per `(company_id, source)` group avoids expanding ~145
+/// country aliases and re-tokenizing every needle on each candidate job row.
+#[derive(Debug, Clone)]
+pub struct CompiledCriteria {
+    is_match_all: bool,
+    title_match_mode: MatchMode,
+    title_include: Vec<CompiledTerm>,
+    title_exclude: Vec<CompiledTerm>,
+    location_match_mode: MatchMode,
+    location_include: Vec<CompiledTerm>,
+    location_exclude: Vec<CompiledTerm>,
+    remote: RemoteMode,
+}
+
+impl CompiledCriteria {
+    pub fn match_all() -> Self {
+        Self {
+            is_match_all: true,
+            title_match_mode: MatchMode::Word,
+            title_include: Vec::new(),
+            title_exclude: Vec::new(),
+            location_match_mode: MatchMode::Word,
+            location_include: Vec::new(),
+            location_exclude: Vec::new(),
+            remote: RemoteMode::Any,
+        }
+    }
+
+    pub fn compile(criteria: &FilterCriteria, aliases: &AliasTable) -> Self {
+        if criteria.is_match_all() {
+            return Self::match_all();
+        }
+
+        let title_match_mode = criteria.title.match_mode;
+        let title_include = criteria
+            .title
+            .include
+            .iter()
+            .map(|t| CompiledTerm::new(t, title_match_mode))
+            .collect();
+        let title_exclude = criteria
+            .title
+            .exclude
+            .iter()
+            .map(|t| CompiledTerm::new(t, title_match_mode))
+            .collect();
+
+        let location_match_mode = criteria.location.match_mode;
+        let location_exclude = criteria
+            .location
+            .exclude
+            .iter()
+            .map(|t| CompiledTerm::new(t, location_match_mode))
+            .collect();
+
+        let mut expanded_include: Vec<CompiledTerm> = Vec::new();
+        let mut seen_include: HashSet<String> = HashSet::new();
+        let country = criteria.location.country.as_deref();
+        for tok in &criteria.location.include {
+            for expanded in aliases.expand_location(tok, country) {
+                if seen_include.insert(expanded.clone()) {
+                    expanded_include.push(CompiledTerm::new(&expanded, location_match_mode));
+                }
+            }
+        }
+        if let Some(c) = country {
+            if !c.trim().is_empty() {
+                for expanded in aliases.expand_country(c) {
+                    if seen_include.insert(expanded.clone()) {
+                        expanded_include.push(CompiledTerm::new(&expanded, location_match_mode));
+                    }
+                }
+            }
+        }
+
+        Self {
+            is_match_all: false,
+            title_match_mode,
+            title_include,
+            title_exclude,
+            location_match_mode,
+            location_include: expanded_include,
+            location_exclude,
+            remote: criteria.remote,
+        }
+    }
+
+    pub fn matches(&self, aliases: &AliasTable, job: JobView<'_>) -> MatchResult {
+        if self.is_match_all {
+            return MatchResult {
+                included: true,
+                reason: "no criteria".to_string(),
+            };
+        }
+
+        let title_norm = normalize(job.title);
+        let title_tokens = tokenize(&title_norm);
+        let loc_norm = normalize(job.location.unwrap_or(""));
+        let loc_tokens = tokenize(&loc_norm);
+
+        for term in &self.title_exclude {
+            if term.matches(&title_tokens, &title_norm, self.title_match_mode) {
+                return MatchResult {
+                    included: false,
+                    reason: format!("excluded by title '{}'", term.raw),
+                };
+            }
+        }
+        if !self.title_include.is_empty() {
+            let matched = self
+                .title_include
+                .iter()
+                .any(|term| term.matches(&title_tokens, &title_norm, self.title_match_mode));
+            if !matched {
+                return MatchResult {
+                    included: false,
+                    reason: "no title include matched".to_string(),
+                };
+            }
+        }
+
+        let is_remote = aliases.is_remote(&loc_norm);
+        if self.remote == RemoteMode::RemoteOnly && !is_remote {
+            return MatchResult {
+                included: false,
+                reason: "not remote".to_string(),
+            };
+        }
+        if self.remote == RemoteMode::OnsiteOnly && is_remote {
+            return MatchResult {
+                included: false,
+                reason: "remote excluded".to_string(),
+            };
+        }
+
+        for term in &self.location_exclude {
+            if term.matches(&loc_tokens, &loc_norm, self.location_match_mode) {
+                return MatchResult {
+                    included: false,
+                    reason: format!("excluded by location '{}'", term.raw),
+                };
+            }
+        }
+
+        if !self.location_include.is_empty() {
+            if self.remote != RemoteMode::OnsiteOnly
+                && is_remote
+                && loc_has_no_place(&loc_tokens, aliases)
+            {
+                return MatchResult {
+                    included: true,
+                    reason: "remote passes location gate".to_string(),
+                };
+            }
+            let matched = self
+                .location_include
+                .iter()
+                .any(|term| term.matches(&loc_tokens, &loc_norm, self.location_match_mode));
+            if !matched {
+                return MatchResult {
+                    included: false,
+                    reason: "no location include matched".to_string(),
+                };
+            }
+        }
+
+        MatchResult {
+            included: true,
+            reason: "all criteria satisfied".to_string(),
+        }
+    }
 }
 
 /// Evaluate one [`FilterCriteria`] against one job (Req 2.x, 3.x, 5.x, 6.x).
@@ -175,120 +368,7 @@ fn loc_has_no_place(loc_tokens: &[String], aliases: &AliasTable) -> bool {
 /// 5. A job not excluded by any gate is included only if both the title and
 ///    location dimensions are satisfied (Req 2.8).
 pub fn matches(criteria: &FilterCriteria, aliases: &AliasTable, job: JobView<'_>) -> MatchResult {
-    // --- Empty criteria includes everything (Req 3.1, 3.3). ---
-    if criteria.is_match_all() {
-        return MatchResult {
-            included: true,
-            reason: "no criteria".to_string(),
-        };
-    }
-
-    let title_norm = normalize(job.title);
-    let title_tokens = tokenize(&title_norm);
-    let loc_norm = normalize(job.location.unwrap_or(""));
-    let loc_tokens = tokenize(&loc_norm);
-
-    // --- TITLE ---
-    // Exclude wins first (Req 2.1).
-    for term in &criteria.title.exclude {
-        if term_matches(&title_tokens, &title_norm, term, criteria.title.match_mode) {
-            return MatchResult {
-                included: false,
-                reason: format!("excluded by title '{term}'"),
-            };
-        }
-    }
-    // Include is any-of; empty include satisfies the title dimension (Req 2.4, 2.6).
-    if !criteria.title.include.is_empty() {
-        let matched =
-            criteria.title.include.iter().any(|term| {
-                term_matches(&title_tokens, &title_norm, term, criteria.title.match_mode)
-            });
-        if !matched {
-            return MatchResult {
-                included: false,
-                reason: "no title include matched".to_string(),
-            };
-        }
-    }
-
-    // --- REMOTE (Req 6.1, 6.2, 6.3) ---
-    let is_remote = aliases.is_remote(&loc_norm);
-    if criteria.remote == RemoteMode::RemoteOnly && !is_remote {
-        return MatchResult {
-            included: false,
-            reason: "not remote".to_string(),
-        };
-    }
-    if criteria.remote == RemoteMode::OnsiteOnly && is_remote {
-        return MatchResult {
-            included: false,
-            reason: "remote excluded".to_string(),
-        };
-    }
-
-    // --- LOCATION ---
-    // Build the effective include set by expanding aliases + country (Req 5.2),
-    // then deduplicate preserving first-seen order (Req 5.3).
-    let mut expanded_include: Vec<String> = Vec::new();
-    let country = criteria.location.country.as_deref();
-    for tok in &criteria.location.include {
-        for expanded in aliases.expand_location(tok, country) {
-            if !expanded_include.contains(&expanded) {
-                expanded_include.push(expanded);
-            }
-        }
-    }
-    if let Some(c) = country {
-        if !c.trim().is_empty() {
-            for expanded in aliases.expand_country(c) {
-                if !expanded_include.contains(&expanded) {
-                    expanded_include.push(expanded);
-                }
-            }
-        }
-    }
-
-    // Location exclude wins (Req 2.1).
-    for term in &criteria.location.exclude {
-        if term_matches(&loc_tokens, &loc_norm, term, criteria.location.match_mode) {
-            return MatchResult {
-                included: false,
-                reason: format!("excluded by location '{term}'"),
-            };
-        }
-    }
-
-    if !expanded_include.is_empty() {
-        // Remote-bypasses-location-name rule (Req 6.4): a remote job with no
-        // specific non-remote place present passes the location gate when remote
-        // is allowed, so rows like "Remote - US" are not dropped by a city list.
-        if criteria.remote != RemoteMode::OnsiteOnly
-            && is_remote
-            && loc_has_no_place(&loc_tokens, aliases)
-        {
-            return MatchResult {
-                included: true,
-                reason: "remote passes location gate".to_string(),
-            };
-        }
-        // Location include is any-of (Req 2.5).
-        let matched = expanded_include
-            .iter()
-            .any(|term| term_matches(&loc_tokens, &loc_norm, term, criteria.location.match_mode));
-        if !matched {
-            return MatchResult {
-                included: false,
-                reason: "no location include matched".to_string(),
-            };
-        }
-    }
-
-    // Not excluded and both dimensions satisfied (Req 2.8).
-    MatchResult {
-        included: true,
-        reason: "all criteria satisfied".to_string(),
-    }
+    CompiledCriteria::compile(criteria, aliases).matches(aliases, job)
 }
 
 #[cfg(test)]

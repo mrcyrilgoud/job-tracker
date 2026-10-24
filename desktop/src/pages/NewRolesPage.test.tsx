@@ -173,11 +173,8 @@ describe("NewRolesPage", () => {
     expect(host.textContent).toContain("Software Engineer role-1");
   });
 
-  it("saves and dismisses roles, refreshing the full queue after each action", async () => {
-    apiMocks.listWatchRoles
-      .mockResolvedValueOnce([role("role-1"), role("role-2")])
-      .mockResolvedValueOnce([role("role-2")])
-      .mockResolvedValueOnce([]);
+  it("saves and dismisses roles, updating the queue locally without re-fetching", async () => {
+    apiMocks.listWatchRoles.mockResolvedValueOnce([role("role-1"), role("role-2")]);
     await mount();
 
     await act(async () => {
@@ -185,6 +182,7 @@ describe("NewRolesPage", () => {
       await Promise.resolve();
     });
     expect(apiMocks.approveWatchJob).toHaveBeenCalledExactlyOnceWith("role-1");
+    expect(host.textContent).not.toContain("Software Engineer role-1");
     expect(host.textContent).toContain("Software Engineer role-2");
 
     await act(async () => {
@@ -193,6 +191,7 @@ describe("NewRolesPage", () => {
     });
     expect(apiMocks.dismissWatchJob).toHaveBeenCalledExactlyOnceWith("role-2");
     expect(host.textContent).toContain("Your watches are up to date. No new matches found.");
+    expect(apiMocks.listWatchRoles).toHaveBeenCalledTimes(1);
   });
 
   it("refreshes the queue after a completed run", async () => {
@@ -320,9 +319,10 @@ describe("NewRolesPage", () => {
   });
 
   it("resets a company filter when triage removes its final queued role", async () => {
-    apiMocks.listWatchRoles
-      .mockResolvedValueOnce([role("role-1", { companyId: "company-1" })])
-      .mockResolvedValueOnce([role("role-2", { companyId: "company-2" })]);
+    apiMocks.listWatchRoles.mockResolvedValueOnce([
+      role("role-1", { companyId: "company-1" }),
+      role("role-2", { companyId: "company-2" }),
+    ]);
     await mount("/new-roles?companyId=company-1&search=Software&groupBy=company");
 
     await act(async () => {
@@ -336,5 +336,6 @@ describe("NewRolesPage", () => {
     expect(host.querySelector('[data-testid="route-search"]')?.textContent).toContain("search=Software");
     expect(host.querySelector('[data-testid="route-search"]')?.textContent).toContain("groupBy=company");
     expect(host.querySelector('[data-testid="route-search"]')?.textContent).not.toContain("companyId=");
+    expect(apiMocks.listWatchRoles).toHaveBeenCalledTimes(1);
   });
 });

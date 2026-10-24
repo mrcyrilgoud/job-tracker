@@ -1,10 +1,10 @@
 @import "tailwindcss";
-@import "@fontsource/plus-jakarta-sans/400.css";
-@import "@fontsource/plus-jakarta-sans/500.css";
-@import "@fontsource/plus-jakarta-sans/600.css";
-@import "@fontsource/fraunces/400.css";
-@import "@fontsource/fraunces/500.css";
-@import "@fontsource/fraunces/600.css";
+@import "@fontsource/plus-jakarta-sans/latin-400.css";
+@import "@fontsource/plus-jakarta-sans/latin-500.css";
+@import "@fontsource/plus-jakarta-sans/latin-600.css";
+@import "@fontsource/fraunces/latin-400.css";
+@import "@fontsource/fraunces/latin-500.css";
+@import "@fontsource/fraunces/latin-600.css";
 
 :root {
   --font-jakarta: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
@@ -282,8 +282,7 @@ button {
 }
 
 .btn-secondary {
-  background: color-mix(in srgb, var(--surface) 80%, transparent);
-  backdrop-filter: blur(8px);
+  background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);

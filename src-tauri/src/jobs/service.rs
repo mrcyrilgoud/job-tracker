@@ -104,7 +104,7 @@ pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
     title_from_metadata(url, metadata.as_ref())
 }
 
-fn title_from_metadata(url: &str, metadata: Option<&JobMetadata>) -> String {
+pub(crate) fn title_from_metadata(url: &str, metadata: Option<&JobMetadata>) -> String {
     metadata
         .and_then(|metadata| metadata.title.clone())
         .unwrap_or_else(|| guess_title_from_url(url))
@@ -639,26 +639,24 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     // per-call cache and re-read on every call, so changing criteria re-filters
     // existing rows on the next listing without any re-sync (Req 8.4).
     if watch_path {
-        use crate::filtering::engine::{matches, JobView};
-        use crate::filtering::model::FilterCriteria;
+        use crate::filtering::engine::JobView;
         use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
         let aliases = load_alias_table(conn)?;
         let mut cache = CriteriaCache::new();
 
         out.retain(|item| {
-            let criteria = cache
-                .resolve(conn, &item.job.company_id, &item.job.source)
-                .unwrap_or_else(|_| FilterCriteria::match_all());
-            matches(
-                &criteria,
-                &aliases,
-                JobView {
-                    title: &item.job.title,
-                    location: item.job.location.as_deref(),
-                },
-            )
-            .included
+            let compiled =
+                cache.resolve_compiled(conn, &aliases, &item.job.company_id, &item.job.source);
+            compiled
+                .matches(
+                    &aliases,
+                    JobView {
+                        title: &item.job.title,
+                        location: item.job.location.as_deref(),
+                    },
+                )
+                .included
         });
 
         if let Some(lim) = filters.limit {
@@ -706,7 +704,7 @@ pub fn list_jobs_page(
         jobs_page_order_by(sort_spec, applied_tab)
     );
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-    let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+    let mut stmt = conn.prepare_cached(&sql).map_err(map_sqlite)?;
     let rows = stmt
         .query_map(params_ref.as_slice(), |row| {
             let item = JobListSummary {
@@ -825,14 +823,14 @@ pub fn list_watch_roles_page(
     filters: WatchRoleFilters,
     cursor: Option<JobPageCursor>,
 ) -> AppResult<WatchRolePage> {
-    use crate::filtering::engine::{matches, JobView};
-    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::engine::JobView;
     use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
     let aliases = load_alias_table(conn)?;
     let mut criteria_cache = CriteriaCache::new();
     let mut scan_cursor = cursor;
     let mut matches_for_page = Vec::with_capacity(JOB_PAGE_SIZE + 1);
+    let mut scan_batch_size = JOB_PAGE_SIZE + 1;
 
     loop {
         let (mut where_sql, mut values) = watch_role_filter_sql(&filters);
@@ -842,7 +840,7 @@ pub fn list_watch_roles_page(
             values.push(Box::new(cursor.updated_at.clone()));
             values.push(Box::new(cursor.id.clone()));
         }
-        values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
+        values.push(Box::new(scan_batch_size as i64));
         let sql = format!(
             "SELECT j.id, j.company_id, j.title, j.url, j.status, j.posting_state,
                     j.source, j.location, j.is_new_from_watch, j.watch_disposition,
@@ -852,7 +850,7 @@ pub fn list_watch_roles_page(
         );
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|value| value.as_ref()).collect();
-        let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+        let mut stmt = conn.prepare_cached(&sql).map_err(map_sqlite)?;
         let candidates = stmt
             .query_map(params_ref.as_slice(), |row| {
                 Ok(WatchRoleSummary {
@@ -884,18 +882,21 @@ pub fn list_watch_roles_page(
             id: candidate.job.id.clone(),
         });
         for candidate in candidates {
-            let criteria = criteria_cache
-                .resolve(conn, &candidate.job.company_id, &candidate.job.source)
-                .unwrap_or_else(|_| FilterCriteria::match_all());
-            if matches(
-                &criteria,
+            let compiled = criteria_cache.resolve_compiled(
+                conn,
                 &aliases,
-                JobView {
-                    title: &candidate.job.title,
-                    location: candidate.job.location.as_deref(),
-                },
-            )
-            .included
+                &candidate.job.company_id,
+                &candidate.job.source,
+            );
+            if compiled
+                .matches(
+                    &aliases,
+                    JobView {
+                        title: &candidate.job.title,
+                        location: candidate.job.location.as_deref(),
+                    },
+                )
+                .included
             {
                 matches_for_page.push(candidate);
                 if matches_for_page.len() > JOB_PAGE_SIZE {
@@ -904,9 +905,10 @@ pub fn list_watch_roles_page(
             }
         }
 
-        if matches_for_page.len() > JOB_PAGE_SIZE || raw_count < JOB_PAGE_SIZE + 1 {
+        if matches_for_page.len() > JOB_PAGE_SIZE || raw_count < scan_batch_size {
             break;
         }
+        scan_batch_size = JOB_PAGE_SIZE * 4;
         scan_cursor = last_candidate_cursor;
     }
 
@@ -974,32 +976,30 @@ pub(crate) fn retain_watch_positions_matching_criteria(
     conn: &Connection,
     positions: &mut Vec<JobListItem>,
 ) -> AppResult<()> {
-    use crate::filtering::engine::{matches, JobView};
-    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::engine::JobView;
     use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
     let aliases = load_alias_table(conn)?;
     let mut cache = CriteriaCache::new();
     positions.retain(|item| {
-        let criteria = cache
-            .resolve(conn, &item.job.company_id, &item.job.source)
-            .unwrap_or_else(|_| FilterCriteria::match_all());
-        matches(
-            &criteria,
-            &aliases,
-            JobView {
-                title: &item.job.title,
-                location: item.job.location.as_deref(),
-            },
-        )
-        .included
+        let compiled =
+            cache.resolve_compiled(conn, &aliases, &item.job.company_id, &item.job.source);
+        compiled
+            .matches(
+                &aliases,
+                JobView {
+                    title: &item.job.title,
+                    location: item.job.location.as_deref(),
+                },
+            )
+            .included
     });
     Ok(())
 }
 
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
-        .prepare(&format!(
+        .prepare_cached(&format!(
             "SELECT {}, c.id, c.name, c.careers_url, c.created_at, c.updated_at
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
             job_cols(Some("j"))
@@ -1028,7 +1028,7 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
     };
 
     let mut events_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id, job_id, type, note, occurred_at FROM job_events WHERE job_id = ?1 ORDER BY occurred_at DESC",
         )
         .map_err(map_sqlite)?;
@@ -1047,7 +1047,7 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
         .map_err(map_sqlite)?;
 
     let mut att_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT jd.id, jd.job_id, jd.document_id, jd.kind, jd.used_at,
                     d.id, d.original_filename, d.stored_filename, d.mime_type, d.checksum, d.size_bytes, d.imported_at
              FROM job_documents jd INNER JOIN documents d ON jd.document_id = d.id
@@ -1128,6 +1128,15 @@ pub fn update_job(
     job_id: &str,
     updates: UpdateJobInput,
 ) -> AppResult<JobDetail> {
+    update_job_row(conn, job_id, updates)?;
+    get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
+}
+
+pub(crate) fn update_job_row(
+    conn: &Connection,
+    job_id: &str,
+    updates: UpdateJobInput,
+) -> AppResult<()> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
     let timestamp = now_iso();
     let mut company_id = existing.company_id.clone();
@@ -1298,7 +1307,7 @@ pub fn update_job(
         delete_untracked_empty_company(conn, &existing.company_id)?;
     }
 
-    get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
+    Ok(())
 }
 
 /// Permanently delete a job and its associated events and attachments from SQLite.
@@ -1366,6 +1375,15 @@ pub fn unarchive_job(
     job_id: &str,
     target_status: Option<&str>,
 ) -> AppResult<JobDetail> {
+    unarchive_job_row(conn, job_id, target_status)?;
+    get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
+}
+
+fn unarchive_job_row(
+    conn: &Connection,
+    job_id: &str,
+    target_status: Option<&str>,
+) -> AppResult<()> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
     let next_status = target_status
         .filter(|s| is_job_status(s) && *s != "archived")
@@ -1376,7 +1394,7 @@ pub fn unarchive_job(
                 "wishlist"
             }
         });
-    update_job(
+    update_job_row(
         conn,
         job_id,
         UpdateJobInput {
@@ -1393,7 +1411,7 @@ pub fn unarchive_jobs(conn: &Connection, job_ids: &[String]) -> AppResult<usize>
     let mut restored = 0;
     for job_id in job_ids {
         if seen.insert(job_id.as_str()) {
-            unarchive_job(conn, job_id, None)?;
+            unarchive_job_row(conn, job_id, None)?;
             restored += 1;
         }
     }
@@ -1529,7 +1547,7 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
     .collect();
 
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT status, COUNT(*) FROM jobs j \
              WHERE j.is_new_from_watch = 0 \
                AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed') \
@@ -1660,7 +1678,7 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
 
     let start_iso = start.with_timezone(&chrono::Utc).to_rfc3339();
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT occurred_at FROM job_events \
              WHERE occurred_at >= ?1 \
                AND type NOT IN ('discovered_from_watch', 'dismissed_from_watch', 'approved_from_watch')",

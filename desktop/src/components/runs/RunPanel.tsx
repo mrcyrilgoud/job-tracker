@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import { RunPostingList } from "@/components/runs/RunPostingList";
 import { RunSummaryCard } from "@/components/runs/RunSummaryCard";
 import { useRunMonitor } from "@/lib/RunMonitorContext";
+import type { RunSnapshot } from "@/lib/run-contract";
 import {
   canRetry,
   isTerminalRunStatus,
@@ -10,6 +11,24 @@ import {
   STAGE_LABELS,
   STAGE_OUTCOME_LABELS,
 } from "@/lib/run-state";
+
+const RunElapsedLabel = memo(function RunElapsedLabel({
+  snapshot,
+  terminal,
+}: {
+  snapshot: RunSnapshot;
+  terminal: boolean;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (terminal) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [snapshot.runId, terminal]);
+
+  const vm = runViewModel(snapshot, terminal ? undefined : now);
+  return <>{vm.elapsedLabel}</>;
+});
 
 /**
  * The persistent run panel shown under the header (Req 2.1, 2.2, 2.3, 5.1, 5.2).
@@ -33,16 +52,9 @@ export function RunPanel() {
   const snapshot = state.displayed;
   const terminal = snapshot !== null && isTerminalRunStatus(snapshot.runStatus);
 
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (snapshot === null || terminal) return undefined;
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [snapshot, terminal]);
-
   if (snapshot === null) return null;
 
-  const vm = runViewModel(snapshot, terminal ? undefined : now);
+  const vm = runViewModel(snapshot);
   const isPostingRun = snapshot.runType !== "careerCheck";
   const total = vm.total > 0 ? vm.total : 0;
   const pct = total > 0 ? Math.min(100, Math.round((vm.completed / total) * 100)) : 0;
@@ -80,7 +92,7 @@ export function RunPanel() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs text-[var(--muted)]">
             <span>
-              {STAGE_LABELS[vm.stage]} · {vm.elapsedLabel}
+              {STAGE_LABELS[vm.stage]} · <RunElapsedLabel snapshot={snapshot} terminal={terminal} />
             </span>
             <span aria-hidden>
               {vm.completed} / {total}
