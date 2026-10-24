@@ -671,4 +671,48 @@ mod tests {
         insert("e4", None, "authoritative").unwrap();
         insert("e5", None, "authoritative").unwrap();
     }
+
+    #[test]
+    fn jobs_page_default_and_applied_sorts_use_cursor_indexes_without_temp_btree() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+
+        let explain = |sql: &str| -> Vec<String> {
+            let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        let pipeline_plan = explain(
+            "SELECT j.id FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+             WHERE j.is_new_from_watch = 0
+             ORDER BY j.created_at DESC, j.id ASC LIMIT 101",
+        )
+        .join(" | ");
+        assert!(
+            pipeline_plan.contains("jobs_pipeline_created_cursor_idx"),
+            "expected jobs_pipeline_created_cursor_idx in plan: {pipeline_plan}"
+        );
+        assert!(
+            !pipeline_plan.contains("TEMP B-TREE"),
+            "unexpected temp B-tree in pipeline plan: {pipeline_plan}"
+        );
+
+        let status_plan = explain(
+            "SELECT j.id FROM jobs j INNER JOIN companies c ON j.company_id = c.id
+             WHERE j.status = 'wishlist' AND j.is_new_from_watch = 0
+             ORDER BY j.created_at DESC, j.id ASC LIMIT 101",
+        )
+        .join(" | ");
+        assert!(
+            status_plan.contains("jobs_status_created_cursor_idx"),
+            "expected jobs_status_created_cursor_idx in plan: {status_plan}"
+        );
+        assert!(
+            !status_plan.contains("TEMP B-TREE"),
+            "unexpected temp B-tree in status plan: {status_plan}"
+        );
+    }
 }

@@ -94,47 +94,14 @@ pub(crate) fn tokenize(normalized: &str) -> Vec<String> {
 ///     as an ordered, contiguous run within `haystack_tokens` (Req 1.2).
 /// - `Substring` mode (Req 1.3): matches iff `haystack_norm` contains the
 ///   normalized needle as a contiguous substring, regardless of token boundaries.
+#[cfg(test)]
 pub(crate) fn term_matches(
     haystack_tokens: &[String],
     haystack_norm: &str,
     needle: &str,
     mode: MatchMode,
 ) -> bool {
-    let needle_norm = normalize(needle);
-    // Req 1.6 / 2.3: an empty-after-normalization term matches nothing.
-    if needle_norm.is_empty() {
-        return false;
-    }
-
-    match mode {
-        MatchMode::Substring => {
-            // Req 1.3: contiguous substring anywhere, ignoring token boundaries.
-            haystack_norm.contains(&needle_norm)
-        }
-        MatchMode::Word => {
-            let needle_tokens = tokenize(&needle_norm);
-            // A needle that tokenizes to nothing cannot match.
-            if needle_tokens.is_empty() {
-                return false;
-            }
-            // Req 1.7: zero-token haystack yields no Word-mode match.
-            if haystack_tokens.is_empty() {
-                return false;
-            }
-            if needle_tokens.len() == 1 {
-                // Req 1.1: single token matches a whole token only.
-                haystack_tokens.iter().any(|tok| tok == &needle_tokens[0])
-            } else {
-                // Req 1.2: multi-word needle matches as an ordered contiguous run.
-                if needle_tokens.len() > haystack_tokens.len() {
-                    return false;
-                }
-                haystack_tokens
-                    .windows(needle_tokens.len())
-                    .any(|window| window == needle_tokens.as_slice())
-            }
-        }
-    }
+    CompiledTerm::new(needle, mode).matches(haystack_tokens, haystack_norm, mode)
 }
 
 /// True when the location text carries no specific, non-remote place name.

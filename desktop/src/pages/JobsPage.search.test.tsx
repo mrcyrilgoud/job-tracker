@@ -771,4 +771,43 @@ describe("JobsPage live search suggestions", () => {
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("Delete permanently");
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("Batch delete failed");
   });
+
+  it("deletes a single job locally and refreshes only the dashboard without resetting pagination", async () => {
+    const rows = Array.from({ length: 105 }, (_, index) =>
+      makeJob(`paged-${String(index).padStart(3, "0")}`, `Paged role ${index}`));
+    apiMocks.listJobsPage.mockImplementation(async (_filters, cursor) => ({
+      jobs: cursor ? rows.slice(100) : rows.slice(0, 100),
+      nextCursor: cursor ? null : { updatedAt: rows[99].job.updatedAt, id: rows[99].job.id },
+    }));
+    await mount();
+
+    const loadMore = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Load more"))!;
+    await act(async () => {
+      loadMore.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(105);
+
+    const listJobsCallsBefore = apiMocks.listJobsPage.mock.calls.length;
+    const listCompaniesCallsBefore = apiMocks.listCompanies.mock.calls.length;
+    const dashboardCallsBefore = apiMocks.getJobsDashboard.mock.calls.length;
+
+    const deleteButton = host.querySelector<HTMLButtonElement>('button[title="Delete role"]')!;
+    await act(async () => deleteButton.click());
+    const confirm = [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+      .find((button) => button.textContent?.includes("Delete permanently"))!;
+    await act(async () => {
+      confirm.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.deleteJob).toHaveBeenCalledWith("paged-000");
+    expect(host.querySelectorAll("ul.space-y-3 > li")).toHaveLength(104);
+    expect(apiMocks.listJobsPage).toHaveBeenCalledTimes(listJobsCallsBefore);
+    expect(apiMocks.listCompanies).toHaveBeenCalledTimes(listCompaniesCallsBefore);
+    expect(apiMocks.getJobsDashboard).toHaveBeenCalledTimes(dashboardCallsBefore + 1);
+  });
 });
