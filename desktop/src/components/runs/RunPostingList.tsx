@@ -1,3 +1,5 @@
+import { memo, useMemo } from "react";
+
 import { EvidenceDisclosure } from "@/components/runs/EvidenceDisclosure";
 import { toneClasses, type Tone } from "@/lib/ui";
 import { useRunMonitor } from "@/lib/RunMonitorContext";
@@ -45,14 +47,75 @@ function statusTone(row: PostingProgress): Tone {
  * (Unknown state, Error, or Canceled), and "Select all needing attention"
  * selects the Unknown/Error rows.
  */
-export function RunPostingList() {
+const RunPostingRow = memo(function RunPostingRow({
+  row,
+  selected,
+  onToggleRetry,
+}: {
+  row: PostingProgress;
+  selected: boolean;
+  onToggleRetry: (jobId: string) => void;
+}) {
+  const eligible = isRetryEligible(row);
+  const tone = statusTone(row);
+  return (
+    <li className="flex flex-wrap items-start gap-x-3 gap-y-2 py-2.5 first:pt-0 last:pb-0">
+      {eligible ? (
+        <label className="mt-0.5 flex shrink-0 items-center gap-1.5 text-xs text-[var(--muted)]">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleRetry(row.jobId)}
+            aria-label={`Select ${row.title} at ${row.companyName} for retry`}
+          />
+          <span className="sr-only">Retry</span>
+        </label>
+      ) : (
+        <span className="mt-0.5 w-4 shrink-0" aria-hidden />
+      )}
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={row.postingUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="min-w-0 truncate text-sm font-medium text-[var(--foreground)] hover:text-[var(--accent)] hover:underline"
+          >
+            {row.title}
+          </a>
+          <span className={`pill text-[11px] ${toneClasses[tone]}`}>
+            <span className="pill-dot" />
+            {postingRowStatusText(row)}
+          </span>
+          {needsAttention(row) ? (
+            <span className="text-[11px] font-medium text-[var(--amber-ink)]">Needs attention</span>
+          ) : null}
+        </div>
+        <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{row.companyName}</p>
+        {row.reason ? (
+          <p className="mt-0.5 text-xs text-[var(--faint)]">{row.reason}</p>
+        ) : null}
+        {row.status === "completed" ? (
+          <EvidenceDisclosure evidence={row.evidence} reason={row.reason} />
+        ) : null}
+      </div>
+    </li>
+  );
+});
+
+export const RunPostingList = memo(function RunPostingList() {
   const { state, setFilter, toggleRetry, selectAllNeedingAttention } = useRunMonitor();
 
   const snapshot = state.displayed;
+  const rows = useMemo(() => visiblePostings(state), [state.displayed, state.filter]);
+  const attentionCount = useMemo(
+    () => (snapshot ? attentionPostings(snapshot).length : 0),
+    [snapshot],
+  );
+
   if (snapshot === null || snapshot.runType === "careerCheck") return null;
 
-  const rows = visiblePostings(state);
-  const attentionCount = attentionPostings(snapshot).length;
   const totalCount = snapshot.postings.length;
 
   return (
@@ -106,57 +169,16 @@ export function RunPostingList() {
         </p>
       ) : (
         <ul className="divide-y divide-[var(--border)]">
-          {rows.map((row) => {
-            const eligible = isRetryEligible(row);
-            const selected = state.retrySelection.has(row.jobId);
-            const tone = statusTone(row);
-            return (
-              <li key={row.jobId} className="flex flex-wrap items-start gap-x-3 gap-y-2 py-2.5 first:pt-0 last:pb-0">
-                {eligible ? (
-                  <label className="mt-0.5 flex shrink-0 items-center gap-1.5 text-xs text-[var(--muted)]">
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => toggleRetry(row.jobId)}
-                      aria-label={`Select ${row.title} at ${row.companyName} for retry`}
-                    />
-                    <span className="sr-only">Retry</span>
-                  </label>
-                ) : (
-                  <span className="mt-0.5 w-4 shrink-0" aria-hidden />
-                )}
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <a
-                      href={row.postingUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="min-w-0 truncate text-sm font-medium text-[var(--foreground)] hover:text-[var(--accent)] hover:underline"
-                    >
-                      {row.title}
-                    </a>
-                    <span className={`pill text-[11px] ${toneClasses[tone]}`}>
-                      <span className="pill-dot" />
-                      {postingRowStatusText(row)}
-                    </span>
-                    {needsAttention(row) ? (
-                      <span className="text-[11px] font-medium text-[var(--amber-ink)]">Needs attention</span>
-                    ) : null}
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-[var(--muted)]">{row.companyName}</p>
-                  {row.reason ? (
-                    <p className="mt-0.5 text-xs text-[var(--faint)]">{row.reason}</p>
-                  ) : null}
-                  {row.status === "completed" ? (
-                    <EvidenceDisclosure evidence={row.evidence} reason={row.reason} />
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
+          {rows.map((row) => (
+            <RunPostingRow
+              key={row.jobId}
+              row={row}
+              selected={state.retrySelection.has(row.jobId)}
+              onToggleRetry={toggleRetry}
+            />
+          ))}
         </ul>
       )}
     </div>
   );
-}
+});

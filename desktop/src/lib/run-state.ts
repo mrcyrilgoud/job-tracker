@@ -735,8 +735,11 @@ export function buildAnnouncements(
   };
   for (const p of s.postings) {
     if (p.status === "error") {
-      const reason = p.reason ? `: ${p.reason}` : "";
-      speak(postingErrorKey(s.runId, p.jobId), `Error checking ${p.title} at ${p.companyName}${reason}`);
+      const key = postingErrorKey(s.runId, p.jobId);
+      if (!next.announcedErrors.has(key)) {
+        const reason = p.reason ? `: ${p.reason}` : "";
+        speak(key, `Error checking ${p.title} at ${p.companyName}${reason}`);
+      }
     }
   }
   if (s.runStatus === "error") {
