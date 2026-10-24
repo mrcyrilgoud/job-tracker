@@ -639,26 +639,24 @@ pub fn list_jobs(conn: &Connection, filters: JobFilters) -> AppResult<Vec<JobLis
     // per-call cache and re-read on every call, so changing criteria re-filters
     // existing rows on the next listing without any re-sync (Req 8.4).
     if watch_path {
-        use crate::filtering::engine::{matches, JobView};
-        use crate::filtering::model::FilterCriteria;
+        use crate::filtering::engine::JobView;
         use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
         let aliases = load_alias_table(conn)?;
         let mut cache = CriteriaCache::new();
 
         out.retain(|item| {
-            let criteria = cache
-                .resolve(conn, &item.job.company_id, &item.job.source)
-                .unwrap_or_else(|_| FilterCriteria::match_all());
-            matches(
-                &criteria,
-                &aliases,
-                JobView {
-                    title: &item.job.title,
-                    location: item.job.location.as_deref(),
-                },
-            )
-            .included
+            let compiled =
+                cache.resolve_compiled(conn, &aliases, &item.job.company_id, &item.job.source);
+            compiled
+                .matches(
+                    &aliases,
+                    JobView {
+                        title: &item.job.title,
+                        location: item.job.location.as_deref(),
+                    },
+                )
+                .included
         });
 
         if let Some(lim) = filters.limit {
@@ -825,14 +823,14 @@ pub fn list_watch_roles_page(
     filters: WatchRoleFilters,
     cursor: Option<JobPageCursor>,
 ) -> AppResult<WatchRolePage> {
-    use crate::filtering::engine::{matches, JobView};
-    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::engine::JobView;
     use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
     let aliases = load_alias_table(conn)?;
     let mut criteria_cache = CriteriaCache::new();
     let mut scan_cursor = cursor;
     let mut matches_for_page = Vec::with_capacity(JOB_PAGE_SIZE + 1);
+    let mut scan_batch_size = JOB_PAGE_SIZE + 1;
 
     loop {
         let (mut where_sql, mut values) = watch_role_filter_sql(&filters);
@@ -842,7 +840,7 @@ pub fn list_watch_roles_page(
             values.push(Box::new(cursor.updated_at.clone()));
             values.push(Box::new(cursor.id.clone()));
         }
-        values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
+        values.push(Box::new(scan_batch_size as i64));
         let sql = format!(
             "SELECT j.id, j.company_id, j.title, j.url, j.status, j.posting_state,
                     j.source, j.location, j.is_new_from_watch, j.watch_disposition,
@@ -884,18 +882,21 @@ pub fn list_watch_roles_page(
             id: candidate.job.id.clone(),
         });
         for candidate in candidates {
-            let criteria = criteria_cache
-                .resolve(conn, &candidate.job.company_id, &candidate.job.source)
-                .unwrap_or_else(|_| FilterCriteria::match_all());
-            if matches(
-                &criteria,
+            let compiled = criteria_cache.resolve_compiled(
+                conn,
                 &aliases,
-                JobView {
-                    title: &candidate.job.title,
-                    location: candidate.job.location.as_deref(),
-                },
-            )
-            .included
+                &candidate.job.company_id,
+                &candidate.job.source,
+            );
+            if compiled
+                .matches(
+                    &aliases,
+                    JobView {
+                        title: &candidate.job.title,
+                        location: candidate.job.location.as_deref(),
+                    },
+                )
+                .included
             {
                 matches_for_page.push(candidate);
                 if matches_for_page.len() > JOB_PAGE_SIZE {
@@ -904,9 +905,10 @@ pub fn list_watch_roles_page(
             }
         }
 
-        if matches_for_page.len() > JOB_PAGE_SIZE || raw_count < JOB_PAGE_SIZE + 1 {
+        if matches_for_page.len() > JOB_PAGE_SIZE || raw_count < scan_batch_size {
             break;
         }
+        scan_batch_size = JOB_PAGE_SIZE * 4;
         scan_cursor = last_candidate_cursor;
     }
 
@@ -974,25 +976,23 @@ pub(crate) fn retain_watch_positions_matching_criteria(
     conn: &Connection,
     positions: &mut Vec<JobListItem>,
 ) -> AppResult<()> {
-    use crate::filtering::engine::{matches, JobView};
-    use crate::filtering::model::FilterCriteria;
+    use crate::filtering::engine::JobView;
     use crate::filtering::resolver::{load_alias_table, CriteriaCache};
 
     let aliases = load_alias_table(conn)?;
     let mut cache = CriteriaCache::new();
     positions.retain(|item| {
-        let criteria = cache
-            .resolve(conn, &item.job.company_id, &item.job.source)
-            .unwrap_or_else(|_| FilterCriteria::match_all());
-        matches(
-            &criteria,
-            &aliases,
-            JobView {
-                title: &item.job.title,
-                location: item.job.location.as_deref(),
-            },
-        )
-        .included
+        let compiled =
+            cache.resolve_compiled(conn, &aliases, &item.job.company_id, &item.job.source);
+        compiled
+            .matches(
+                &aliases,
+                JobView {
+                    title: &item.job.title,
+                    location: item.job.location.as_deref(),
+                },
+            )
+            .included
     });
     Ok(())
 }

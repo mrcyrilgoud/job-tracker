@@ -154,19 +154,27 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
         .collect::<Result<_, _>>()
         .map_err(map_sqlite)?;
 
+    let mut watches_by_company: HashMap<String, Vec<CompanyWatch>> = HashMap::new();
+    for watch in watches {
+        watches_by_company
+            .entry(watch.company_id.clone())
+            .or_default()
+            .push(watch);
+    }
+
+    let mut reviews_by_company: HashMap<String, Vec<CareersPageReview>> = HashMap::new();
+    for review in reviews {
+        reviews_by_company
+            .entry(review.company_id.clone())
+            .or_default()
+            .push(review);
+    }
+
     Ok(companies
         .into_iter()
         .map(|company| {
-            let company_watches: Vec<_> = watches
-                .iter()
-                .filter(|w| w.company_id == company.id)
-                .cloned()
-                .collect();
-            let company_reviews: Vec<_> = reviews
-                .iter()
-                .filter(|r| r.company_id == company.id)
-                .cloned()
-                .collect();
+            let company_watches = watches_by_company.remove(&company.id).unwrap_or_default();
+            let company_reviews = reviews_by_company.remove(&company.id).unwrap_or_default();
             let open_position_count = open_position_counts.get(&company.id).copied().unwrap_or(0);
             serde_json::json!({
                 "company": company,

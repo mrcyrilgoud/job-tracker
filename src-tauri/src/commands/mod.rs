@@ -14,7 +14,7 @@ use crate::companies;
 use crate::db::AppState;
 use crate::documents;
 use crate::error::{AppError, AppResult};
-use crate::filtering::engine::{matches as engine_matches, JobView};
+use crate::filtering::engine::{CompiledCriteria, JobView};
 use crate::filtering::model::FilterCriteria;
 use crate::filtering::resolver::{
     get_global_criteria, get_watch_criteria, load_alias_table, set_global_criteria,
@@ -1422,11 +1422,11 @@ pub async fn preview_filter_match(
 ) -> AppResult<Vec<PreviewOutcome>> {
     let conn = state.db.lock();
     let aliases = load_alias_table(&conn)?;
+    let compiled = CompiledCriteria::compile(&criteria, &aliases);
     let outcomes = samples
         .iter()
         .map(|sample| {
-            let result = engine_matches(
-                &criteria,
+            let result = compiled.matches(
                 &aliases,
                 JobView {
                     title: &sample.title,
@@ -1630,11 +1630,11 @@ mod filter_command_tests {
         let outcomes: Vec<PreviewOutcome> = state
             .with_db(|conn| {
                 let aliases = load_alias_table(conn)?;
+                let compiled = CompiledCriteria::compile(&criteria, &aliases);
                 Ok(samples
                     .iter()
                     .map(|(title, location)| {
-                        let result = engine_matches(
-                            &criteria,
+                        let result = compiled.matches(
                             &aliases,
                             JobView {
                                 title,

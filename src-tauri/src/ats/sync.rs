@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::ats::{list_jobs, AtsJob};
 use crate::companies::get_watch;
 use crate::error::{map_sqlite, AppError, AppResult};
-use crate::filtering::engine::{matches, JobView};
+use crate::filtering::engine::{CompiledCriteria, JobView};
 use crate::filtering::model::FilterCriteria;
 use crate::filtering::resolver::{load_alias_table, resolve_effective_criteria};
 use crate::util::{create_id, normalize_canonical_url, now_iso};
@@ -111,6 +111,7 @@ fn apply_watch_sync_inner(
     let criteria = resolve_effective_criteria(conn, &watch.company_id, &watch.provider)
         .unwrap_or_else(|_| FilterCriteria::match_all());
     let aliases = load_alias_table(conn)?;
+    let compiled_criteria = CompiledCriteria::compile(&criteria, &aliases);
 
     let mut created = 0usize;
     let mut reactivated = 0usize;
@@ -121,15 +122,15 @@ fn apply_watch_sync_inner(
         // Compute the inclusion hint for this remote role. This is a
         // non-destructive annotation only: every role is still stored
         // regardless of the result, and no job is ever deleted (Req 9.3, 9.4).
-        let included = matches(
-            &criteria,
-            &aliases,
-            JobView {
-                title: &remote.title,
-                location: remote.location.as_deref(),
-            },
-        )
-        .included;
+        let included = compiled_criteria
+            .matches(
+                &aliases,
+                JobView {
+                    title: &remote.title,
+                    location: remote.location.as_deref(),
+                },
+            )
+            .included;
         let included_int = i64::from(included);
         let by_external = existing_by_external_id
             .get(remote.external_id.as_str())
