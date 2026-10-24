@@ -17,6 +17,8 @@ pub use paths::{resolve_data_dir, DataPaths};
 /// Apply the standard SQLite settings and schema used by app database handles.
 pub(crate) fn configure_app_connection(conn: &Connection) -> AppResult<()> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.pragma_update(None, "busy_timeout", 5000i32)?;
     conn.pragma_update(None, "foreign_keys", true)?;
     migrate::migrate(conn)?;

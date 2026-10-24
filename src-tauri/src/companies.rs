@@ -23,7 +23,7 @@ fn map_watch(row: &rusqlite::Row<'_>) -> rusqlite::Result<CompanyWatch> {
 
 pub fn list_companies(conn: &Connection) -> AppResult<Vec<Company>> {
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id, name, careers_url, created_at, updated_at FROM companies ORDER BY name",
         )
         .map_err(map_sqlite)?;
@@ -112,7 +112,7 @@ pub fn insert_watch(
 pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_json::Value>> {
     let companies = list_companies(conn)?;
     let mut watches_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id, company_id, provider, board_slug, last_synced_at, consecutive_sync_failures, last_sync_error, created_at, updated_at FROM company_watches",
         )
         .map_err(map_sqlite)?;
@@ -123,7 +123,7 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
         .map_err(map_sqlite)?;
 
     let mut reviews_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id, company_id, previous_hash, current_hash, summary, status, created_at FROM careers_page_reviews WHERE status = 'pending' ORDER BY created_at DESC",
         )
         .map_err(map_sqlite)?;
@@ -144,7 +144,7 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
         .map_err(map_sqlite)?;
 
     let mut counts_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT company_id, COUNT(*) FROM jobs WHERE posting_state = 'active' AND source IN ('greenhouse', 'lever', 'ashby') GROUP BY company_id",
         )
         .map_err(map_sqlite)?;

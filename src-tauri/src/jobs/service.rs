@@ -706,7 +706,7 @@ pub fn list_jobs_page(
         jobs_page_order_by(sort_spec, applied_tab)
     );
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-    let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+    let mut stmt = conn.prepare_cached(&sql).map_err(map_sqlite)?;
     let rows = stmt
         .query_map(params_ref.as_slice(), |row| {
             let item = JobListSummary {
@@ -852,7 +852,7 @@ pub fn list_watch_roles_page(
         );
         let params_ref: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|value| value.as_ref()).collect();
-        let mut stmt = conn.prepare(&sql).map_err(map_sqlite)?;
+        let mut stmt = conn.prepare_cached(&sql).map_err(map_sqlite)?;
         let candidates = stmt
             .query_map(params_ref.as_slice(), |row| {
                 Ok(WatchRoleSummary {
@@ -999,7 +999,7 @@ pub(crate) fn retain_watch_positions_matching_criteria(
 
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
-        .prepare(&format!(
+        .prepare_cached(&format!(
             "SELECT {}, c.id, c.name, c.careers_url, c.created_at, c.updated_at
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
             job_cols(Some("j"))
@@ -1028,7 +1028,7 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
     };
 
     let mut events_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT id, job_id, type, note, occurred_at FROM job_events WHERE job_id = ?1 ORDER BY occurred_at DESC",
         )
         .map_err(map_sqlite)?;
@@ -1047,7 +1047,7 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
         .map_err(map_sqlite)?;
 
     let mut att_stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT jd.id, jd.job_id, jd.document_id, jd.kind, jd.used_at,
                     d.id, d.original_filename, d.stored_filename, d.mime_type, d.checksum, d.size_bytes, d.imported_at
              FROM job_documents jd INNER JOIN documents d ON jd.document_id = d.id
@@ -1529,7 +1529,7 @@ pub fn get_pipeline_counts(conn: &Connection) -> AppResult<HashMap<String, i64>>
     .collect();
 
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT status, COUNT(*) FROM jobs j \
              WHERE j.is_new_from_watch = 0 \
                AND (j.watch_disposition IS NULL OR j.watch_disposition != 'dismissed') \
@@ -1660,7 +1660,7 @@ pub fn get_weekly_activity(conn: &Connection) -> AppResult<WeeklyActivity> {
 
     let start_iso = start.with_timezone(&chrono::Utc).to_rfc3339();
     let mut stmt = conn
-        .prepare(
+        .prepare_cached(
             "SELECT occurred_at FROM job_events \
              WHERE occurred_at >= ?1 \
                AND type NOT IN ('discovered_from_watch', 'dismissed_from_watch', 'approved_from_watch')",

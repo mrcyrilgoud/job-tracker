@@ -515,6 +515,12 @@ fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
 
 fn open_csv_conn(db_path: &Path) -> AppResult<Connection> {
     let conn = Connection::open(db_path).map_err(map_sqlite)?;
+    conn.pragma_update(None, "journal_mode", "WAL")
+        .map_err(map_sqlite)?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(map_sqlite)?;
+    conn.pragma_update(None, "temp_store", "MEMORY")
+        .map_err(map_sqlite)?;
     conn.pragma_update(None, "busy_timeout", 5000i32)
         .map_err(map_sqlite)?;
     conn.pragma_update(None, "foreign_keys", true)

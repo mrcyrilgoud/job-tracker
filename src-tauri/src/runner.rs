@@ -24,6 +24,9 @@ pub(crate) fn open_runner_conn(paths: &DataPaths) -> AppResult<Connection> {
 pub(crate) fn open_runner_status_conn(paths: &DataPaths) -> AppResult<Connection> {
     paths.ensure_dirs()?;
     let conn = Connection::open(&paths.db_path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
     conn.pragma_update(None, "busy_timeout", 5000i32)?;
     conn.pragma_update(None, "foreign_keys", true)?;
     Ok(conn)

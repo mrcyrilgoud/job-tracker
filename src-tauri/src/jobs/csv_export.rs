@@ -170,6 +170,10 @@ pub(crate) fn open_csv_command_conn(db_path: &std::path::Path) -> AppResult<Conn
     let conn = Connection::open(db_path).map_err(|e| AppError::from(e.to_string()))?;
     conn.pragma_update(None, "journal_mode", "WAL")
         .map_err(|e| AppError::from(e.to_string()))?;
+    conn.pragma_update(None, "synchronous", "NORMAL")
+        .map_err(|e| AppError::from(e.to_string()))?;
+    conn.pragma_update(None, "temp_store", "MEMORY")
+        .map_err(|e| AppError::from(e.to_string()))?;
     conn.pragma_update(None, "busy_timeout", 5000i32)
         .map_err(|e| AppError::from(e.to_string()))?;
     conn.pragma_update(None, "foreign_keys", true)
