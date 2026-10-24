@@ -1,5 +1,5 @@
 import { formatDistanceToNow } from "date-fns";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
@@ -316,6 +316,17 @@ export function JobsPage() {
     loadJobs(appliedSearch, true, false, nextCursor);
   }, [nextCursor, loadingMore, loading, loadJobs, appliedSearch]);
 
+  const refreshDashboard = useCallback(async () => {
+    try {
+      const dashboardResult = await api.getJobsDashboard();
+      setCounts(dashboardResult.counts);
+      setActivity(dashboardResult.weeklyActivity);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load jobs";
+      reportRefreshFailed(message);
+    }
+  }, [reportRefreshFailed]);
+
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const searchText = appliedSearchRef.current;
     loadJobs(searchText, opts?.quiet ?? false, true);
@@ -363,7 +374,7 @@ export function JobsPage() {
 
   useEffect(() => onRunSettled(() => { void load({ quiet: true }); }), [load, onRunSettled]);
 
-  async function handleToggleFavorite(jobId: string) {
+  const handleToggleFavorite = useCallback(async (jobId: string) => {
     setTogglingFavId(jobId);
     // Optimistic UI update
     setJobs((prev) =>
@@ -398,14 +409,18 @@ export function JobsPage() {
     } finally {
       setTogglingFavId(null);
     }
-  }
+  }, [load]);
 
-  async function handleSetAppeal(jobId: string, appeal: number | null) {
-    const previous = jobs.find((item) => item.job.id === jobId)?.job.appeal ?? null;
+  const handleSetAppeal = useCallback(async (jobId: string, appeal: number | null) => {
+    let previous: number | null = null;
     setJobs((prev) =>
-      prev.map((item) =>
-        item.job.id === jobId ? { ...item, job: { ...item.job, appeal } } : item,
-      ),
+      prev.map((item) => {
+        if (item.job.id === jobId) {
+          previous = item.job.appeal ?? null;
+          return { ...item, job: { ...item.job, appeal } };
+        }
+        return item;
+      }),
     );
     try {
       const res = await api.updateJob(jobId, { appeal });
@@ -424,38 +439,88 @@ export function JobsPage() {
         ),
       );
     }
-  }
+  }, []);
 
-  async function handleUpdateStatus(jobId: string, nextStatus: JobStatus) {
+  const handleUpdateStatus = useCallback(async (jobId: string, nextStatus: JobStatus) => {
+    const archivedStatuses: readonly JobStatus[] = ["archived", "rejected", "withdrawn", "closed"];
+    const nextIsArchived = archivedStatuses.includes(nextStatus);
+    const keepInList = status
+      ? nextStatus === status
+      : isArchivedFilter
+        ? nextIsArchived
+        : !nextIsArchived;
+
     // Optimistic update
     setJobs((prev) =>
-      prev.map((item) =>
-        item.job.id === jobId ? { ...item, job: { ...item.job, status: nextStatus } } : item,
-      ),
+      keepInList
+        ? prev.map((item) =>
+            item.job.id === jobId ? { ...item, job: { ...item.job, status: nextStatus } } : item,
+          )
+        : prev.filter((item) => item.job.id !== jobId),
     );
     try {
-      await api.updateJob(jobId, { status: nextStatus });
-      await load({ quiet: true });
+      const res = await api.updateJob(jobId, { status: nextStatus });
+      if (keepInList) {
+        setJobs((prev) =>
+          prev.map((item) =>
+            item.job.id === jobId
+              ? {
+                  ...item,
+                  job: {
+                    ...item.job,
+                    status: res.detail.job.status,
+                    appliedAt: res.detail.job.appliedAt,
+                    updatedAt: res.detail.job.updatedAt,
+                  },
+                }
+              : item,
+          ),
+        );
+      }
+      await refreshDashboard();
     } catch (err) {
       await load({ quiet: true });
       setError(err instanceof Error ? err.message : "Failed to update job status");
     }
-  }
+  }, [isArchivedFilter, load, refreshDashboard, status]);
 
-  async function handleToggleArchive(jobId: string, currentStatus: JobStatus) {
+  const handleToggleArchive = useCallback(async (jobId: string, currentStatus: JobStatus) => {
     try {
-      if (currentStatus === "archived") {
-        await api.unarchiveJob(jobId);
-      } else {
-        await api.archiveJob(jobId);
-      }
-      await load({ quiet: true });
+      const res = currentStatus === "archived"
+        ? await api.unarchiveJob(jobId)
+        : await api.archiveJob(jobId);
+      const nextStatus = res.detail.job.status;
+      const archivedStatuses: readonly JobStatus[] = ["archived", "rejected", "withdrawn", "closed"];
+      const nextIsArchived = archivedStatuses.includes(nextStatus);
+      const keepInList = status
+        ? nextStatus === status
+        : isArchivedFilter
+          ? nextIsArchived
+          : !nextIsArchived;
+      setJobs((prev) =>
+        keepInList
+          ? prev.map((item) =>
+              item.job.id === jobId
+                ? {
+                    ...item,
+                    job: {
+                      ...item.job,
+                      status: nextStatus,
+                      appliedAt: res.detail.job.appliedAt,
+                      updatedAt: res.detail.job.updatedAt,
+                    },
+                  }
+                : item,
+            )
+          : prev.filter((item) => item.job.id !== jobId),
+      );
+      await refreshDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update archive status");
     }
-  }
+  }, [isArchivedFilter, refreshDashboard, status]);
 
-  function toggleJobSelection(jobId: string) {
+  const toggleJobSelection = useCallback((jobId: string) => {
     if (!selectionReady || bulkAction || deleting) return;
     setSelectedJobIds((current) => {
       const next = new Set(current);
@@ -463,7 +528,7 @@ export function JobsPage() {
       else next.add(jobId);
       return next;
     });
-  }
+  }, [bulkAction, deleting, selectionReady]);
 
   function toggleAllVisibleJobs() {
     if (!selectionReady || selectingAll || bulkAction || deleting) return;
@@ -516,9 +581,9 @@ export function JobsPage() {
     }
   }
 
-  function requestDeleteJob(job: { id: string; title: string; companyName: string }) {
+  const requestDeleteJob = useCallback((job: { id: string; title: string; companyName: string }) => {
     setDeleteConfirmation({ ids: [job.id], job, isBulk: false });
-  }
+  }, []);
 
   function requestDeleteSelectedJobs() {
     const ids = [...selectedJobIds];
@@ -540,8 +605,12 @@ export function JobsPage() {
       const deletedIds = new Set(confirmation.ids);
       setJobs((prev) => prev.filter((item) => !deletedIds.has(item.job.id)));
       setDeleteConfirmation(null);
-      if (confirmation.isBulk) setSelectedJobIds(new Set());
-      await load({ quiet: true });
+      if (confirmation.isBulk) {
+        setSelectedJobIds(new Set());
+        await load({ quiet: true });
+      } else {
+        await refreshDashboard();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete selected postings");
     } finally {
@@ -1230,127 +1299,21 @@ export function JobsPage() {
             />
           ) : (
             <ul className="space-y-3">
-              {jobs.map(({ job, companyName }) => {
-                const statusInfo = jobStatusPresentation(job.status);
-                const postingInfo = postingStateMatters(job.status)
-                      ? postingStatePresentation(job.postingState, job.lastCheckedAt)
-                  : null;
-                const source = jobSourceLabel(job.source);
-                const StageIcon = statusIcons[job.status];
-                const selected = selectedJobIds.has(job.id);
-                return (
-                  <li
-                    key={job.id}
-                    className={`archived-selection-row relative ${selected ? "is-selected" : ""}`}
-                  >
-                    <Link
-                      to={`/jobs/${job.id}`}
-                      className={`card group block p-5 hover:shadow-[var(--shadow-md)] ${
-                        isArchivedFilter ? "archived-job-card pl-12" : ""
-                      } ${selected ? "is-selected" : ""}`}
-                    >
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`pill ${toneClasses[statusInfo.tone]}`}>
-                              <StageIcon size={12} />
-                              {statusInfo.label}
-                            </span>
-                            {postingInfo ? (
-                              <span className={`pill ${toneClasses[postingInfo.tone]}`}>
-                                <span className="pill-dot" />
-                                {postingInfo.label}
-                              </span>
-                            ) : null}
-                            {job.isNewFromWatch ? (
-                              <span className="pill bg-[var(--accent-soft)] text-[var(--accent-ink)]">
-                                New
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="font-display text-lg font-medium leading-snug">{job.title}</p>
-                          <p className="text-sm text-[var(--muted)]">
-                            {companyName}
-                            {job.appliedAt
-                              ? ` · Applied ${formatDistanceToNow(new Date(job.appliedAt), {
-                                  addSuffix: true,
-                                })}`
-                              : ""}
-                          </p>
-                          {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
-                          <div
-                            className="flex items-center gap-1.5"
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                          >
-                            <label
-                              htmlFor={`appeal-${job.id}`}
-                              className="text-xs text-[var(--faint)]"
-                              title={APPEAL_SCALE_LABEL}
-                            >
-                              Appeal
-                            </label>
-                            <AppealSelect
-                              id={`appeal-${job.id}`}
-                              value={job.appeal}
-                              compact
-                              onChange={(appeal) => void handleSetAppeal(job.id, appeal)}
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              void handleToggleArchive(job.id, job.status);
-                            }}
-                            className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--accent)] transition-colors"
-                            title={job.status === "archived" ? "Restore to active" : "Archive role"}
-                          >
-                            <ArchiveIcon size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              requestDeleteJob({ id: job.id, title: job.title, companyName });
-                            }}
-                            className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] transition-colors"
-                            title="Delete role"
-                          >
-                            <TrashIcon size={16} />
-                          </button>
-                          <FavoriteButton
-                            isFavorite={job.isFavorite}
-                            onToggle={() => handleToggleFavorite(job.id)}
-                            disabled={togglingFavId === job.id}
-                          />
-                          <p className="text-xs text-[var(--faint)] ml-1">
-                            Updated{" "}
-                            {formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}
-                          </p>
-                        </div>
-                      </div>
-                    </Link>
-                    {isArchivedFilter ? (
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        disabled={!selectionReady || bulkAction !== null || deleting}
-                        onChange={() => toggleJobSelection(job.id)}
-                        aria-label={`Select ${job.title} at ${companyName}`}
-                        className="archived-selection-checkbox absolute left-5 top-6 z-10 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
-                      />
-                    ) : null}
-                  </li>
-                );
-              })}
+              {jobs.map((item) => (
+                <JobListRow
+                  key={item.job.id}
+                  item={item}
+                  isArchivedFilter={isArchivedFilter}
+                  selected={selectedJobIds.has(item.job.id)}
+                  selectionDisabled={!selectionReady || bulkAction !== null || deleting}
+                  togglingFavorite={togglingFavId === item.job.id}
+                  onSetAppeal={handleSetAppeal}
+                  onToggleArchive={handleToggleArchive}
+                  onRequestDelete={requestDeleteJob}
+                  onToggleFavorite={handleToggleFavorite}
+                  onToggleSelect={toggleJobSelection}
+                />
+              ))}
             </ul>
           )}
           {nextCursor ? (
@@ -1435,6 +1398,148 @@ export function JobsPage() {
     </>
   );
 }
+
+const JobListRow = memo(function JobListRow({
+  item,
+  isArchivedFilter,
+  selected,
+  selectionDisabled,
+  togglingFavorite,
+  onSetAppeal,
+  onToggleArchive,
+  onRequestDelete,
+  onToggleFavorite,
+  onToggleSelect,
+}: {
+  item: JobListSummary;
+  isArchivedFilter: boolean;
+  selected: boolean;
+  selectionDisabled: boolean;
+  togglingFavorite: boolean;
+  onSetAppeal: (jobId: string, appeal: number | null) => Promise<void>;
+  onToggleArchive: (jobId: string, currentStatus: JobStatus) => Promise<void>;
+  onRequestDelete: (job: { id: string; title: string; companyName: string }) => void;
+  onToggleFavorite: (jobId: string) => Promise<void>;
+  onToggleSelect: (jobId: string) => void;
+}) {
+  const { job, companyName } = item;
+  const statusInfo = jobStatusPresentation(job.status);
+  const postingInfo = postingStateMatters(job.status)
+    ? postingStatePresentation(job.postingState, job.lastCheckedAt)
+    : null;
+  const source = jobSourceLabel(job.source);
+  const StageIcon = statusIcons[job.status];
+
+  return (
+    <li className={`archived-selection-row relative ${selected ? "is-selected" : ""}`}>
+      <Link
+        to={`/jobs/${job.id}`}
+        className={`card group block p-5 hover:shadow-[var(--shadow-md)] ${
+          isArchivedFilter ? "archived-job-card pl-12" : ""
+        } ${selected ? "is-selected" : ""}`}
+      >
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`pill ${toneClasses[statusInfo.tone]}`}>
+                <StageIcon size={12} />
+                {statusInfo.label}
+              </span>
+              {postingInfo ? (
+                <span className={`pill ${toneClasses[postingInfo.tone]}`}>
+                  <span className="pill-dot" />
+                  {postingInfo.label}
+                </span>
+              ) : null}
+              {job.isNewFromWatch ? (
+                <span className="pill bg-[var(--accent-soft)] text-[var(--accent-ink)]">
+                  New
+                </span>
+              ) : null}
+            </div>
+            <p className="font-display text-lg font-medium leading-snug">{job.title}</p>
+            <p className="text-sm text-[var(--muted)]">
+              {companyName}
+              {job.appliedAt
+                ? ` · Applied ${formatDistanceToNow(new Date(job.appliedAt), {
+                    addSuffix: true,
+                  })}`
+                : ""}
+            </p>
+            {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+            <div
+              className="flex items-center gap-1.5"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+            >
+              <label
+                htmlFor={`appeal-${job.id}`}
+                className="text-xs text-[var(--faint)]"
+                title={APPEAL_SCALE_LABEL}
+              >
+                Appeal
+              </label>
+              <AppealSelect
+                id={`appeal-${job.id}`}
+                value={job.appeal}
+                compact
+                onChange={(appeal) => void onSetAppeal(job.id, appeal)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                void onToggleArchive(job.id, job.status);
+              }}
+              className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--accent)] transition-colors"
+              title={job.status === "archived" ? "Restore to active" : "Archive role"}
+            >
+              <ArchiveIcon size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRequestDelete({ id: job.id, title: job.title, companyName });
+              }}
+              className="rounded-lg p-1.5 text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] transition-colors"
+              title="Delete role"
+            >
+              <TrashIcon size={16} />
+            </button>
+            <FavoriteButton
+              isFavorite={job.isFavorite}
+              onToggle={() => void onToggleFavorite(job.id)}
+              disabled={togglingFavorite}
+            />
+            <p className="text-xs text-[var(--faint)] ml-1">
+              Updated{" "}
+              {formatDistanceToNow(new Date(job.updatedAt), { addSuffix: true })}
+            </p>
+          </div>
+        </div>
+      </Link>
+      {isArchivedFilter ? (
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={selectionDisabled}
+          onChange={() => onToggleSelect(job.id)}
+          aria-label={`Select ${job.title} at ${companyName}`}
+          className="archived-selection-checkbox absolute left-5 top-6 z-10 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-wait"
+        />
+      ) : null}
+    </li>
+  );
+});
 
 function ActivityLine({ activity }: { activity: WeeklyActivity }) {
   const peak = Math.max(1, ...activity.days.map((day) => day.count));
