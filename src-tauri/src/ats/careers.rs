@@ -61,24 +61,44 @@ pub fn apply_careers_check(
     content_hash: &str,
     normalized_text: &str,
 ) -> AppResult<serde_json::Value> {
-    let previous: Option<(String, String)> = conn
+    let previous: Option<(String, String, String)> = conn
         .query_row(
-            "SELECT content_hash, captured_at FROM careers_page_snapshots WHERE company_id = ?1 ORDER BY captured_at DESC LIMIT 1",
+            "SELECT id, content_hash, captured_at FROM careers_page_snapshots WHERE company_id = ?1 ORDER BY captured_at DESC, id DESC LIMIT 1",
             params![company_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(map_sqlite)?;
 
     let captured_at = now_iso();
+    if let Some((prev_id, prev_hash, _)) = &previous {
+        if prev_hash == content_hash {
+            conn.execute(
+                "UPDATE careers_page_snapshots SET captured_at = ?1 WHERE id = ?2",
+                params![captured_at, prev_id],
+            )
+            .map_err(map_sqlite)?;
+            return Ok(serde_json::json!({
+                "changed": false,
+                "reason": "No change detected"
+            }));
+        }
+    }
+
+    let snapshot_id = create_id();
     let text_slice: String = normalized_text.chars().take(20_000).collect();
     conn.execute(
         "INSERT INTO careers_page_snapshots (id, company_id, content_hash, normalized_text, captured_at) VALUES (?1,?2,?3,?4,?5)",
-        params![create_id(), company_id, content_hash, text_slice, captured_at],
+        params![snapshot_id, company_id, content_hash, text_slice, captured_at],
+    )
+    .map_err(map_sqlite)?;
+    conn.execute(
+        "DELETE FROM careers_page_snapshots WHERE company_id = ?1 AND id != ?2",
+        params![company_id, snapshot_id],
     )
     .map_err(map_sqlite)?;
 
-    let Some((prev_hash, _)) = previous else {
+    let Some((_, prev_hash, _)) = previous else {
         return Ok(serde_json::json!({
             "changed": false,
             "reason": "Initial snapshot captured"
@@ -91,13 +111,6 @@ pub fn apply_careers_check(
         return Ok(serde_json::json!({
             "changed": false,
             "reason": "Careers content baseline refreshed"
-        }));
-    }
-
-    if prev_hash == content_hash {
-        return Ok(serde_json::json!({
-            "changed": false,
-            "reason": "No change detected"
         }));
     }
 
@@ -173,6 +186,48 @@ mod tests {
             })
             .unwrap();
         assert_eq!(reviews, 0);
+    }
+
+    #[test]
+    fn unchanged_and_updated_checks_keep_single_snapshot_per_company() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES ('company', 'Acme', NULL, 'now', 'now')",
+            [],
+        )
+        .unwrap();
+
+        let initial =
+            apply_careers_check(&conn, "company", "Acme", "v2:hash-1", "initial text").unwrap();
+        assert_eq!(initial["changed"], false);
+
+        let unchanged =
+            apply_careers_check(&conn, "company", "Acme", "v2:hash-1", "initial text").unwrap();
+        assert_eq!(unchanged["changed"], false);
+        assert_eq!(unchanged["reason"], "No change detected");
+
+        let count_after_unchanged: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM careers_page_snapshots WHERE company_id = 'company'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after_unchanged, 1);
+
+        let changed =
+            apply_careers_check(&conn, "company", "Acme", "v2:hash-2", "updated text").unwrap();
+        assert_eq!(changed["changed"], true);
+
+        let count_after_change: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM careers_page_snapshots WHERE company_id = 'company'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after_change, 1);
     }
 }
 

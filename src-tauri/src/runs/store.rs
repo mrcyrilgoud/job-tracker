@@ -1664,6 +1664,19 @@ pub fn prune_history(
             )
             .map_err(map_sqlite)?;
 
+        c.execute(
+            "DELETE FROM careers_page_snapshots WHERE id IN (
+               SELECT id FROM (
+                 SELECT id,
+                   ROW_NUMBER() OVER (PARTITION BY company_id ORDER BY captured_at DESC, id DESC) AS rn
+                 FROM careers_page_snapshots
+               )
+               WHERE rn > 1
+             )",
+            [],
+        )
+        .map_err(map_sqlite)?;
+
         Ok(report)
     })
 }
