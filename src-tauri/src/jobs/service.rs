@@ -1128,6 +1128,15 @@ pub fn update_job(
     job_id: &str,
     updates: UpdateJobInput,
 ) -> AppResult<JobDetail> {
+    update_job_row(conn, job_id, updates)?;
+    get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
+}
+
+pub(crate) fn update_job_row(
+    conn: &Connection,
+    job_id: &str,
+    updates: UpdateJobInput,
+) -> AppResult<()> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
     let timestamp = now_iso();
     let mut company_id = existing.company_id.clone();
@@ -1298,7 +1307,7 @@ pub fn update_job(
         delete_untracked_empty_company(conn, &existing.company_id)?;
     }
 
-    get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
+    Ok(())
 }
 
 /// Permanently delete a job and its associated events and attachments from SQLite.
@@ -1366,6 +1375,15 @@ pub fn unarchive_job(
     job_id: &str,
     target_status: Option<&str>,
 ) -> AppResult<JobDetail> {
+    unarchive_job_row(conn, job_id, target_status)?;
+    get_job_detail(conn, job_id)?.ok_or_else(|| AppError::from("Job not found after update"))
+}
+
+fn unarchive_job_row(
+    conn: &Connection,
+    job_id: &str,
+    target_status: Option<&str>,
+) -> AppResult<()> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
     let next_status = target_status
         .filter(|s| is_job_status(s) && *s != "archived")
@@ -1376,7 +1394,7 @@ pub fn unarchive_job(
                 "wishlist"
             }
         });
-    update_job(
+    update_job_row(
         conn,
         job_id,
         UpdateJobInput {
@@ -1393,7 +1411,7 @@ pub fn unarchive_jobs(conn: &Connection, job_ids: &[String]) -> AppResult<usize>
     let mut restored = 0;
     for job_id in job_ids {
         if seen.insert(job_id.as_str()) {
-            unarchive_job(conn, job_id, None)?;
+            unarchive_job_row(conn, job_id, None)?;
             restored += 1;
         }
     }
