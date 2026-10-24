@@ -69,3 +69,11 @@ Do **not** pass `-f` / `--favorite` unless the human explicitly asked to favorit
 - GUI path is Tauri `invoke` only (`desktop/src/lib/api.ts`); agents should not try to drive the WebView
 
 Handlers live in `src-tauri/src/cli/` and call the same services as Tauri IPC, so CLI mutations also refresh the CSV mirror.
+
+## Cursor Cloud specific instructions
+
+Cloud agents run this repo on Linux. The environment install provides Tauri’s WebKitGTK packages and a Rust stable new enough to compile `src-tauri/Cargo.lock`. The default image’s Rust 1.83 stops on `edition2024` (for example `serde_spanned` 1.1.1). `Cargo.toml` `rust-version` is only a minimum and is older than what the lockfile needs.
+
+- UI: `npm run tauri:dev` (needs a display). A browser tab at `http://localhost:1420/` only shows the “Open the desktop app” notice. Set `DISPLAY` and start a session bus with `dbus-launch` before the GUI. If the WebKit window is blank and the log mentions DRI3, set `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+- CLI: `npm run cli -- --data-dir <dir> <command> --json`. Debug builds use repo `data/` when that directory exists. Packaged `jt`, the LaunchAgent, and `~/Library/Application Support/com.jobtracker.local` are macOS-only.
+- Checks: `npm test`, `npm run test:desktop`, `npm run desktop:build`. On Node 22 / ICU 78, three Vitest assertions fail because `formatAnnualSalaryRange` renders `$120.0k` where the tests expect `$120k` (`maximumFractionDigits: 1` keeps a trailing zero). Rust tests and the Vite production build are the compile signal.
