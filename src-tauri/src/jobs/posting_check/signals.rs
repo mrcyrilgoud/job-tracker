@@ -337,8 +337,8 @@ impl PageFacts {
     fn parse(html: &str, requested: &Url, final_url: &Url) -> Self {
         let doc = Html::parse_document(html);
 
-        let title = first_text(&doc, "title");
-        let h1 = first_text(&doc, "h1");
+        let title = first_text(&doc, sel_title());
+        let h1 = first_text(&doc, sel_h1());
         let og_title = meta_content(&doc, "og:title");
         let og_site_name = meta_content(&doc, "og:site_name");
 
@@ -355,7 +355,7 @@ impl PageFacts {
         };
 
         let (apply_enabled, apply_disabled) = apply_controls(&doc);
-        let has_password_input = doc.select(&sel("input")).any(|el| {
+        let has_password_input = doc.select(sel_input()).any(|el| {
             el.value()
                 .attr("type")
                 .is_some_and(|t| t.trim().eq_ignore_ascii_case("password"))
@@ -383,12 +383,51 @@ impl PageFacts {
     }
 }
 
-fn sel(css: &str) -> Selector {
-    Selector::parse(css).expect("static selector must parse")
+fn sel_title() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("title").expect("static selector must parse"))
 }
 
-fn first_text(doc: &Html, css: &str) -> String {
-    doc.select(&sel(css))
+fn sel_h1() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("h1").expect("static selector must parse"))
+}
+
+fn sel_meta() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("meta").expect("static selector must parse"))
+}
+
+fn sel_script_type() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("script[type]").expect("static selector must parse"))
+}
+
+fn sel_input() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("input").expect("static selector must parse"))
+}
+
+fn sel_apply_candidates() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("a, button, input").expect("static selector must parse"))
+}
+
+fn sel_apply_forms() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| {
+        Selector::parse("#application_form, #application-form, form[action*=\"apply\"]")
+            .expect("static selector must parse")
+    })
+}
+
+fn sel_anchor_href() -> &'static Selector {
+    static SEL: std::sync::OnceLock<Selector> = std::sync::OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("a[href]").expect("static selector must parse"))
+}
+
+fn first_text(doc: &Html, selector: &Selector) -> String {
+    doc.select(selector)
         .next()
         .map(|el| norm(&el.text().collect::<String>()))
         .unwrap_or_default()
@@ -396,7 +435,7 @@ fn first_text(doc: &Html, css: &str) -> String {
 
 /// Content of the first `<meta property=key>` or `<meta name=key>`, normalized.
 fn meta_content(doc: &Html, key: &str) -> String {
-    doc.select(&sel("meta"))
+    doc.select(sel_meta())
         .find_map(|el| {
             let v = el.value();
             let matches = v
@@ -412,7 +451,7 @@ fn meta_content(doc: &Html, key: &str) -> String {
 /// Every JSON-LD `JobPosting` object on the page.
 fn json_ld_job_postings(doc: &Html) -> Vec<serde_json::Map<String, Value>> {
     let mut out = Vec::new();
-    for el in doc.select(&sel("script[type]")) {
+    for el in doc.select(sel_script_type()) {
         let is_ld = el.value().attr("type").is_some_and(|t| {
             t.trim()
                 .to_ascii_lowercase()
@@ -475,21 +514,25 @@ fn hiring_org_names(posting: &serde_json::Map<String, Value>) -> Vec<String> {
 
 /// Text of every text node outside `script`, `style`, `noscript`, and `template`.
 fn visible_text(doc: &Html) -> String {
-    let mut out = String::new();
-    for node in doc.root_element().descendants() {
-        let Some(text) = node.value().as_text() else {
-            continue;
-        };
-        let hidden = node.ancestors().any(|a| {
-            a.value()
-                .as_element()
-                .is_some_and(|e| matches!(e.name(), "script" | "style" | "noscript" | "template"))
-        });
-        if !hidden {
-            out.push_str(text);
-            out.push(' ');
+    fn collect_visible(element: ElementRef<'_>, out: &mut String) {
+        if matches!(
+            element.value().name(),
+            "script" | "style" | "noscript" | "template"
+        ) {
+            return;
+        }
+        for child in element.children() {
+            if let Some(text) = child.value().as_text() {
+                out.push_str(text);
+                out.push(' ');
+            } else if let Some(child_el) = ElementRef::wrap(child) {
+                collect_visible(child_el, out);
+            }
         }
     }
+
+    let mut out = String::new();
+    collect_visible(doc.root_element(), &mut out);
     out
 }
 
@@ -508,7 +551,7 @@ fn apply_controls(doc: &Html) -> (bool, bool) {
         }
     };
 
-    for el in doc.select(&sel("a, button, input")) {
+    for el in doc.select(sel_apply_candidates()) {
         let v = el.value();
         let is_candidate = match v.name() {
             "input" => v
@@ -535,9 +578,7 @@ fn apply_controls(doc: &Html) -> (bool, bool) {
         }
     }
 
-    for el in doc.select(&sel(
-        "#application_form, #application-form, form[action*=\"apply\"]",
-    )) {
+    for el in doc.select(sel_apply_forms()) {
         record(el);
     }
 
@@ -783,7 +824,7 @@ fn job_detail_link_count(doc: &Html, requested: &Url, final_url: &Url) -> usize 
         .into_iter()
         .filter_map(job_detail_key)
         .collect();
-    doc.select(&sel("a[href]"))
+    doc.select(sel_anchor_href())
         .filter_map(|a| a.value().attr("href"))
         .filter_map(|href| final_url.join(href.trim()).ok())
         .filter_map(|u| job_detail_key(&u))

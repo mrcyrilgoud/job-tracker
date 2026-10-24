@@ -1,3 +1,6 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
@@ -8,27 +11,36 @@ use crate::util::{create_id, now_iso};
 const CAREERS_HASH_VERSION: &str = "v2:";
 
 fn normalize_careers_text(html: &str) -> String {
-    let no_script = regex::Regex::new(r"(?is)<script[\s\S]*?</script>")
-        .unwrap()
+    static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
+    static STYLE_RE: OnceLock<Regex> = OnceLock::new();
+    static MAIN_RE: OnceLock<Regex> = OnceLock::new();
+    static CHROME_RE: OnceLock<Regex> = OnceLock::new();
+    static TAGS_RE: OnceLock<Regex> = OnceLock::new();
+
+    let no_script = SCRIPT_RE
+        .get_or_init(|| Regex::new(r"(?is)<script[\s\S]*?</script>").unwrap())
         .replace_all(html, " ");
-    let no_style = regex::Regex::new(r"(?is)<style[\s\S]*?</style>")
-        .unwrap()
+    let no_style = STYLE_RE
+        .get_or_init(|| Regex::new(r"(?is)<style[\s\S]*?</style>").unwrap())
         .replace_all(&no_script, " ");
     // A main region is the strongest signal that the page is describing the
     // employer's careers content. Many marketing sites do not use one, so
     // fall back to the document after removing common site chrome.
-    let main = regex::Regex::new(r"(?is)<main\b[^>]*>(.*?)</main>")
-        .unwrap()
+    let main = MAIN_RE
+        .get_or_init(|| Regex::new(r"(?is)<main\b[^>]*>(.*?)</main>").unwrap())
         .captures(&no_style)
         .and_then(|captures| captures.get(1).map(|content| content.as_str()))
         .unwrap_or(&no_style);
-    let without_chrome = regex::Regex::new(
-        r"(?is)<nav\b[^>]*>.*?</nav>|<header\b[^>]*>.*?</header>|<footer\b[^>]*>.*?</footer>|<aside\b[^>]*>.*?</aside>",
-    )
-    .unwrap()
-    .replace_all(main, " ");
-    let no_tags = regex::Regex::new(r"(?is)<[^>]+>")
-        .unwrap()
+    let without_chrome = CHROME_RE
+        .get_or_init(|| {
+            Regex::new(
+                r"(?is)<nav\b[^>]*>.*?</nav>|<header\b[^>]*>.*?</header>|<footer\b[^>]*>.*?</footer>|<aside\b[^>]*>.*?</aside>",
+            )
+            .unwrap()
+        })
+        .replace_all(main, " ");
+    let no_tags = TAGS_RE
+        .get_or_init(|| Regex::new(r"(?is)<[^>]+>").unwrap())
         .replace_all(&without_chrome, " ");
     no_tags
         .split_whitespace()

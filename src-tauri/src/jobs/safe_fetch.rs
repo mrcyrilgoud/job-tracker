@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dns_lookup::lookup_host;
+use parking_lot::Mutex;
 use reqwest::header::HeaderMap;
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, StatusCode};
@@ -172,6 +174,9 @@ where
 }
 
 async fn assert_public_hostname(hostname: &str) -> Result<(), HostCheckError> {
+    const PUBLIC_HOST_TTL: Duration = Duration::from_secs(60);
+    static PUBLIC_HOST_CACHE: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+
     if hostname == "localhost" || hostname.ends_with(".local") {
         return Err(HostCheckError::new(
             FetchErrorKind::BlockedDestination,
@@ -189,8 +194,27 @@ async fn assert_public_hostname(hostname: &str) -> Result<(), HostCheckError> {
         return Ok(());
     }
 
+    let cache = PUBLIC_HOST_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let host_key = hostname.to_ascii_lowercase();
+    {
+        let guard = cache.lock();
+        if let Some(verified_at) = guard.get(&host_key) {
+            if verified_at.elapsed() < PUBLIC_HOST_TTL {
+                return Ok(());
+            }
+        }
+    }
+
     let owned = hostname.to_string();
-    resolve_public_with(move || lookup_host(&owned), DNS_TIMEOUT).await
+    resolve_public_with(move || lookup_host(&owned), DNS_TIMEOUT).await?;
+    {
+        let mut guard = cache.lock();
+        if guard.len() > 256 {
+            guard.retain(|_, ts| ts.elapsed() < PUBLIC_HOST_TTL);
+        }
+        guard.insert(host_key, Instant::now());
+    }
+    Ok(())
 }
 
 /// Keeps only allowlisted signal headers with UTF-8 values, lowercased names, and values

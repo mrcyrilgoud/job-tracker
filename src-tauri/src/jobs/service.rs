@@ -104,7 +104,7 @@ pub async fn resolve_title_from_url(url: &str, title: Option<&str>) -> String {
     title_from_metadata(url, metadata.as_ref())
 }
 
-fn title_from_metadata(url: &str, metadata: Option<&JobMetadata>) -> String {
+pub(crate) fn title_from_metadata(url: &str, metadata: Option<&JobMetadata>) -> String {
     metadata
         .and_then(|metadata| metadata.title.clone())
         .unwrap_or_else(|| guess_title_from_url(url))
