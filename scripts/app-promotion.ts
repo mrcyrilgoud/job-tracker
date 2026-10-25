@@ -1,4 +1,18 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+
+
+function copyAppBundle(source: string, destination: string): void {
+  // ditto preserves macOS bundle metadata better than a plain recursive copy.
+  if (process.platform === "darwin") {
+    const result = spawnSync("ditto", [source, destination], { encoding: "utf8" });
+    if (result.status !== 0) {
+      throw new Error(`Could not stage app bundle: ${(result.stderr || result.stdout || "ditto failed").trim()}`);
+    }
+    return;
+  }
+  fs.cpSync(source, destination, { recursive: true, errorOnExist: true, force: false });
+}
 
 export interface AppPromotionOptions {
   sourceBundle: string;
@@ -29,7 +43,7 @@ export function promoteAppBundle(options: AppPromotionOptions): void {
   let oldAppMoved = false;
   let newAppInstalled = false;
   try {
-    fs.cpSync(options.sourceBundle, stage, { recursive: true, errorOnExist: true, force: false });
+    copyAppBundle(options.sourceBundle, stage);
     if (options.hashExecutable(stage) !== sourceHash) {
       throw new Error("Source and staged app executable hashes do not match.");
     }

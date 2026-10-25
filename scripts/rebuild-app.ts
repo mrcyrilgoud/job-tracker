@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { promoteAppBundle } from "./app-promotion";
+import { resignAdhocAndVerify } from "./codesign-app";
 import {
   acquireDirectoryLock,
   assertCheckoutUnchanged,
@@ -163,10 +164,8 @@ function executableHash(bundle: string): string {
 }
 
 function verifySignature(bundle: string): void {
-  const result = spawnSync("codesign", ["--verify", "--deep", "--strict", bundle], { encoding: "utf8" });
-  if (result.status !== 0) {
-    throw new Error(`Code signature verification failed: ${(result.stderr || result.stdout || "codesign failed").trim()}`);
-  }
+  // Tauri's ad-hoc signature can claim sealed resources without writing them.
+  resignAdhocAndVerify(bundle);
 }
 
 function verifyCli(bundle: string): void {
