@@ -100,9 +100,11 @@ pub enum Commands {
 pub struct ListArgs {
     #[arg(
         long,
-        help = "Filter by status (e.g. wishlist, applied, interviewing, offer, rejected, withdrawn, closed)"
+        value_delimiter = ',',
+        num_args = 1..,
+        help = "Filter by one or more statuses; repeat --status or comma-separate (e.g. wishlist, applied, interviewing, offer, rejected, withdrawn, closed, archived)"
     )]
-    pub status: Option<String>,
+    pub status: Vec<String>,
 
     #[arg(short = 'c', long, help = "Filter by company name or ID")]
     pub company: Option<String>,
@@ -116,6 +118,18 @@ pub struct ListArgs {
 
     #[arg(short = 'l', long, help = "Filter by location")]
     pub location: Option<String>,
+
+    #[arg(long, help = "Date field: appliedAt | postingDate | lastCheckedAt")]
+    pub date_field: Option<String>,
+
+    #[arg(long, help = "Start date YYYY-MM-DD (inclusive)")]
+    pub date_from: Option<String>,
+
+    #[arg(long, help = "End date YYYY-MM-DD (inclusive)")]
+    pub date_to: Option<String>,
+
+    #[arg(long, help = "Remote mode: any | remoteOnly | onsiteOnly")]
+    pub remote: Option<String>,
 
     #[arg(short = 'f', long, help = "Show only favorite jobs")]
     pub favorites: bool,

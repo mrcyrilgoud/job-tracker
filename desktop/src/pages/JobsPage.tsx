@@ -29,10 +29,17 @@ import {
   jobListSortFromUrl,
 } from "@/lib/job-list-sort";
 import {
+  countActiveFilterDimensions,
+  encodeStatusesToUrl,
   filterCompaniesBySearch,
   filterDraftFromUrl,
+  parseDateFilterFromUrl,
+  parseRemoteModeFromUrl,
   parseSalaryBound,
+  parseStatusesFromUrl,
+  validateDateRange,
   validateSalaryRange,
+  type DateField,
 } from "@/lib/job-filters";
 import {
   jobStatuses,
@@ -43,6 +50,7 @@ import {
   type JobListSortDirection,
   type JobSort,
   type JobStatus,
+  type RemoteMode,
   type WeeklyActivity,
 } from "@/lib/schema";
 import { useRunMonitorActions } from "@/lib/RunMonitorContext";
@@ -77,6 +85,34 @@ export function JobsPage() {
   const salaryMaxParam = searchParams.get("salaryMax");
   const salaryMin = parseSalaryBound(salaryMinParam);
   const salaryMax = parseSalaryBound(salaryMaxParam);
+  const statusesParam = searchParams.get("statuses");
+  const dateFieldParam = searchParams.get("dateField");
+  const dateFromParam = searchParams.get("dateFrom");
+  const dateToParam = searchParams.get("dateTo");
+  const locationParam = searchParams.get("location");
+  const remoteParam = searchParams.get("remote");
+  const activeStatuses = useMemo(() => parseStatusesFromUrl(searchParams), [searchParams]);
+  const activeDateFilter = useMemo(() => parseDateFilterFromUrl(searchParams), [searchParams]);
+  const activeRemoteMode = useMemo(() => parseRemoteModeFromUrl(searchParams), [searchParams]);
+  const activeLocation = (locationParam ?? "").trim();
+  // A URL param was present but the parser dropped it as malformed / out-of-domain.
+  const droppedFilterNotice = useMemo(() => {
+    const statusesDropped = Boolean(statusesParam) && activeStatuses.length === 0;
+    const dateFieldDropped = Boolean(dateFieldParam) && activeDateFilter.field === undefined;
+    const dateFromDropped = Boolean(dateFromParam) && activeDateFilter.from === "";
+    const dateToDropped = Boolean(dateToParam) && activeDateFilter.to === "";
+    const remoteDropped = Boolean(remoteParam) && activeRemoteMode === "any" && remoteParam !== "any";
+    return statusesDropped || dateFieldDropped || dateFromDropped || dateToDropped || remoteDropped;
+  }, [
+    statusesParam,
+    activeStatuses,
+    dateFieldParam,
+    dateFromParam,
+    dateToParam,
+    activeDateFilter,
+    remoteParam,
+    activeRemoteMode,
+  ]);
   const isFavoriteFilter = searchParams.get("favorites") === "true";
   const isArchivedFilter = searchParams.get("archived") === "true";
   const viewMode = (searchParams.get("view") as "list" | "board" | null) ?? (isFavoriteFilter ? "board" : "list");
@@ -99,8 +135,9 @@ export function JobsPage() {
   const [companySidebarSearch, setCompanySidebarSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
+  const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam, searchParams));
   const [filterError, setFilterError] = useState<string | null>(null);
+  const [droppedNoticeDismissed, setDroppedNoticeDismissed] = useState(false);
   const [liveSearch, setLiveSearch] = useState(search ?? "");
   const [appliedSearch, setAppliedSearch] = useState(search ?? "");
   const [searchMenuOpen, setSearchMenuOpen] = useState(false);
@@ -142,10 +179,16 @@ export function JobsPage() {
       sortSpec: JobListSort;
       filters: {
         status?: string;
+        statuses?: string[];
         companyId?: string;
         postingState?: string;
         salaryMin?: number;
         salaryMax?: number;
+        dateField?: DateField;
+        dateFrom?: string;
+        dateTo?: string;
+        location?: string;
+        remoteMode?: RemoteMode;
         isFavorite?: boolean;
         isArchived?: boolean;
       };
@@ -155,10 +198,15 @@ export function JobsPage() {
   const { onRunSettled, reportRefreshFailed } = useRunMonitorActions();
 
   useEffect(() => {
-    setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam));
+    setFilterDraft(filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam, searchParams));
     setLiveSearch(search ?? "");
     setFilterError(null);
-  }, [postingState, search, salaryMinParam, salaryMaxParam]);
+  }, [postingState, search, salaryMinParam, salaryMaxParam, searchParams]);
+
+  // Re-show the malformed-filter notice whenever the dropped set changes.
+  useEffect(() => {
+    setDroppedNoticeDismissed(false);
+  }, [statusesParam, dateFieldParam, dateFromParam, dateToParam, remoteParam]);
 
   useEffect(() => {
     if (!filterPopoverOpen) return;
@@ -195,10 +243,16 @@ export function JobsPage() {
 
   const filtersKey = JSON.stringify({
       status,
+      statuses: activeStatuses,
       companyId,
       postingState,
       salaryMin,
       salaryMax,
+      dateField: activeDateFilter.field,
+      dateFrom: activeDateFilter.from,
+      dateTo: activeDateFilter.to,
+      location: activeLocation,
+      remoteMode: activeRemoteMode,
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
       sort,
@@ -254,14 +308,20 @@ export function JobsPage() {
       sortSpec,
       filters: {
         status,
+        statuses: activeStatuses.length > 0 ? activeStatuses : undefined,
         companyId,
         postingState,
         salaryMin,
         salaryMax,
+        dateField: activeDateFilter.field,
+        dateFrom: activeDateFilter.field ? (activeDateFilter.from || undefined) : undefined,
+        dateTo: activeDateFilter.field ? (activeDateFilter.to || undefined) : undefined,
+        location: activeLocation || undefined,
+        remoteMode: activeRemoteMode !== "any" ? activeRemoteMode : undefined,
         isFavorite: isFavoriteFilter ? true : undefined,
         isArchived: isArchivedFilter
           ? true
-          : !status && !isFavoriteFilter
+          : !status && activeStatuses.length === 0 && !isFavoriteFilter
             ? false
             : undefined,
       },
@@ -312,7 +372,7 @@ export function JobsPage() {
       }
     };
     void drain();
-  }, [status, companyId, postingState, salaryMin, salaryMax, isFavoriteFilter, isArchivedFilter, sort, sortSpec, filtersKey, reportRefreshFailed]);
+  }, [status, activeStatuses, companyId, postingState, salaryMin, salaryMax, activeDateFilter, activeLocation, activeRemoteMode, isFavoriteFilter, isArchivedFilter, sort, sortSpec, filtersKey, reportRefreshFailed]);
 
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore || loading) return;
@@ -510,10 +570,16 @@ export function JobsPage() {
     setSelectingAll(true);
     const filters = {
       status,
+      statuses: activeStatuses.length > 0 ? activeStatuses : undefined,
       companyId,
       postingState,
       salaryMin,
       salaryMax,
+      dateField: activeDateFilter.field,
+      dateFrom: activeDateFilter.field ? (activeDateFilter.from || undefined) : undefined,
+      dateTo: activeDateFilter.field ? (activeDateFilter.to || undefined) : undefined,
+      location: activeLocation || undefined,
+      remoteMode: activeRemoteMode !== "any" ? activeRemoteMode : undefined,
       search: appliedSearch || undefined,
       isFavorite: isFavoriteFilter ? true : undefined,
       isArchived: true,
@@ -674,18 +740,38 @@ export function JobsPage() {
           ? "Showing 100+ roles on your radar."
           : `${jobs.length} ${jobs.length === 1 ? "role" : "roles"} on your radar.`;
 
-  const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter);
+  const hasNewDimensionFilters = Boolean(
+    activeStatuses.length > 0
+    || (activeDateFilter.field && (activeDateFilter.from || activeDateFilter.to))
+    || activeLocation
+    || activeRemoteMode !== "any",
+  );
+  const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter || hasNewDimensionFilters);
   const hasDraftFilters = Boolean(
     filterDraft.search.trim()
     || filterDraft.postingState
     || filterDraft.salaryMin.trim()
     || filterDraft.salaryMax.trim()
+    || filterDraft.statuses.length > 0
+    || (filterDraft.dateField && (filterDraft.dateFrom.trim() || filterDraft.dateTo.trim()))
+    || filterDraft.location.trim()
+    || filterDraft.remoteMode !== "any"
     || status
     || companyId
     || isFavoriteFilter
     || isArchivedFilter,
   );
-  const activeFilterCount = Number(salaryMin !== undefined || salaryMax !== undefined) + Number(Boolean(postingState));
+  const activeFilterCount =
+    Number(salaryMin !== undefined || salaryMax !== undefined)
+    + Number(Boolean(postingState))
+    + countActiveFilterDimensions({
+        statuses: activeStatuses,
+        dateField: activeDateFilter.field ?? "",
+        dateFrom: activeDateFilter.from,
+        dateTo: activeDateFilter.to,
+        location: activeLocation,
+        remoteMode: activeRemoteMode,
+      });
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -694,6 +780,15 @@ export function JobsPage() {
     const nextPosting = filterDraft.postingState;
     const nextSalaryMin = filterDraft.salaryMin.trim();
     const nextSalaryMax = filterDraft.salaryMax.trim();
+    const nextDateFrom = filterDraft.dateFrom.trim();
+    const nextDateTo = filterDraft.dateTo.trim();
+    // Validate the date range first; on failure retain the applied Filter_State
+    // (do not call setSearchParams), per Req 2.7 / 2.8.
+    const dateError = validateDateRange(nextDateFrom, nextDateTo);
+    if (dateError) {
+      setFilterError(dateError);
+      return;
+    }
     const salaryError = validateSalaryRange(nextSalaryMin, nextSalaryMax);
     if (salaryError) {
       setFilterError(salaryError);
@@ -708,6 +803,15 @@ export function JobsPage() {
     if (nextPosting) next.set("postingState", nextPosting);
     if (nextSalaryMin) next.set("salaryMin", nextSalaryMin);
     if (nextSalaryMax) next.set("salaryMax", nextSalaryMax);
+    encodeStatusesToUrl(next, filterDraft.statuses);
+    if (filterDraft.dateField && (nextDateFrom || nextDateTo)) {
+      next.set("dateField", filterDraft.dateField);
+      if (nextDateFrom) next.set("dateFrom", nextDateFrom);
+      if (nextDateTo) next.set("dateTo", nextDateTo);
+    }
+    const nextLocation = filterDraft.location.trim();
+    if (nextLocation) next.set("location", nextLocation);
+    if (filterDraft.remoteMode !== "any") next.set("remote", filterDraft.remoteMode);
     if (viewMode) next.set("view", viewMode);
     writeSortToParams(next, sortSpec, isAppliedTab);
     setSearchParams(next);
@@ -1074,6 +1178,125 @@ export function JobsPage() {
                       <option value="active">Active</option>
                       <option value="inactive">Inactive</option>
                     </select>
+                    <fieldset className="mt-4">
+                      <legend className="field-label">Status</legend>
+                      <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                        {jobStatuses.map((statusValue) => {
+                          const checked = filterDraft.statuses.includes(statusValue);
+                          return (
+                            <label
+                              key={statusValue}
+                              htmlFor={`status-filter-${statusValue}`}
+                              className="flex cursor-pointer items-center gap-2 text-xs font-medium text-[var(--muted)]"
+                            >
+                              <input
+                                id={`status-filter-${statusValue}`}
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) => {
+                                  const isChecked = event.target.checked;
+                                  setFilterDraft((current) => ({
+                                    ...current,
+                                    statuses: isChecked
+                                      ? [...current.statuses, statusValue]
+                                      : current.statuses.filter((value) => value !== statusValue),
+                                  }));
+                                }}
+                                className="h-4 w-4 cursor-pointer accent-[var(--accent)]"
+                              />
+                              <span>{jobStatusPresentation(statusValue).label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                    <fieldset className="mt-4">
+                      <legend className="field-label">Date range</legend>
+                      <select
+                        id="date-field"
+                        name="dateField"
+                        aria-label="Date field"
+                        value={filterDraft.dateField}
+                        onChange={(event) => {
+                          const value = event.target.value as "" | DateField;
+                          setFilterDraft((current) => ({ ...current, dateField: value }));
+                          setFilterError(null);
+                        }}
+                        className="field mt-1 text-sm"
+                      >
+                        <option value="">No date filter</option>
+                        <option value="appliedAt">Date applied</option>
+                        <option value="postingDate">Date added</option>
+                        <option value="lastCheckedAt">Last checked</option>
+                      </select>
+                      <div className="mt-2 grid grid-cols-2 gap-3">
+                        <label htmlFor="date-from" className="text-xs font-medium text-[var(--muted)]">
+                          From
+                          <input
+                            id="date-from"
+                            type="date"
+                            value={filterDraft.dateFrom}
+                            disabled={!filterDraft.dateField}
+                            aria-invalid={filterError ? true : undefined}
+                            aria-describedby={filterError ? "salary-range-error" : undefined}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setFilterDraft((current) => ({ ...current, dateFrom: value }));
+                              setFilterError(null);
+                            }}
+                            className="field mt-1.5 text-sm"
+                          />
+                        </label>
+                        <label htmlFor="date-to" className="text-xs font-medium text-[var(--muted)]">
+                          To
+                          <input
+                            id="date-to"
+                            type="date"
+                            value={filterDraft.dateTo}
+                            disabled={!filterDraft.dateField}
+                            aria-invalid={filterError ? true : undefined}
+                            aria-describedby={filterError ? "salary-range-error" : undefined}
+                            onChange={(event) => {
+                              const value = event.target.value;
+                              setFilterDraft((current) => ({ ...current, dateTo: value }));
+                              setFilterError(null);
+                            }}
+                            className="field mt-1.5 text-sm"
+                          />
+                        </label>
+                      </div>
+                    </fieldset>
+                    <label htmlFor="location-filter" className="field-label mt-4">Location</label>
+                    <input
+                      id="location-filter"
+                      name="location"
+                      type="text"
+                      maxLength={200}
+                      value={filterDraft.location}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setFilterDraft((current) => ({ ...current, location: value }));
+                      }}
+                      placeholder="City, region, or keyword"
+                      className="field text-sm"
+                    />
+                    <label htmlFor="remote-mode" className="field-label mt-4">Remote</label>
+                    <select
+                      id="remote-mode"
+                      name="remoteMode"
+                      value={filterDraft.remoteMode}
+                      onChange={(event) =>
+                        setFilterDraft((current) => ({
+                          ...current,
+                          remoteMode: event.target.value as RemoteMode,
+                        }))
+                      }
+                      className="field text-sm"
+                    >
+                      <option value="any">Any location</option>
+                      <option value="remoteOnly">Remote only</option>
+                      <option value="onsiteOnly">On-site only</option>
+                    </select>
                     <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-3">
                       {isFiltered || hasDraftFilters ? (
                         <Link
@@ -1182,6 +1405,24 @@ export function JobsPage() {
                   </button>
                 </div>
               ) : null}
+            </div>
+          ) : null}
+
+          {droppedFilterNotice && !droppedNoticeDismissed ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-start justify-between gap-3 rounded-xl bg-[var(--amber-soft)] px-3.5 py-2.5 text-sm text-[var(--amber-ink)]"
+            >
+              <span>An invalid filter value in the link was ignored.</span>
+              <button
+                type="button"
+                onClick={() => setDroppedNoticeDismissed(true)}
+                className="shrink-0 text-xs font-medium underline"
+                aria-label="Dismiss invalid filter notice"
+              >
+                Dismiss
+              </button>
             </div>
           ) : null}
 

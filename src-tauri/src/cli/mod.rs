@@ -86,10 +86,14 @@ pub async fn run_cli(cli: Cli) -> AppResult<()> {
         None => {
             // Default to list if no subcommand is given
             Commands::List(args::ListArgs {
-                status: None,
+                status: Vec::new(),
                 company: None,
                 search: None,
                 location: None,
+                date_field: None,
+                date_from: None,
+                date_to: None,
+                remote: None,
                 favorites: false,
                 archived: false,
                 limit: None,
@@ -158,7 +162,7 @@ mod tests {
             Cli::try_parse_from(["job-tracker", "list", "--status", "applied", "-f"]).unwrap();
         match cli.command {
             Some(Commands::List(args)) => {
-                assert_eq!(args.status.as_deref(), Some("applied"));
+                assert_eq!(args.status, vec!["applied".to_string()]);
                 assert!(args.favorites);
             }
             _ => panic!("Expected List command"),
@@ -546,10 +550,14 @@ mod tests {
         handlers::handle_description(&conn, &paths, set_desc_again, true, true).unwrap();
 
         let list_args = ListArgs {
-            status: Some("interviewing".to_string()),
+            status: vec!["interviewing".to_string()],
             company: None,
             search: Some("Quantum".to_string()),
             location: None,
+            date_field: None,
+            date_from: None,
+            date_to: None,
+            remote: None,
             favorites: false,
             archived: false,
             limit: None,
@@ -557,7 +565,7 @@ mod tests {
         let search_results = crate::jobs::service::list_jobs(
             &conn,
             crate::jobs::service::JobFilters {
-                status: list_args.status.clone(),
+                statuses: Some(list_args.status.clone()),
                 company_id: list_args.company.clone(),
                 posting_state: None,
                 search: list_args.search.clone(),
@@ -568,6 +576,7 @@ mod tests {
                 is_favorite: None,
                 is_archived: Some(false),
                 limit: None,
+                ..Default::default()
             },
         )
         .unwrap();

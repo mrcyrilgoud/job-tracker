@@ -295,13 +295,28 @@ pub fn get_job_by_id(conn: &Connection, job_id: &str) -> AppResult<Option<Job>> 
 
 #[derive(Clone, Default)]
 pub struct JobFilters {
+    /// Existing single-select status (sidebar / applied tab). Drives applied-tab sort + cursor.
     pub status: Option<String>,
+    /// Multi-select status set; when `Some`, already validated to de-duplicated `Job_Status` members.
+    pub statuses: Option<Vec<String>>,
     pub company_id: Option<String>,
     pub posting_state: Option<String>,
     pub search: Option<String>,
     pub salary_min: Option<i64>,
     pub salary_max: Option<i64>,
     pub location: Option<String>,
+    /// Remote mode: `"any"` | `"remoteOnly"` | `"onsiteOnly"` (`None`/`"any"` means no restriction).
+    pub remote_mode: Option<String>,
+    /// Date field to range-filter on: `"appliedAt"` | `"postingDate"` | `"lastCheckedAt"`.
+    pub date_field: Option<String>,
+    /// Inclusive start date in `YYYY-MM-DD` form (raw user input).
+    pub date_from: Option<String>,
+    /// Inclusive end date in `YYYY-MM-DD` form (raw user input).
+    pub date_to: Option<String>,
+    /// Precomputed start-of-range boundary string for parameterized `>=` comparison.
+    pub date_from_boundary: Option<String>,
+    /// Precomputed end-of-range boundary string for parameterized `<=` comparison.
+    pub date_to_boundary: Option<String>,
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
     pub is_archived: Option<bool>,
@@ -512,6 +527,117 @@ pub struct LocationSettings {
     pub cities: String,
 }
 
+/// Split requested status values into (valid_unique_members, invalid_values).
+///
+/// Valid members are deduplicated, preserving first-seen order. Any value that
+/// is not a `Job_Status` member is collected into the invalid list (preserving
+/// order, without deduplication). Callers decide policy on the split:
+/// GUI/IPC apply the valid set when it is non-empty and drop invalids; the CLI
+/// rejects the request if any invalid value is present.
+#[allow(dead_code)] // wired into the IPC/CLI boundaries by later tasks
+pub fn partition_statuses(requested: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut valid = Vec::new();
+    let mut invalid = Vec::new();
+    let mut seen = HashSet::new();
+    for raw in requested {
+        if is_job_status(raw) {
+            if seen.insert(raw.clone()) {
+                valid.push(raw.clone());
+            }
+        } else {
+            invalid.push(raw.clone());
+        }
+    }
+    (valid, invalid)
+}
+
+/// Escape the SQLite `LIKE` metacharacters (`\`, `%`, `_`) in user text so the
+/// value matches literally when wrapped as `%...%` with `ESCAPE '\'` appended.
+/// The backslash is escaped first so escapes introduced for `%`/`_` are not
+/// themselves re-escaped.
+pub fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// Map a wire-level date field name to its SQLite column. Returns `None` for
+/// any value outside the supported set, so no user-supplied text ever reaches
+/// the SQL string (only these static column fragments do).
+#[allow(dead_code)] // wired into the date-range SQL fragment by later tasks
+pub fn date_column(field: Option<&str>) -> Option<&'static str> {
+    match field {
+        Some("appliedAt") => Some("j.applied_at"),
+        Some("postingDate") => Some("j.created_at"),
+        Some("lastCheckedAt") => Some("j.last_checked_at"),
+        _ => None,
+    }
+}
+
+/// Compute the inclusive start boundary string for a validated `YYYY-MM-DD`
+/// date. The bare date sorts at or before any same-day ISO-8601 timestamp (and
+/// equals a bare-date stored value), so `col >= start_boundary` includes the
+/// whole start day. See the Data Models section of the design.
+#[allow(dead_code)] // wired into the IPC/CLI boundaries by later tasks
+pub fn date_from_boundary(date: &str) -> String {
+    date.to_string()
+}
+
+/// Compute the inclusive end boundary string for a validated `YYYY-MM-DD` date.
+/// Suffixing the date with `~` (0x7E) — which sorts after `T`, digits, and `Z`
+/// — makes every same-day timestamp compare `<= end_boundary`, so the whole end
+/// day is included. See the Data Models section of the design.
+#[allow(dead_code)] // wired into the IPC/CLI boundaries by later tasks
+pub fn date_to_boundary(date: &str) -> String {
+    format!("{date}~")
+}
+
+/// Strict `YYYY-MM-DD` calendar-date check. Rejects any value that is not a
+/// real calendar date in that exact form (chrono validates month/day ranges,
+/// leap years, etc.). Used by both the IPC boundary and the CLI handler.
+pub fn is_valid_calendar_date(value: &str) -> bool {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok()
+}
+
+/// Pure date-range validator shared by the IPC boundary (Req 2.7, 2.8) and the
+/// CLI handler (Req 6.7). Rejects the input when either supplied bound is not a
+/// valid `YYYY-MM-DD` calendar date, or when the start date is strictly later
+/// than the end date. An absent bound is treated as unconstrained. Returns
+/// `Ok(())` when the range is acceptable.
+pub fn validate_date_range(from: Option<&str>, to: Option<&str>) -> AppResult<()> {
+    if let Some(from) = from {
+        if !is_valid_calendar_date(from) {
+            return Err(AppError::from(format!(
+                "Invalid date '{from}': expected a calendar date in YYYY-MM-DD form"
+            )));
+        }
+    }
+    if let Some(to) = to {
+        if !is_valid_calendar_date(to) {
+            return Err(AppError::from(format!(
+                "Invalid date '{to}': expected a calendar date in YYYY-MM-DD form"
+            )));
+        }
+    }
+    if let (Some(from), Some(to)) = (from, to) {
+        if from > to {
+            return Err(AppError::from(format!(
+                "Invalid date range: start date '{from}' must not be later than end date '{to}'"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Fixed set of remote-indicator terms, matched case-insensitively as
+/// substrings of `location` for the `remoteOnly`/`onsiteOnly` modes.
+const REMOTE_TERMS: [&str; 4] = ["remote", "anywhere", "work from home", "wfh"];
+
 fn append_job_filters(
     sql: &mut String,
     values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
@@ -520,6 +646,41 @@ fn append_job_filters(
     if let Some(status) = &filters.status {
         sql.push_str(" AND j.status = ?");
         values.push(Box::new(status.clone()));
+    }
+    // Multi-select status (Req 1.2, 1.3, 1.4, 4.3): restrict to jobs whose
+    // status is any one of the selected set. Applied only when `statuses` is
+    // `Some` and non-empty; an empty/absent set imposes no restriction. Each
+    // value is bound as a param — only the static `?` placeholders are
+    // interpolated into the SQL text, never user values. When a single
+    // `status` is also present, the two combine conjunctively.
+    if let Some(statuses) = &filters.statuses {
+        if !statuses.is_empty() {
+            let placeholders = statuses.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            sql.push_str(&format!(" AND j.status IN ({placeholders})"));
+            for status in statuses {
+                values.push(Box::new(status.clone()));
+            }
+        }
+    }
+    // Date range (Req 2.3–2.6, 2.11, 2.12): restrict to jobs whose selected
+    // date field falls within the inclusive calendar-day range. Applied only
+    // when `date_field` maps to a supported column via `date_column` and at
+    // least one bound is present. The column comes from a static map, never
+    // user text; the boundary strings (precomputed from the validated
+    // `YYYY-MM-DD` inputs) are bound as params. The `IS NOT NULL` guard
+    // excludes jobs with no stored value for the selected field (Req 2.6).
+    if let Some(column) = date_column(filters.date_field.as_deref()) {
+        if filters.date_from_boundary.is_some() || filters.date_to_boundary.is_some() {
+            sql.push_str(&format!(" AND {column} IS NOT NULL"));
+            if let Some(start_boundary) = &filters.date_from_boundary {
+                sql.push_str(&format!(" AND {column} >= ?"));
+                values.push(Box::new(start_boundary.clone()));
+            }
+            if let Some(end_boundary) = &filters.date_to_boundary {
+                sql.push_str(&format!(" AND {column} <= ?"));
+                values.push(Box::new(end_boundary.clone()));
+            }
+        }
     }
     if let Some(company_id) = &filters.company_id {
         sql.push_str(" AND j.company_id = ?");
@@ -574,13 +735,61 @@ fn append_job_filters(
 
     // Location filtering: the watch path evaluates the structured filter engine
     // in memory (below) rather than building hardcoded location/keyword SQL, so
-    // only the coarse `is_new_from_watch = 1` predicate applies here. The legacy
-    // `filters.location` LIKE branch remains for the non-watch (pipeline) path.
+    // only the coarse `is_new_from_watch = 1` predicate applies here. The
+    // location-text and remote-mode fragments below apply only on the non-watch
+    // (pipeline) path.
     let watch_path = filters.new_from_watch == Some(true);
     if !watch_path {
-        if let Some(location) = &filters.location {
-            sql.push_str(" AND j.location LIKE ?");
-            values.push(Box::new(format!("%{location}%")));
+        // Location text (Req 3.3, 3.4): case-insensitive substring match against
+        // `location`. Trim first and skip empty/whitespace-only text so blank
+        // input imposes no restriction. User text is escaped via `escape_like`
+        // and bound as a param with `ESCAPE '\'` so LIKE wildcards in the query
+        // match literally; only the static placeholder reaches the SQL text.
+        let location_text = filters
+            .location
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let remote_mode = filters.remote_mode.as_deref();
+        let has_remote_restriction =
+            matches!(remote_mode, Some("remoteOnly") | Some("onsiteOnly"));
+
+        // Exclude location-less jobs whenever a text or remote restriction is
+        // active (Req 3.9), so `remoteOnly`/`onsiteOnly` never surface jobs with
+        // no stored location (and `NOT LIKE` on NULL does not slip through).
+        if location_text.is_some() || has_remote_restriction {
+            sql.push_str(" AND j.location IS NOT NULL");
+        }
+
+        if let Some(text) = location_text {
+            sql.push_str(" AND j.location LIKE ? ESCAPE '\\'");
+            values.push(Box::new(format!("%{}%", escape_like(text))));
+        }
+
+        // Remote mode (Req 3.5, 3.6, 3.7): match the fixed indicator terms
+        // case-insensitively (SQLite `LIKE` is ASCII case-insensitive by
+        // default). `remoteOnly` requires at least one term; `onsiteOnly`
+        // requires none; `any`/`None` impose no restriction. Each term is a
+        // static literal interpolated only as a bound `%term%` param.
+        match remote_mode {
+            Some("remoteOnly") => {
+                let ors = REMOTE_TERMS
+                    .iter()
+                    .map(|_| "j.location LIKE ?")
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                sql.push_str(&format!(" AND ({ors})"));
+                for term in REMOTE_TERMS {
+                    values.push(Box::new(format!("%{term}%")));
+                }
+            }
+            Some("onsiteOnly") => {
+                for term in REMOTE_TERMS {
+                    sql.push_str(" AND j.location NOT LIKE ?");
+                    values.push(Box::new(format!("%{term}%")));
+                }
+            }
+            _ => {} // "any" or None: no restriction (Req 3.7)
         }
     }
 }
@@ -1814,6 +2023,76 @@ mod tests {
     use super::*;
     use crate::db::migrate::migrate;
     use crate::jobs::metadata::extract_job_metadata;
+
+    #[test]
+    fn partition_statuses_keeps_valid_unique_first_seen_and_collects_invalid() {
+        let requested = vec![
+            "applied".to_string(),
+            "bogus".to_string(),
+            "applied".to_string(), // duplicate valid -> dropped
+            "interviewing".to_string(),
+            "nope".to_string(),
+        ];
+        let (valid, invalid) = partition_statuses(&requested);
+        assert_eq!(valid, vec!["applied".to_string(), "interviewing".to_string()]);
+        assert_eq!(invalid, vec!["bogus".to_string(), "nope".to_string()]);
+    }
+
+    #[test]
+    fn partition_statuses_all_invalid_yields_empty_valid() {
+        let requested = vec!["x".to_string(), "y".to_string()];
+        let (valid, invalid) = partition_statuses(&requested);
+        assert!(valid.is_empty());
+        assert_eq!(invalid, vec!["x".to_string(), "y".to_string()]);
+    }
+
+    #[test]
+    fn partition_statuses_empty_input_yields_empty() {
+        let (valid, invalid) = partition_statuses(&[]);
+        assert!(valid.is_empty());
+        assert!(invalid.is_empty());
+    }
+
+    #[test]
+    fn escape_like_escapes_backslash_percent_and_underscore() {
+        assert_eq!(escape_like("a_b%c\\d"), "a\\_b\\%c\\\\d");
+        assert_eq!(escape_like("plain text"), "plain text");
+        assert_eq!(escape_like("100%"), "100\\%");
+    }
+
+    #[test]
+    fn date_column_maps_supported_fields_and_rejects_others() {
+        assert_eq!(date_column(Some("appliedAt")), Some("j.applied_at"));
+        assert_eq!(date_column(Some("postingDate")), Some("j.created_at"));
+        assert_eq!(date_column(Some("lastCheckedAt")), Some("j.last_checked_at"));
+        assert_eq!(date_column(Some("createdAt")), None);
+        assert_eq!(date_column(Some("")), None);
+        assert_eq!(date_column(None), None);
+    }
+
+    #[test]
+    fn date_boundaries_bracket_same_day_iso_timestamps() {
+        let start = date_from_boundary("2026-08-23");
+        let end = date_to_boundary("2026-08-23");
+        assert_eq!(start, "2026-08-23");
+        assert_eq!(end, "2026-08-23~");
+
+        // A bare-date stored value is within [start, end].
+        let bare = "2026-08-23";
+        assert!(bare >= start.as_str() && bare <= end.as_str());
+
+        // Start-of-day and end-of-day ISO timestamps are within [start, end].
+        let midnight = "2026-08-23T00:00:00";
+        let end_of_day = "2026-08-23T23:59:59.999999999";
+        assert!(midnight >= start.as_str() && midnight <= end.as_str());
+        assert!(end_of_day >= start.as_str() && end_of_day <= end.as_str());
+
+        // Timestamps on neighboring days fall outside the range.
+        let prev_day = "2026-08-22T23:59:59";
+        let next_day = "2026-08-24T00:00:00";
+        assert!(prev_day < start.as_str());
+        assert!(next_day > end.as_str());
+    }
 
     fn test_connection() -> Connection {
         let connection = Connection::open_in_memory().unwrap();
@@ -3921,5 +4200,764 @@ mod tests {
         )
         .unwrap();
         assert_eq!(watch_inbox(&conn).len(), 3);
+    }
+
+    // =====================================================================
+    // Enhanced-filters property-based tests (proptest). Each property is
+    // tagged with its design identifier. DB-backed properties build an
+    // in-memory SQLite connection and run the real `list_jobs` so the
+    // assertions exercise the actual `append_job_filters` SQL.
+    // =====================================================================
+
+    use proptest::prelude::*;
+
+    /// All pipeline `Job_Status` members, used as the generation domain for
+    /// DB-backed status properties.
+    const PROP_STATUSES: [&str; 8] = [
+        "wishlist",
+        "applied",
+        "interviewing",
+        "offer",
+        "rejected",
+        "withdrawn",
+        "closed",
+        "archived",
+    ];
+
+    /// Build a fresh in-memory DB with a single company so property bodies can
+    /// insert jobs and run `list_jobs` against real SQL.
+    fn prop_conn() -> Connection {
+        let conn = test_connection();
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) \
+             VALUES ('prop-co', 'Prop Co', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    /// Insert a pipeline job with explicit status / location / date columns.
+    /// `is_new_from_watch = 0` and a NULL `watch_disposition` keep the row in
+    /// the default pipeline listing (so the enhanced filters are what decide
+    /// inclusion). `applied_at`, `created_at` and `last_checked_at` are set
+    /// individually so date-range properties can target each field.
+    #[allow(clippy::too_many_arguments)]
+    fn prop_insert_job(
+        conn: &Connection,
+        id: &str,
+        status: &str,
+        location: Option<&str>,
+        applied_at: Option<&str>,
+        created_at: &str,
+        last_checked_at: Option<&str>,
+    ) {
+        let url = format!("https://example.test/prop/{id}");
+        conn.execute(
+            "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, applied_at, \
+                               posting_state, last_checked_at, source, location, \
+                               is_new_from_watch, missing_from_sync_count, created_at, updated_at) \
+             VALUES (?1, 'prop-co', ?1, ?2, ?2, ?3, ?4, 'active', ?5, 'manual', ?6, 0, 0, ?7, ?7)",
+            params![id, url, status, applied_at, last_checked_at, location, created_at],
+        )
+        .unwrap();
+    }
+
+    /// Collect the returned job ids as a sorted set for order-insensitive
+    /// comparison.
+    fn prop_result_ids(conn: &Connection, filters: JobFilters) -> Vec<String> {
+        let mut ids = list_jobs(conn, filters)
+            .unwrap()
+            .into_iter()
+            .map(|item| item.job.id)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
+    }
+
+    /// Case-insensitive literal substring test mirroring SQLite `LIKE
+    /// %needle%` with wildcards treated literally (the SQL escapes them).
+    fn ci_contains(haystack: &str, needle: &str) -> bool {
+        haystack.to_lowercase().contains(&needle.to_lowercase())
+    }
+
+    // --- Property 2: Mixed-validity status partition (pure) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 2: Mixed-validity status partition
+        // Validates: Requirements 1.8
+        #[test]
+        fn prop_mixed_validity_status_partition(
+            // Mix valid members, duplicates, and arbitrary non-member tokens in
+            // any order so the generator covers duplicate, non-member, and
+            // mixed lists.
+            tokens in prop::collection::vec(
+                prop_oneof![
+                    prop::sample::select(PROP_STATUSES.as_slice()).prop_map(|s| s.to_string()),
+                    "[a-z]{1,6}",
+                ],
+                0..12,
+            ),
+        ) {
+            let (valid, invalid) = partition_statuses(&tokens);
+
+            // Every valid entry is a real Job_Status member.
+            for v in &valid {
+                prop_assert!(is_job_status(v), "valid entry {v} is not a member");
+            }
+            // Valid list has no duplicates.
+            let mut seen = std::collections::HashSet::new();
+            for v in &valid {
+                prop_assert!(seen.insert(v.clone()), "valid list has duplicate {v}");
+            }
+            // Valid list equals the deduplicated members in first-seen order.
+            let mut expected_valid = Vec::new();
+            let mut expected_seen = std::collections::HashSet::new();
+            let mut expected_invalid = Vec::new();
+            for t in &tokens {
+                if is_job_status(t) {
+                    if expected_seen.insert(t.clone()) {
+                        expected_valid.push(t.clone());
+                    }
+                } else {
+                    expected_invalid.push(t.clone());
+                }
+            }
+            prop_assert_eq!(&valid, &expected_valid, "valid partition/order mismatch");
+            // Invalid list is exactly all non-members (order preserved).
+            prop_assert_eq!(&invalid, &expected_invalid, "invalid partition mismatch");
+            for iv in &invalid {
+                prop_assert!(!is_job_status(iv), "invalid entry {iv} is actually a member");
+            }
+        }
+    }
+
+    // --- Property 1: Status-set membership filtering (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 1: Status-set membership filtering
+        // Validates: Requirements 1.2, 1.3, 1.4, 1.7
+        #[test]
+        fn prop_status_set_membership_filtering(
+            // Each job gets a random status; `selected` is a random subset of
+            // valid statuses (each flag picks that status into the set).
+            job_statuses in prop::collection::vec(0usize..PROP_STATUSES.len(), 1..20),
+            selected_flags in prop::collection::vec(any::<bool>(), PROP_STATUSES.len()),
+        ) {
+            let conn = prop_conn();
+            for (index, status_idx) in job_statuses.iter().enumerate() {
+                let id = format!("job-{index:03}");
+                prop_insert_job(
+                    &conn,
+                    &id,
+                    PROP_STATUSES[*status_idx],
+                    None,
+                    None,
+                    "2026-01-01T00:00:00Z",
+                    None,
+                );
+            }
+
+            let selected: Vec<String> = PROP_STATUSES
+                .iter()
+                .zip(selected_flags.iter())
+                .filter_map(|(s, keep)| keep.then(|| s.to_string()))
+                .collect();
+
+            // Expected: ids whose status is in the selected set.
+            let selected_set: std::collections::HashSet<&str> =
+                selected.iter().map(String::as_str).collect();
+            let mut expected = job_statuses
+                .iter()
+                .enumerate()
+                .filter(|(_, idx)| selected_set.contains(PROP_STATUSES[**idx]))
+                .map(|(index, _)| format!("job-{index:03}"))
+                .collect::<Vec<_>>();
+            expected.sort();
+
+            if selected.is_empty() {
+                // Empty set => Some([]) imposes no status restriction: all jobs.
+                let all = prop_result_ids(
+                    &conn,
+                    JobFilters {
+                        statuses: Some(Vec::new()),
+                        ..JobFilters::default()
+                    },
+                );
+                let mut all_expected = job_statuses
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| format!("job-{index:03}"))
+                    .collect::<Vec<_>>();
+                all_expected.sort();
+                prop_assert_eq!(all, all_expected.clone(), "empty Some set should not restrict");
+
+                // None likewise imposes no restriction.
+                let none = prop_result_ids(&conn, JobFilters::default());
+                prop_assert_eq!(none, all_expected, "None statuses should not restrict");
+            } else {
+                let got = prop_result_ids(
+                    &conn,
+                    JobFilters {
+                        statuses: Some(selected.clone()),
+                        ..JobFilters::default()
+                    },
+                );
+                prop_assert_eq!(got, expected, "status-set membership mismatch");
+            }
+        }
+    }
+
+    // --- Property 10: Order-independence (confluence) (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 10: Order-independence (confluence)
+        // Validates: Requirements 4.4
+        #[test]
+        fn prop_order_independence(
+            job_statuses in prop::collection::vec(0usize..PROP_STATUSES.len(), 1..20),
+            selected_flags in prop::collection::vec(any::<bool>(), PROP_STATUSES.len()),
+            // A permutation seed used to reverse / rotate the selected set.
+            rotate in 0usize..PROP_STATUSES.len(),
+        ) {
+            let conn = prop_conn();
+            for (index, status_idx) in job_statuses.iter().enumerate() {
+                let id = format!("job-{index:03}");
+                prop_insert_job(
+                    &conn,
+                    &id,
+                    PROP_STATUSES[*status_idx],
+                    None,
+                    None,
+                    "2026-01-01T00:00:00Z",
+                    None,
+                );
+            }
+
+            let selected: Vec<String> = PROP_STATUSES
+                .iter()
+                .zip(selected_flags.iter())
+                .filter_map(|(s, keep)| keep.then(|| s.to_string()))
+                .collect();
+            prop_assume!(!selected.is_empty());
+
+            // Build a reordered-but-equal set: rotate then reverse.
+            let mut reordered = selected.clone();
+            if !reordered.is_empty() {
+                let k = rotate % reordered.len();
+                reordered.rotate_left(k);
+                reordered.reverse();
+            }
+
+            let a = prop_result_ids(
+                &conn,
+                JobFilters {
+                    statuses: Some(selected),
+                    ..JobFilters::default()
+                },
+            );
+            let b = prop_result_ids(
+                &conn,
+                JobFilters {
+                    statuses: Some(reordered),
+                    ..JobFilters::default()
+                },
+            );
+            prop_assert_eq!(a, b, "reordering the status set changed the result");
+        }
+    }
+
+    // --- Property 5: Date-range inclusivity with null exclusion (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 5: Date-range inclusivity with null exclusion
+        // Validates: Requirements 2.3, 2.4, 2.5, 2.6, 2.11, 2.12
+        #[test]
+        fn prop_date_range_inclusivity_with_null_exclusion(
+            // Which field to range on.
+            field_choice in 0usize..3,
+            // A list of stored values: index into a fixed catalog of shapes
+            // (bare date, full ISO, start-of-day, end-of-day, NULL) across a
+            // few calendar days.
+            value_choices in prop::collection::vec(0usize..DATE_VALUES.len(), 1..24),
+            from_choice in prop::option::of(0usize..DATE_DAYS.len()),
+            to_choice in prop::option::of(0usize..DATE_DAYS.len()),
+        ) {
+            // Ensure at least one active bound so the filter engages.
+            prop_assume!(from_choice.is_some() || to_choice.is_some());
+
+            let field = ["appliedAt", "postingDate", "lastCheckedAt"][field_choice];
+            let conn = prop_conn();
+
+            // Each stored value is a (literal, is_null) pair. We place the value
+            // in the targeted field and keep the other two columns benign /
+            // non-null so only the targeted field drives inclusion. `created_at`
+            // cannot be null, so for the postingDate field a "NULL" shape is
+            // represented by an out-of-range sentinel day instead.
+            for (index, choice) in value_choices.iter().enumerate() {
+                let id = format!("job-{index:03}");
+                let (value, is_null) = DATE_VALUES[*choice];
+                let base_created = "2000-01-01T00:00:00Z"; // far before any test day
+                match field {
+                    "appliedAt" => prop_insert_job(
+                        &conn, &id, "wishlist", None,
+                        if is_null { None } else { Some(value) },
+                        base_created, Some("2000-01-01T00:00:00Z"),
+                    ),
+                    "lastCheckedAt" => prop_insert_job(
+                        &conn, &id, "wishlist", None, Some("2000-01-01T00:00:00Z"),
+                        base_created,
+                        if is_null { None } else { Some(value) },
+                    ),
+                    // postingDate maps to created_at (NOT NULL); a null shape
+                    // becomes a far-past day that no in-range query matches.
+                    _ => {
+                        let created = if is_null { "2000-01-01T00:00:00Z" } else { value };
+                        prop_insert_job(
+                            &conn, &id, "wishlist", None, Some("2000-01-01T00:00:00Z"),
+                            created, Some("2000-01-01T00:00:00Z"),
+                        );
+                    }
+                }
+            }
+
+            let from = from_choice.map(|c| DATE_DAYS[c]);
+            let to = to_choice.map(|c| DATE_DAYS[c]);
+            // Skip inverted ranges (handled by validation, not this predicate).
+            if let (Some(f), Some(t)) = (from, to) {
+                prop_assume!(f <= t);
+            }
+
+            let from_boundary = from.map(date_from_boundary);
+            let to_boundary = to.map(date_to_boundary);
+
+            let got = prop_result_ids(
+                &conn,
+                JobFilters {
+                    date_field: Some(field.to_string()),
+                    date_from: from.map(str::to_string),
+                    date_to: to.map(str::to_string),
+                    date_from_boundary: from_boundary.clone(),
+                    date_to_boundary: to_boundary.clone(),
+                    ..JobFilters::default()
+                },
+            );
+
+            // Expected: field non-null and within [from_boundary, to_boundary].
+            let mut expected = Vec::new();
+            for (index, choice) in value_choices.iter().enumerate() {
+                let (value, is_null) = DATE_VALUES[*choice];
+                // Effective stored value for the targeted field.
+                let stored: Option<&str> = match field {
+                    "postingDate" => {
+                        if is_null { Some("2000-01-01T00:00:00Z") } else { Some(value) }
+                    }
+                    _ => if is_null { None } else { Some(value) },
+                };
+                let Some(stored) = stored else { continue };
+                let after_from = from_boundary
+                    .as_deref()
+                    .map(|b| stored >= b)
+                    .unwrap_or(true);
+                let before_to = to_boundary
+                    .as_deref()
+                    .map(|b| stored <= b)
+                    .unwrap_or(true);
+                if after_from && before_to {
+                    expected.push(format!("job-{index:03}"));
+                }
+            }
+            expected.sort();
+            prop_assert_eq!(got, expected, "date-range membership mismatch for field {}", field);
+        }
+    }
+
+    /// Calendar days used as range bounds for the date property.
+    const DATE_DAYS: [&str; 4] = ["2026-08-22", "2026-08-23", "2026-08-24", "2026-08-25"];
+
+    /// Catalog of stored date-value shapes: `(literal, is_null)`. Covers bare
+    /// dates, full ISO timestamps, start-of-day, end-of-day, and NULL across
+    /// the test days.
+    const DATE_VALUES: [(&str, bool); 10] = [
+        ("2026-08-23", false),                      // bare date
+        ("2026-08-23T00:00:00", false),             // start of day
+        ("2026-08-23T12:30:00", false),             // midday full ISO
+        ("2026-08-23T23:59:59.999999999", false),   // end of day
+        ("2026-08-22T23:59:59", false),             // just before day 23
+        ("2026-08-24T00:00:00", false),             // just after day 23
+        ("2026-08-25T08:00:00Z", false),            // later day with Z suffix
+        ("2026-08-22", false),                      // bare date, earlier day
+        ("", true),                                 // NULL field
+        ("2026-08-24", false),                      // bare date, later day
+    ];
+
+    // --- Property 7: Location-text substring match (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 7: Location-text substring match
+        // Validates: Requirements 3.3, 3.4, 3.9
+        #[test]
+        fn prop_location_text_substring_match(
+            locations in prop::collection::vec(
+                prop::option::of(location_sample()),
+                1..20,
+            ),
+            // Query text may include LIKE wildcards and mixed case; empty /
+            // whitespace variants exercise the no-restriction branch.
+            query in prop_oneof![
+                Just(String::new()),
+                Just("   ".to_string()),
+                "[A-Za-z%_ ]{0,8}",
+            ],
+        ) {
+            let conn = prop_conn();
+            for (index, loc) in locations.iter().enumerate() {
+                let id = format!("job-{index:03}");
+                prop_insert_job(
+                    &conn, &id, "wishlist", loc.as_deref(), None,
+                    "2026-01-01T00:00:00Z", None,
+                );
+            }
+
+            let got = prop_result_ids(
+                &conn,
+                JobFilters {
+                    location: Some(query.clone()),
+                    ..JobFilters::default()
+                },
+            );
+
+            let trimmed = query.trim();
+            let mut expected = Vec::new();
+            for (index, loc) in locations.iter().enumerate() {
+                let keep = if trimmed.is_empty() {
+                    true // no restriction
+                } else {
+                    match loc {
+                        Some(l) => ci_contains(l, trimmed),
+                        None => false, // null location excluded when text active
+                    }
+                };
+                if keep {
+                    expected.push(format!("job-{index:03}"));
+                }
+            }
+            expected.sort();
+            prop_assert_eq!(got, expected, "location-text match mismatch for query {:?}", query);
+        }
+    }
+
+    /// A small catalog of location strings including wildcards, mixed case, and
+    /// remote indicator terms, plus plain onsite strings.
+    fn location_sample() -> impl Strategy<Value = String> {
+        prop::sample::select(vec![
+            "Remote".to_string(),
+            "REMOTE - US".to_string(),
+            "Greater Remoteville".to_string(),
+            "Anywhere, USA".to_string(),
+            "WFH".to_string(),
+            "Work From Home".to_string(),
+            "New York, NY".to_string(),
+            "San Francisco".to_string(),
+            "100% remote".to_string(),
+            "under_score city".to_string(),
+            "Berlin".to_string(),
+            "london".to_string(),
+        ])
+    }
+
+    // --- Property 8: Remote-mode predicate (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 8: Remote-mode predicate
+        // Validates: Requirements 3.5, 3.6, 3.7, 3.9
+        #[test]
+        fn prop_remote_mode_predicate(
+            locations in prop::collection::vec(
+                prop::option::of(location_sample()),
+                1..20,
+            ),
+            mode_choice in 0usize..3,
+        ) {
+            let conn = prop_conn();
+            for (index, loc) in locations.iter().enumerate() {
+                let id = format!("job-{index:03}");
+                prop_insert_job(
+                    &conn, &id, "wishlist", loc.as_deref(), None,
+                    "2026-01-01T00:00:00Z", None,
+                );
+            }
+
+            let mode = ["any", "remoteOnly", "onsiteOnly"][mode_choice];
+            let got = prop_result_ids(
+                &conn,
+                JobFilters {
+                    remote_mode: Some(mode.to_string()),
+                    ..JobFilters::default()
+                },
+            );
+
+            let terms = ["remote", "anywhere", "work from home", "wfh"];
+            let mut expected = Vec::new();
+            for (index, loc) in locations.iter().enumerate() {
+                let keep = match mode {
+                    "any" => true,
+                    "remoteOnly" => loc
+                        .as_deref()
+                        .map(|l| terms.iter().any(|t| ci_contains(l, t)))
+                        .unwrap_or(false),
+                    "onsiteOnly" => loc
+                        .as_deref()
+                        .map(|l| terms.iter().all(|t| !ci_contains(l, t)))
+                        .unwrap_or(false),
+                    _ => unreachable!(),
+                };
+                if keep {
+                    expected.push(format!("job-{index:03}"));
+                }
+            }
+            expected.sort();
+            prop_assert_eq!(got, expected, "remote-mode predicate mismatch for mode {}", mode);
+        }
+    }
+
+    // --- Property 9: Conjunctive composition (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 9: Conjunctive composition
+        // Validates: Requirements 3.8, 4.1, 4.2, 4.3
+        #[test]
+        fn prop_conjunctive_composition(
+            job_statuses in prop::collection::vec(0usize..PROP_STATUSES.len(), 1..20),
+            locations in prop::collection::vec(prop::option::of(location_sample()), 1..20),
+            applied_choices in prop::collection::vec(0usize..DATE_VALUES.len(), 1..20),
+            // Which filters are active.
+            use_status in any::<bool>(),
+            use_location in any::<bool>(),
+            use_remote in any::<bool>(),
+            use_date in any::<bool>(),
+            // Filter inputs.
+            selected_flags in prop::collection::vec(any::<bool>(), PROP_STATUSES.len()),
+            loc_query in "[A-Za-z ]{0,6}",
+            mode_choice in 0usize..3,
+            from_choice in prop::option::of(0usize..DATE_DAYS.len()),
+            to_choice in prop::option::of(0usize..DATE_DAYS.len()),
+        ) {
+            // Align the three per-job vectors to the shortest length.
+            let n = job_statuses
+                .len()
+                .min(locations.len())
+                .min(applied_choices.len());
+            prop_assume!(n > 0);
+
+            let conn = prop_conn();
+            for index in 0..n {
+                let id = format!("job-{index:03}");
+                let (value, is_null) = DATE_VALUES[applied_choices[index]];
+                prop_insert_job(
+                    &conn,
+                    &id,
+                    PROP_STATUSES[job_statuses[index]],
+                    locations[index].as_deref(),
+                    if is_null { None } else { Some(value) },
+                    "2000-01-01T00:00:00Z",
+                    None,
+                );
+            }
+
+            // Build each single-filter JobFilters (only the chosen dimension).
+            let selected: Vec<String> = PROP_STATUSES
+                .iter()
+                .zip(selected_flags.iter())
+                .filter_map(|(s, keep)| keep.then(|| s.to_string()))
+                .collect();
+
+            let status_filter = JobFilters {
+                statuses: Some(selected.clone()),
+                ..JobFilters::default()
+            };
+            let location_filter = JobFilters {
+                location: Some(loc_query.clone()),
+                ..JobFilters::default()
+            };
+            let mode = ["any", "remoteOnly", "onsiteOnly"][mode_choice];
+            let remote_filter = JobFilters {
+                remote_mode: Some(mode.to_string()),
+                ..JobFilters::default()
+            };
+            let from = from_choice.map(|c| DATE_DAYS[c]);
+            let to = to_choice.map(|c| DATE_DAYS[c]);
+            if let (Some(f), Some(t)) = (from, to) {
+                prop_assume!(f <= t);
+            }
+            let date_active = use_date && (from.is_some() || to.is_some());
+            let date_filter = JobFilters {
+                date_field: Some("appliedAt".to_string()),
+                date_from: from.map(str::to_string),
+                date_to: to.map(str::to_string),
+                date_from_boundary: from.map(date_from_boundary),
+                date_to_boundary: to.map(date_to_boundary),
+                ..JobFilters::default()
+            };
+
+            // Combined filter with the active dimensions set together.
+            let mut combined = JobFilters::default();
+            if use_status {
+                combined.statuses = Some(selected.clone());
+            }
+            if use_location {
+                combined.location = Some(loc_query.clone());
+            }
+            if use_remote {
+                combined.remote_mode = Some(mode.to_string());
+            }
+            if date_active {
+                combined.date_field = Some("appliedAt".to_string());
+                combined.date_from = from.map(str::to_string);
+                combined.date_to = to.map(str::to_string);
+                combined.date_from_boundary = from.map(date_from_boundary);
+                combined.date_to_boundary = to.map(date_to_boundary);
+            }
+
+            let combined_ids = prop_result_ids(&conn, combined);
+
+            // Expected: intersection of each active single-filter result set.
+            // Start from the universe (no restriction) and intersect.
+            let mut expected: std::collections::BTreeSet<String> =
+                prop_result_ids(&conn, JobFilters::default())
+                    .into_iter()
+                    .collect();
+            let mut intersect_with = |f: JobFilters| {
+                let set: std::collections::BTreeSet<String> =
+                    prop_result_ids(&conn, f).into_iter().collect();
+                expected = expected.intersection(&set).cloned().collect();
+            };
+            if use_status {
+                intersect_with(status_filter);
+            }
+            if use_location {
+                intersect_with(location_filter);
+            }
+            if use_remote {
+                intersect_with(remote_filter);
+            }
+            if date_active {
+                intersect_with(date_filter);
+            }
+
+            let expected_vec: Vec<String> = expected.into_iter().collect();
+            prop_assert_eq!(combined_ids, expected_vec, "conjunction != intersection of parts");
+        }
+    }
+
+    // --- Property 12: CLI / IPC parity (DB-backed) ---
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: enhanced-filters, Property 12: CLI / IPC parity
+        // Validates: Requirements 6.1, 6.2, 6.3, 6.5
+        #[test]
+        fn prop_cli_ipc_parity(
+            job_statuses in prop::collection::vec(0usize..PROP_STATUSES.len(), 1..20),
+            locations in prop::collection::vec(prop::option::of(location_sample()), 1..20),
+            selected_flags in prop::collection::vec(any::<bool>(), PROP_STATUSES.len()),
+            loc_query in "[A-Za-z ]{0,6}",
+            mode_choice in 0usize..3,
+            field_choice in 0usize..3,
+            from_choice in prop::option::of(0usize..DATE_DAYS.len()),
+            to_choice in prop::option::of(0usize..DATE_DAYS.len()),
+        ) {
+            let n = job_statuses.len().min(locations.len());
+            prop_assume!(n > 0);
+
+            let conn = prop_conn();
+            for index in 0..n {
+                let id = format!("job-{index:03}");
+                prop_insert_job(
+                    &conn,
+                    &id,
+                    PROP_STATUSES[job_statuses[index]],
+                    locations[index].as_deref(),
+                    Some("2026-08-23T12:00:00"),
+                    "2026-08-23T12:00:00Z",
+                    Some("2026-08-23T12:00:00"),
+                );
+            }
+
+            let selected: Vec<String> = PROP_STATUSES
+                .iter()
+                .zip(selected_flags.iter())
+                .filter_map(|(s, keep)| keep.then(|| s.to_string()))
+                .collect();
+            let mode = ["any", "remoteOnly", "onsiteOnly"][mode_choice];
+            let field = ["appliedAt", "postingDate", "lastCheckedAt"][field_choice];
+            let from = from_choice.map(|c| DATE_DAYS[c]);
+            let to = to_choice.map(|c| DATE_DAYS[c]);
+            if let (Some(f), Some(t)) = (from, to) {
+                prop_assume!(f <= t);
+            }
+
+            // Shared field values both construction paths agree on.
+            let statuses_opt = (!selected.is_empty()).then(|| selected.clone());
+            let date_field_opt = (from.is_some() || to.is_some()).then(|| field.to_string());
+            let from_boundary = date_field_opt
+                .as_ref()
+                .and_then(|_| from.map(date_from_boundary));
+            let to_boundary = date_field_opt
+                .as_ref()
+                .and_then(|_| to.map(date_to_boundary));
+
+            // "IPC path": build JobFilters as the From<ListJobsArgs> impl does —
+            // partition the (already-valid) status set, compute boundaries.
+            let ipc_statuses = statuses_opt.as_ref().map(|requested| {
+                let (valid, _invalid) = partition_statuses(requested);
+                valid
+            });
+            let ipc_filters = JobFilters {
+                statuses: ipc_statuses,
+                location: Some(loc_query.clone()),
+                remote_mode: Some(mode.to_string()),
+                date_field: date_field_opt.clone(),
+                date_from: from.map(str::to_string),
+                date_to: to.map(str::to_string),
+                date_from_boundary: from_boundary.clone(),
+                date_to_boundary: to_boundary.clone(),
+                ..JobFilters::default()
+            };
+
+            // "CLI path": the handler maps the same validated flags onto the
+            // same JobFilters fields (single/multi --status both map to
+            // `statuses`; boundaries computed the same way).
+            let cli_filters = JobFilters {
+                statuses: statuses_opt.clone(),
+                location: Some(loc_query.clone()),
+                remote_mode: Some(mode.to_string()),
+                date_field: date_field_opt.clone(),
+                date_from: from.map(str::to_string),
+                date_to: to.map(str::to_string),
+                date_from_boundary: from_boundary,
+                date_to_boundary: to_boundary,
+                ..JobFilters::default()
+            };
+
+            let ipc_ids = prop_result_ids(&conn, ipc_filters);
+            let cli_ids = prop_result_ids(&conn, cli_filters);
+            prop_assert_eq!(ipc_ids, cli_ids, "CLI and IPC paths returned different rows");
+        }
     }
 }

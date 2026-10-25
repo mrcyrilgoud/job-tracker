@@ -1,0 +1,580 @@
+{
+  "pbtResults": {
+    "1.2 Write property test for status partition": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921031852
+    },
+    "3.4 Write property test for date-range inclusivity with null exclusion": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921032809
+    },
+    "3.5 Write property test for location-text substring match": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921155346
+    },
+    "3.6 Write property test for remote-mode predicate": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921035147
+    },
+    "8.1 Write property test for status-set membership filtering": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921036549
+    },
+    "8.2 Write property test for conjunctive composition": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921038007
+    },
+    "8.3 Write property test for order-independence": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921038941
+    },
+    "6.4 Write property test for CLI / IPC parity": {
+      "status": "passed",
+      "lastRunTimestamp": 1792921039849
+    }
+  },
+  "executionHistory": {
+    "1.1 Implement `partition_statuses`, `escape_like`, `date_column`, and date-boundary mapping": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100633
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919108701
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919302289
+      }
+    ],
+    "2.1 Extend `JobFilters` struct with optional filter fields": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100683
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919109595
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919303153
+      }
+    ],
+    "3.1 Add the multi-status `IN (...)` fragment to `append_job_filters`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100736
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919309250
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919381886
+      }
+    ],
+    "3.2 Add the date-range fragment to `append_job_filters`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100761
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919386418
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919444849
+      }
+    ],
+    "3.3 Extend the location fragment and add the remote-mode fragment in `append_job_filters`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100783
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919445879
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919525206
+      }
+    ],
+    "4. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100815
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919537693
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919549939
+      }
+    ],
+    "5.1 Extend `ListJobsArgs` and its `From<ListJobsArgs> for JobFilters` impl": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100842
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919570904
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919727679
+      }
+    ],
+    "6.1 Extend `ListArgs` with the new flags": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100860
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919571863
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919726752
+      }
+    ],
+    "6.2 Implement strict validation and `JobFilters` construction in `handle_list`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100878
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919738026
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919901828
+      }
+    ],
+    "7. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100896
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919905307
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919915646
+      }
+    ],
+    "9.1 Add the new optional fields to the TS `JobFilters` type": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100916
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919110602
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919304275
+      }
+    ],
+    "10.1 Add status, date, and remote URL helpers plus date validators": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100937
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919310127
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919383002
+      }
+    ],
+    "11. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100969
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919920738
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919930000
+      }
+    ],
+    "12.1 Add popover controls for status set, date field/range, and location/remote": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919100990
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919933832
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920312588
+      }
+    ],
+    "12.2 Implement submit, restore, and empty-result wiring": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919101007
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919951109
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920314082
+      }
+    ],
+    "12.3 Extend the active-filter indicator count": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919101025
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919952212
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920314724
+      }
+    ],
+    "13. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919101043
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920318377
+      },
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920333843
+      }
+    ],
+    "1. Add pure Rust helpers for status partitioning, LIKE escaping, and date boundaries": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919302328
+      }
+    ],
+    "2. Add new fields to Rust `JobFilters`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919303177
+      }
+    ],
+    "9. Extend the TypeScript `JobFilters` type and `api.ts`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919304333
+      }
+    ],
+    "10. Implement pure `job-filters.ts` parse/encode/validate helpers": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919383040
+      }
+    ],
+    "3. Implement the parameterized SQL fragments in the shared service": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919525243
+      }
+    ],
+    "5. Wire the IPC boundary (`ListJobsArgs` + `From` impl)": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919727702
+      }
+    ],
+    "6. Add CLI flags and strict validation in `handle_list`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792919901862
+      }
+    ],
+    "12. Build the Filter_Popover controls and draft state in `JobsPage.tsx`": [
+      {
+        "executionId": "3f3ee416-e047-4870-a5cd-0eb4fc19659a",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920314746
+      }
+    ],
+    "1.2 Write property test for status partition": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920805274
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921059406
+      }
+    ],
+    "3.4 Write property test for date-range inclusivity with null exclusion": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920806644
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921060352
+      }
+    ],
+    "3.5 Write property test for location-text substring match": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920807612
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921061814
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921109330
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921167254
+      }
+    ],
+    "3.6 Write property test for remote-mode predicate": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920808998
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921062695
+      }
+    ],
+    "8.1 Write property test for status-set membership filtering": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920809946
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921064156
+      }
+    ],
+    "8.2 Write property test for conjunctive composition": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920811342
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921065546
+      }
+    ],
+    "8.3 Write property test for order-independence": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920812295
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921066498
+      }
+    ],
+    "6.4 Write property test for CLI / IPC parity": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920813402
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921067370
+      }
+    ],
+    "10.2 Write property test for URL round-trip and normalization": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920817109
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921073127
+      }
+    ],
+    "10.3 Write property test for restore robustness against malformed input": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920818486
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921074531
+      }
+    ],
+    "10.4 Write property test for date-range validation": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920819424
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921075555
+      }
+    ],
+    "12.4 Write property test for active-filter count": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920820834
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921076867
+      }
+    ],
+    "5.2 Write unit tests for the IPC status/date validation boundary": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920822243
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921070773
+      }
+    ],
+    "6.3 Write unit tests for CLI error contract": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920823179
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921072172
+      }
+    ],
+    "12.5 Write component tests for popover controls and submit preservation": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792920824233
+      },
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921077824
+      }
+    ],
+    "8. Add remaining shared-service property tests for composition": [
+      {
+        "executionId": "ba580f1d-69ba-4255-a1f5-422a44e99953",
+        "chatSessionId": "sess_86d66999-afa9-48df-8236-f5d1c0cf07e4",
+        "timestamp": 1792921064187
+      }
+    ]
+  }
+}

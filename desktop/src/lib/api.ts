@@ -18,6 +18,7 @@ import type {
   JobSort,
   JobListSort,
   JobStatus,
+  RemoteMode,
   WeeklyActivity,
   WatchRolePage,
   WatchRoleSummary,
@@ -56,12 +57,17 @@ export type FilterPreviewOutcome = {
 
 export type JobFilters = {
   status?: string;
+  statuses?: string[];
   companyId?: string;
   postingState?: string;
   search?: string;
   salaryMin?: number;
   salaryMax?: number;
   location?: string;
+  remoteMode?: RemoteMode;
+  dateField?: "appliedAt" | "postingDate" | "lastCheckedAt";
+  dateFrom?: string;
+  dateTo?: string;
   newFromWatch?: boolean;
   isFavorite?: boolean;
   isArchived?: boolean;

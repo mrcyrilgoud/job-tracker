@@ -39,9 +39,10 @@ use crate::jobs::service::{
     get_watch_role_keywords as service_get_keywords, get_weekly_activity, list_job_ids, list_jobs,
     list_jobs_page, list_open_watch_positions, list_watch_roles_page, reset_dismissed_watch_job,
     resolve_title_from_url, save_open_watch_job, set_job_favorite, set_location_settings,
+    date_column, date_from_boundary, date_to_boundary, partition_statuses,
     set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
-    unarchive_jobs as unarchive_jobs_service, update_job, JobFilters, LocationSettings,
-    UpdateJobInput, WatchRoleFilters,
+    unarchive_jobs as unarchive_jobs_service, update_job, validate_date_range, JobFilters,
+    LocationSettings, UpdateJobInput, WatchRoleFilters,
 };
 use crate::models::{Job, JobListPageCursor, JobListSort, JobPageCursor, JobSort};
 use crate::runner::try_lock_runner;
@@ -67,12 +68,23 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct ListJobsArgs {
     pub status: Option<String>,
+    /// Multi-select status set from the Filter_Popover. Validated/partitioned
+    /// into valid members here; an all-invalid set is rejected (Req 1.9).
+    pub statuses: Option<Vec<String>>,
     pub company_id: Option<String>,
     pub posting_state: Option<String>,
     pub search: Option<String>,
     pub salary_min: Option<i64>,
     pub salary_max: Option<i64>,
     pub location: Option<String>,
+    /// Remote mode: `"any"` | `"remoteOnly"` | `"onsiteOnly"`.
+    pub remote_mode: Option<String>,
+    /// Date field to range-filter on: `"appliedAt"` | `"postingDate"` | `"lastCheckedAt"`.
+    pub date_field: Option<String>,
+    /// Inclusive start date in `YYYY-MM-DD` form.
+    pub date_from: Option<String>,
+    /// Inclusive end date in `YYYY-MM-DD` form.
+    pub date_to: Option<String>,
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
     pub is_archived: Option<bool>,
@@ -80,21 +92,67 @@ pub struct ListJobsArgs {
     pub limit: Option<usize>,
 }
 
-impl From<ListJobsArgs> for JobFilters {
-    fn from(filters: ListJobsArgs) -> Self {
-        Self {
-            status: filters.status,
-            company_id: filters.company_id,
-            posting_state: filters.posting_state,
-            search: filters.search,
-            salary_min: filters.salary_min,
-            salary_max: filters.salary_max,
-            location: filters.location,
-            new_from_watch: filters.new_from_watch,
-            is_favorite: filters.is_favorite,
-            is_archived: filters.is_archived,
-            limit: filters.limit,
-        }
+impl ListJobsArgs {
+    /// Fallible conversion into [`JobFilters`] that runs the GUI/IPC-side
+    /// validation policy (defense-in-depth; the popover normally pre-validates):
+    ///
+    /// - Multi-select `statuses` are resolved via [`partition_statuses`]. When
+    ///   every provided value is a non-member the request is rejected with the
+    ///   Req 1.9 error; otherwise the valid members are applied and invalid
+    ///   values are dropped (Req 1.8).
+    /// - The `date_field`/`date_from`/`date_to` range is validated via the
+    ///   shared [`validate_date_range`] helper (Req 2.7, 2.8); on an invalid
+    ///   date or `start > end` the request is rejected. Day-boundary strings
+    ///   are precomputed and stored only when `date_field` is a supported
+    ///   domain member and at least one bound is present.
+    pub fn into_filters(self) -> AppResult<JobFilters> {
+        let statuses = match self.statuses {
+            Some(requested) if !requested.is_empty() => {
+                let (valid, _invalid) = partition_statuses(&requested);
+                if valid.is_empty() {
+                    return Err(AppError::from("No valid Job_Status value was provided"));
+                }
+                Some(valid)
+            }
+            _ => None,
+        };
+
+        // Validate the supplied date range regardless of the field so malformed
+        // dates are rejected even if the field is out of domain.
+        validate_date_range(self.date_from.as_deref(), self.date_to.as_deref())?;
+
+        // Only compute boundaries when the field is a supported domain member
+        // and at least one bound is present.
+        let field_in_domain = date_column(self.date_field.as_deref()).is_some();
+        let (date_from_boundary, date_to_boundary) = if field_in_domain {
+            (
+                self.date_from.as_deref().map(date_from_boundary),
+                self.date_to.as_deref().map(date_to_boundary),
+            )
+        } else {
+            (None, None)
+        };
+
+        Ok(JobFilters {
+            status: self.status,
+            statuses,
+            company_id: self.company_id,
+            posting_state: self.posting_state,
+            search: self.search,
+            salary_min: self.salary_min,
+            salary_max: self.salary_max,
+            location: self.location,
+            remote_mode: self.remote_mode,
+            date_field: self.date_field,
+            date_from: self.date_from,
+            date_to: self.date_to,
+            date_from_boundary,
+            date_to_boundary,
+            new_from_watch: self.new_from_watch,
+            is_favorite: self.is_favorite,
+            is_archived: self.is_archived,
+            limit: self.limit,
+        })
     }
 }
 
@@ -103,9 +161,9 @@ pub async fn list_jobs_cmd(
     state: State<'_, AppState>,
     filters: Option<ListJobsArgs>,
 ) -> AppResult<serde_json::Value> {
-    let filters = filters.unwrap_or_default();
+    let filters = filters.unwrap_or_default().into_filters()?;
     state.with_db(|conn| {
-        let jobs = list_jobs(conn, filters.into())?;
+        let jobs = list_jobs(conn, filters)?;
         Ok(serde_json::json!({ "jobs": jobs }))
     })
 }
@@ -120,14 +178,9 @@ pub async fn list_jobs_page_cmd(
     sort_spec: Option<JobListSort>,
     cursor: Option<JobListPageCursor>,
 ) -> AppResult<serde_json::Value> {
+    let filters = filters.unwrap_or_default().into_filters()?;
     state.with_db(|conn| {
-        let page = list_jobs_page(
-            conn,
-            filters.unwrap_or_default().into(),
-            sort.unwrap_or_default(),
-            sort_spec,
-            cursor,
-        )?;
+        let page = list_jobs_page(conn, filters, sort.unwrap_or_default(), sort_spec, cursor)?;
         Ok(serde_json::json!(page))
     })
 }
@@ -138,8 +191,9 @@ pub async fn list_job_ids_cmd(
     state: State<'_, AppState>,
     filters: Option<ListJobsArgs>,
 ) -> AppResult<serde_json::Value> {
+    let filters = filters.unwrap_or_default().into_filters()?;
     state.with_db(|conn| {
-        let ids = list_job_ids(conn, filters.unwrap_or_default().into())?;
+        let ids = list_job_ids(conn, filters)?;
         Ok(serde_json::json!({ "ids": ids }))
     })
 }
@@ -585,6 +639,101 @@ mod tests {
             "Confirmed board provider and slug must be provided together"
         );
         assert_eq!(row_counts(&state), (0, 0, 0));
+    }
+
+    fn list_args_with_statuses(statuses: Vec<&str>) -> ListJobsArgs {
+        ListJobsArgs {
+            statuses: Some(statuses.into_iter().map(str::to_string).collect()),
+            ..Default::default()
+        }
+    }
+
+    /// `JobFilters` intentionally does not derive `Debug`, so `Result::unwrap_err`
+    /// (which requires the `Ok` type to be `Debug`) cannot be used. Extract the
+    /// error directly instead.
+    fn expect_filters_err(result: AppResult<JobFilters>) -> AppError {
+        match result {
+            Ok(_) => panic!("expected into_filters() to return Err"),
+            Err(error) => error,
+        }
+    }
+
+    #[test]
+    fn into_filters_rejects_all_invalid_status_set() {
+        // Req 1.9: every provided value is a non-member -> error naming the
+        // "no valid Job_Status" condition, and no JobFilters is produced.
+        let error = expect_filters_err(list_args_with_statuses(vec!["bogus", "nonsense"]).into_filters());
+        assert!(
+            error.to_string().contains("No valid Job_Status"),
+            "unexpected error message: {error}"
+        );
+    }
+
+    #[test]
+    fn into_filters_drops_invalid_members_from_mixed_status_set() {
+        // Req 1.8: a mix of valid and invalid values is accepted; only the
+        // valid members survive on the resulting JobFilters.statuses (invalids
+        // dropped, first-seen order preserved).
+        let filters = list_args_with_statuses(vec!["bogus", "applied", "nonsense", "interviewing"])
+            .into_filters()
+            .unwrap();
+        assert_eq!(
+            filters.statuses,
+            Some(vec!["applied".to_string(), "interviewing".to_string()])
+        );
+    }
+
+    #[test]
+    fn into_filters_rejects_invalid_calendar_date() {
+        // Req 2.8: a malformed/out-of-range date in either bound is rejected.
+        for bad in ["2026-13-40", "not-a-date"] {
+            let error = expect_filters_err(
+                ListJobsArgs {
+                    date_field: Some("appliedAt".to_string()),
+                    date_from: Some(bad.to_string()),
+                    ..Default::default()
+                }
+                .into_filters(),
+            );
+            assert!(
+                error.to_string().contains(bad),
+                "expected error to name the bad date '{bad}', got: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn into_filters_rejects_inverted_date_range() {
+        // Req 2.7: start strictly later than end is rejected.
+        let error = expect_filters_err(
+            ListJobsArgs {
+                date_field: Some("appliedAt".to_string()),
+                date_from: Some("2026-05-10".to_string()),
+                date_to: Some("2026-05-01".to_string()),
+                ..Default::default()
+            }
+            .into_filters(),
+        );
+        assert!(
+            error.to_string().contains("2026-05-10") && error.to_string().contains("2026-05-01"),
+            "expected error to name the inverted range, got: {error}"
+        );
+    }
+
+    #[test]
+    fn into_filters_populates_boundaries_for_valid_date_range() {
+        // A supported date_field with a valid range yields precomputed
+        // inclusive day-boundary strings on the resulting JobFilters.
+        let filters = ListJobsArgs {
+            date_field: Some("postingDate".to_string()),
+            date_from: Some("2026-05-01".to_string()),
+            date_to: Some("2026-05-10".to_string()),
+            ..Default::default()
+        }
+        .into_filters()
+        .unwrap();
+        assert_eq!(filters.date_from_boundary.as_deref(), Some("2026-05-01"));
+        assert_eq!(filters.date_to_boundary.as_deref(), Some("2026-05-10~"));
     }
 
     #[test]

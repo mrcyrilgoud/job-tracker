@@ -16,11 +16,12 @@ use crate::jobs::csv::export_jobs_csv;
 use crate::jobs::csv_config::active_csv_path;
 use crate::jobs::metadata::resolve_job_metadata;
 use crate::jobs::service::{
-    add_job_event, archive_job, create_job_from_url_with_careers, delete_jobs, dismiss_watch_job,
-    get_job_by_id, get_job_detail, get_pipeline_counts, get_weekly_activity, job_cols, list_jobs,
-    map_job, reset_dismissed_watch_job, resolve_title_from_url,
-    retain_watch_positions_matching_criteria, save_open_watch_job, set_job_favorite, unarchive_job,
-    update_job, JobFilters, UpdateJobInput, JOB_COL_COUNT,
+    add_job_event, archive_job, create_job_from_url_with_careers, date_column, date_from_boundary,
+    date_to_boundary, delete_jobs, dismiss_watch_job, get_job_by_id, get_job_detail,
+    get_pipeline_counts, get_weekly_activity, job_cols, list_jobs, map_job, partition_statuses,
+    reset_dismissed_watch_job, resolve_title_from_url, retain_watch_positions_matching_criteria,
+    save_open_watch_job, set_job_favorite, unarchive_job, update_job, validate_date_range,
+    JobFilters, UpdateJobInput, JOB_COL_COUNT,
 };
 use crate::models::{is_job_status, JobListItem};
 use crate::runner::run_jobs_cycle_trigger;
@@ -115,22 +116,82 @@ pub fn handle_list(
     args: ListArgs,
     json: bool,
 ) -> AppResult<()> {
-    let explicit_status = args.status.is_some();
+    // Strict CLI validation (Req 1.10, 3.13, 6.6, 6.7): any invalid input is
+    // rejected by name with a nonzero exit (an `Err(AppError)` return prints no
+    // rows), unlike the IPC boundary which silently drops some invalid values.
+
+    // 1. Statuses: reject the first non-member value outright, then map valid
+    //    members to `statuses` (the CLI has no sidebar/applied-tab notion, so it
+    //    never uses the single `status` field).
+    let (valid_statuses, invalid_statuses) = partition_statuses(&args.status);
+    if let Some(bad) = invalid_statuses.first() {
+        return Err(AppError::from(format!(
+            "Invalid status '{bad}'. Valid statuses: wishlist, applied, interviewing, offer, rejected, withdrawn, closed, archived"
+        )));
+    }
+    let statuses = if valid_statuses.is_empty() {
+        None
+    } else {
+        Some(valid_statuses)
+    };
+
+    // 2. Remote mode: only `any`/`remoteOnly`/`onsiteOnly` are accepted; `any`
+    //    (like `None`) imposes no restriction downstream.
+    let remote_mode = match args.remote.as_deref() {
+        None | Some("any") | Some("remoteOnly") | Some("onsiteOnly") => args.remote.clone(),
+        Some(other) => {
+            return Err(AppError::from(format!(
+                "Invalid remote mode '{other}'. Valid values: any, remoteOnly, onsiteOnly"
+            )));
+        }
+    };
+
+    // 3. Date field + range. A supplied field must be a supported member; dates
+    //    must be valid `YYYY-MM-DD` and non-inverted. Boundaries are computed
+    //    only when the field is valid and at least one bound is present.
+    if let Some(field) = args.date_field.as_deref() {
+        if date_column(Some(field)).is_none() {
+            return Err(AppError::from(format!(
+                "Invalid date field '{field}'. Valid values: appliedAt, postingDate, lastCheckedAt"
+            )));
+        }
+    }
+    validate_date_range(args.date_from.as_deref(), args.date_to.as_deref())?;
+
+    let field_in_domain = date_column(args.date_field.as_deref()).is_some();
+    let (date_from_bound, date_to_bound) = if field_in_domain {
+        (
+            args.date_from.as_deref().map(date_from_boundary),
+            args.date_to.as_deref().map(date_to_boundary),
+        )
+    } else {
+        (None, None)
+    };
+
+    // A non-empty `statuses` selection (e.g. closed, rejected) must not be
+    // hidden by the default active-pipeline `is_archived = Some(false)`.
+    let explicit_status = statuses.is_some();
+
     let filters = JobFilters {
-        status: args.status,
+        status: None,
+        statuses,
         company_id: args.company,
         posting_state: None,
         search: args.search,
         salary_min: None,
         salary_max: None,
         location: args.location,
+        remote_mode,
+        date_field: args.date_field,
+        date_from: args.date_from,
+        date_to: args.date_to,
+        date_from_boundary: date_from_bound,
+        date_to_boundary: date_to_bound,
         new_from_watch: None,
         is_favorite: if args.favorites { Some(true) } else { None },
         is_archived: if args.archived {
             Some(true)
         } else if explicit_status {
-            // An explicit --status (e.g. closed, rejected) must not be hidden
-            // by the default active-pipeline filter.
             None
         } else {
             Some(false)
@@ -923,6 +984,150 @@ mod tests {
     use super::*;
     use crate::db::migrate::migrate;
     use crate::util::{create_id, now_iso};
+
+    fn empty_list_args() -> ListArgs {
+        ListArgs {
+            status: Vec::new(),
+            company: None,
+            search: None,
+            location: None,
+            date_field: None,
+            date_from: None,
+            date_to: None,
+            remote: None,
+            favorites: false,
+            archived: false,
+            limit: None,
+        }
+    }
+
+    /// In-memory DB + a throwaway DataPaths. The strict-validation branches in
+    /// `handle_list` return `Err` before any path/row work, so a non-existent
+    /// data dir is fine for the error-contract tests.
+    fn list_test_fixtures() -> (Connection, DataPaths) {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let paths = DataPaths::from_data_dir(std::path::PathBuf::from("/nonexistent/jt-test"));
+        (conn, paths)
+    }
+
+    #[test]
+    fn handle_list_rejects_invalid_status_and_emits_no_rows() {
+        // Req 1.10 / 6.6: an unknown status value is rejected by name; the Err
+        // return path emits no rows.
+        let (conn, paths) = list_test_fixtures();
+        let error = handle_list(
+            &conn,
+            &paths,
+            ListArgs {
+                status: vec!["bogus".to_string()],
+                ..empty_list_args()
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("bogus"),
+            "expected error to name the invalid status, got: {error}"
+        );
+    }
+
+    #[test]
+    fn handle_list_rejects_invalid_remote_mode() {
+        // Req 3.13 / 6.6: an out-of-domain --remote value is rejected by name.
+        let (conn, paths) = list_test_fixtures();
+        let error = handle_list(
+            &conn,
+            &paths,
+            ListArgs {
+                remote: Some("bogus".to_string()),
+                ..empty_list_args()
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("bogus"),
+            "expected error to name the invalid remote mode, got: {error}"
+        );
+    }
+
+    #[test]
+    fn handle_list_rejects_invalid_date_field() {
+        // Req 6.7: an unsupported --date-field value is rejected by name.
+        let (conn, paths) = list_test_fixtures();
+        let error = handle_list(
+            &conn,
+            &paths,
+            ListArgs {
+                date_field: Some("bogus".to_string()),
+                ..empty_list_args()
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("bogus"),
+            "expected error to name the invalid date field, got: {error}"
+        );
+    }
+
+    #[test]
+    fn handle_list_rejects_malformed_and_inverted_dates() {
+        // Req 6.7: a non-calendar date and an inverted range are both rejected.
+        let (conn, paths) = list_test_fixtures();
+
+        let malformed = handle_list(
+            &conn,
+            &paths,
+            ListArgs {
+                date_field: Some("appliedAt".to_string()),
+                date_from: Some("not-a-date".to_string()),
+                ..empty_list_args()
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            malformed.to_string().contains("not-a-date"),
+            "expected error to name the malformed date, got: {malformed}"
+        );
+
+        let inverted = handle_list(
+            &conn,
+            &paths,
+            ListArgs {
+                date_field: Some("appliedAt".to_string()),
+                date_from: Some("2026-05-10".to_string()),
+                date_to: Some("2026-05-01".to_string()),
+                ..empty_list_args()
+            },
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            inverted.to_string().contains("2026-05-10")
+                && inverted.to_string().contains("2026-05-01"),
+            "expected error to name the inverted range, got: {inverted}"
+        );
+    }
+
+    #[test]
+    fn handle_list_accepts_valid_multi_status() {
+        // Sanity: a fully valid multi-status selection is accepted (Ok) against
+        // an empty in-memory DB.
+        let (conn, paths) = list_test_fixtures();
+        let result = handle_list(
+            &conn,
+            &paths,
+            ListArgs {
+                status: vec!["applied".to_string(), "interviewing".to_string()],
+                ..empty_list_args()
+            },
+            true,
+        );
+        assert!(result.is_ok(), "expected Ok, got: {result:?}");
+    }
 
     #[test]
     fn delete_confirmation_accepts_yes_and_refuses_noninteractive() {
