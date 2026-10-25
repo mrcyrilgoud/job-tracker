@@ -38,6 +38,7 @@ function jobItem(overrides: Partial<Job> & Pick<Job, "id" | "url">): JobListItem
       missingFromSyncCount: 0,
       isFavorite: false,
       appeal: null,
+      applicationEase: null,
       salaryMin: null,
       salaryMax: null,
       createdAt: "2026-07-01T00:00:00.000Z",

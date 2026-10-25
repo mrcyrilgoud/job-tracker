@@ -6,10 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
-    checked_appeal, is_job_status, AttachedDocument, Company, Document, Job, JobDetail,
-    JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor, JobListSort,
-    JobListSortDirection, JobListSortField, JobListSummary, JobPageCursor, JobSort, JobSummary,
-    WeeklyActivity, WeeklyDay,
+    checked_appeal, checked_application_ease, is_job_status, AttachedDocument, Company, Document,
+    Job, JobDetail, JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor,
+    JobListSort, JobListSortDirection, JobListSortField, JobListSummary, JobPageCursor, JobSort,
+    JobSummary, WeeklyActivity, WeeklyDay,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -23,8 +23,8 @@ fn map_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
     })
 }
 
-/// Column order read by [`map_job`]. `appeal` is last so a company column
-/// joined after this list starts at [`JOB_COL_COUNT`].
+/// Column order read by [`map_job`]. A company column joined after this list
+/// starts at [`JOB_COL_COUNT`].
 pub const JOB_COLUMNS: &[&str] = &[
     "id",
     "company_id",
@@ -50,6 +50,7 @@ pub const JOB_COLUMNS: &[&str] = &[
     "appeal",
     "salary_min",
     "salary_max",
+    "application_ease",
 ];
 
 pub const JOB_COL_COUNT: usize = JOB_COLUMNS.len();
@@ -91,6 +92,7 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         appeal: row.get(21)?,
         salary_min: row.get(22)?,
         salary_max: row.get(23)?,
+        application_ease: row.get(24)?,
     })
 }
 
@@ -700,7 +702,7 @@ pub fn list_jobs_page(
     let sql = format!(
         "SELECT j.id, j.title, j.status, j.applied_at, j.posting_state,
                 j.last_checked_at, j.source, j.is_new_from_watch, j.is_favorite,
-                j.updated_at, j.appeal, j.location, c.name, j.created_at
+                j.updated_at, j.appeal, j.location, c.name, j.created_at, j.application_ease
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
          {} LIMIT ?",
         jobs_page_order_by(sort_spec, applied_tab)
@@ -722,6 +724,7 @@ pub fn list_jobs_page(
                     is_favorite: row.get::<_, i64>(8)? != 0,
                     updated_at: row.get(9)?,
                     appeal: row.get(10)?,
+                    application_ease: row.get(14)?,
                     location: row.get(11)?,
                 },
                 company_name: row.get(12)?,
@@ -1119,6 +1122,10 @@ pub struct UpdateJobInput {
     /// `Some(Some(n))` sets it when `n` is 1–5.
     #[serde(default, deserialize_with = "deserialize_optional_update")]
     pub appeal: Option<Option<i64>>,
+    /// `None` leaves application ease unchanged. `Some(None)` clears it.
+    /// `Some(Some(n))` sets it when `n` is 1–5 (5 = easiest to apply).
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub application_ease: Option<Option<i64>>,
 }
 
 use serde::Deserialize;
@@ -1221,11 +1228,20 @@ pub fn update_job(
         }
         None => existing.appeal,
     };
+    let application_ease = match updates.application_ease {
+        Some(next) => {
+            if let Some(score) = next {
+                checked_application_ease(score).map_err(AppError::from)?;
+            }
+            next
+        }
+        None => existing.application_ease,
+    };
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14, updated_at=?15
-           WHERE id=?16"#,
+           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14, application_ease=?15, updated_at=?16
+           WHERE id=?17"#,
         params![
             title,
             company_id,
@@ -1241,6 +1257,7 @@ pub fn update_job(
             appeal,
             salary_min,
             salary_max,
+            application_ease,
             timestamp,
             job_id
         ],
@@ -3562,6 +3579,114 @@ mod tests {
             get_job_by_id(&conn, &job.id).unwrap().unwrap().status,
             "closed"
         );
+    }
+
+    #[test]
+    fn application_ease_is_optional_and_does_not_change_favorite_or_appeal() {
+        let conn = test_connection();
+        let (job, _) = create_job_from_url(
+            &conn,
+            "https://example.com/jobs/easy-apply",
+            "Easy apply role",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(job.application_ease, None);
+        assert_eq!(job.appeal, None);
+        assert!(!job.is_favorite);
+
+        let favorited = set_job_favorite(&conn, &job.id, true).unwrap();
+        assert!(favorited.job.is_favorite);
+
+        let scored = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                appeal: Some(Some(4)),
+                application_ease: Some(Some(5)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(scored.job.application_ease, Some(5));
+        assert_eq!(scored.job.appeal, Some(4));
+        assert!(scored.job.is_favorite);
+        let json = serde_json::to_value(&scored.job).unwrap();
+        assert_eq!(json["applicationEase"], 5);
+        assert!(json.get("application_ease").is_none());
+
+        let missing: UpdateJobInput = serde_json::from_str("{}").unwrap();
+        assert!(missing.application_ease.is_none());
+        let clear_input: UpdateJobInput =
+            serde_json::from_str(r#"{"applicationEase":null}"#).unwrap();
+        assert_eq!(clear_input.application_ease, Some(None));
+        let set_input: UpdateJobInput = serde_json::from_str(r#"{"applicationEase":2}"#).unwrap();
+        assert_eq!(set_input.application_ease, Some(Some(2)));
+
+        let unchanged = update_job(&conn, &job.id, missing).unwrap();
+        assert_eq!(unchanged.job.application_ease, Some(5));
+        assert_eq!(unchanged.job.appeal, Some(4));
+
+        let cleared = update_job(&conn, &job.id, clear_input).unwrap();
+        assert_eq!(cleared.job.application_ease, None);
+        assert_eq!(cleared.job.appeal, Some(4));
+        assert!(cleared.job.is_favorite);
+
+        assert!(update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                application_ease: Some(Some(0)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .is_err());
+        assert!(update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                application_ease: Some(Some(6)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .is_err());
+        assert_eq!(
+            get_job_by_id(&conn, &job.id)
+                .unwrap()
+                .unwrap()
+                .application_ease,
+            None
+        );
+
+        let restored = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                application_ease: Some(Some(3)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        let page = list_jobs_page(
+            &conn,
+            JobFilters {
+                status: Some("wishlist".into()),
+                ..JobFilters::default()
+            },
+            JobSort::NewestPosting,
+            None,
+            None,
+        )
+        .unwrap();
+        let listed = page.jobs.iter().find(|item| item.job.id == job.id).unwrap();
+        assert_eq!(listed.job.application_ease, Some(3));
+        assert_eq!(restored.job.application_ease, Some(3));
+        let listed_json = serde_json::to_value(listed).unwrap();
+        assert_eq!(listed_json["job"]["applicationEase"], 3);
     }
 
     // ---- Query-time filtering integration tests (task 8.3) ----

@@ -31,6 +31,7 @@ function mockJob(
       missingFromSyncCount: 0,
       isFavorite,
       appeal: null,
+      applicationEase: null,
       salaryMin: null,
       salaryMax: null,
       createdAt: "2026-08-01T00:00:00.000Z",

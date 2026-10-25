@@ -67,6 +67,7 @@ function job(
     watchDisposition?: WatchDisposition;
     description?: string | null;
     appeal?: number | null;
+    applicationEase?: number | null;
   } = {},
 ): Job {
   jobSeq += 1;
@@ -95,6 +96,7 @@ function job(
     createdAt: ago(5 * days),
     updatedAt: ago(1 * hours),
     appeal: opts.appeal ?? null,
+    applicationEase: opts.applicationEase ?? null,
     salaryMin: null,
     salaryMax: null,
   };
@@ -142,10 +144,12 @@ export function createFixtureBackend() {
     job("c-anthropic", "Senior Product Engineer", "San Francisco, CA", {
       status: "applied",
       appeal: 5,
+      applicationEase: 4,
     }),
     job("c-stripe", "Staff Frontend Engineer", "Remote (US)", {
       status: "interviewing",
       appeal: 2,
+      applicationEase: 1,
     }),
     job("c-anthropic", "Research Engineer, Safety", "Remote (US)", {
       status: "closed",
@@ -250,6 +254,7 @@ export function createFixtureBackend() {
           isFavorite: job.isFavorite,
           updatedAt: job.updatedAt,
           appeal: job.appeal,
+          applicationEase: job.applicationEase,
           location: job.location,
         },
         companyName,
@@ -412,6 +417,7 @@ export function createFixtureBackend() {
         description?: string | null;
         isFavorite?: boolean;
         appeal?: number | null;
+        applicationEase?: number | null;
         salaryMin?: number | null;
         salaryMax?: number | null;
       };
@@ -434,6 +440,18 @@ export function createFixtureBackend() {
           found.appeal = appeal;
         } else {
           throw new Error("Appeal must be an integer from 1 to 5 (5 = most appealing)");
+        }
+      }
+      if ("applicationEase" in updates) {
+        const applicationEase = updates.applicationEase;
+        if (applicationEase == null) {
+          found.applicationEase = null;
+        } else if (applicationEase >= 1 && applicationEase <= 5) {
+          found.applicationEase = applicationEase;
+        } else {
+          throw new Error(
+            "Application ease must be an integer from 1 to 5 (5 = easiest to apply)",
+          );
         }
       }
       found.updatedAt = new Date().toISOString();

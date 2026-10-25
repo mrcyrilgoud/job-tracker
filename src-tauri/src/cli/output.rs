@@ -61,6 +61,7 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             Cell::new("APPLIED").add_attribute(Attribute::Bold),
             Cell::new("LOCATION").add_attribute(Attribute::Bold),
             Cell::new("APPEAL").add_attribute(Attribute::Bold),
+            Cell::new("EASE").add_attribute(Attribute::Bold),
             Cell::new("FAV").add_attribute(Attribute::Bold),
         ]);
 
@@ -79,6 +80,10 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             .appeal
             .map(|score| score.to_string())
             .unwrap_or_else(|| "—".to_string());
+        let application_ease = job
+            .application_ease
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "—".to_string());
 
         table.add_row(vec![
             Cell::new(id_short).fg(Color::DarkGrey),
@@ -90,6 +95,7 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             Cell::new(applied),
             Cell::new(location),
             Cell::new(appeal),
+            Cell::new(application_ease),
             Cell::new(fav).fg(Color::Yellow),
         ]);
     }
@@ -123,6 +129,13 @@ pub fn format_job_detail(detail: &JobDetail) {
         match job.appeal {
             Some(score) => format!("{score} (1-5, 5 = most appealing)"),
             None => "— (1-5, 5 = most appealing)".to_string(),
+        }
+    );
+    println!(
+        "  Ease:        {}",
+        match job.application_ease {
+            Some(score) => format!("{score} (1-5, 5 = easiest to apply)"),
+            None => "— (1-5, 5 = easiest to apply)".to_string(),
         }
     );
     println!("  Posting URL: {}", job.url);

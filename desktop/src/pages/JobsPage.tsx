@@ -3,6 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
+import {
+  APPLICATION_EASE_SCALE_LABEL,
+  ApplicationEaseSelect,
+} from "@/components/ApplicationEaseSelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
   ArchiveIcon,
@@ -421,6 +425,41 @@ export function JobsPage() {
       setJobs((prev) =>
         prev.map((item) =>
           item.job.id === jobId ? { ...item, job: { ...item.job, appeal: previous } } : item,
+        ),
+      );
+    }
+  }
+
+  async function handleSetApplicationEase(jobId: string, applicationEase: number | null) {
+    const previous = jobs.find((item) => item.job.id === jobId)?.job.applicationEase ?? null;
+    setJobs((prev) =>
+      prev.map((item) =>
+        item.job.id === jobId ? { ...item, job: { ...item.job, applicationEase } } : item,
+      ),
+    );
+    try {
+      const res = await api.updateJob(jobId, { applicationEase });
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId
+            ? {
+                ...item,
+                job: {
+                  ...item.job,
+                  applicationEase: res.detail.job.applicationEase,
+                  updatedAt: res.detail.job.updatedAt,
+                },
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update application ease");
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId
+            ? { ...item, job: { ...item.job, applicationEase: previous } }
+            : item,
         ),
       );
     }
@@ -1279,7 +1318,7 @@ export function JobsPage() {
                           </p>
                           {source ? <p className="text-xs text-[var(--faint)]">{source}</p> : null}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0 self-start md:self-auto">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0 self-start md:self-auto">
                           <div
                             className="flex items-center gap-1.5"
                             onMouseDown={(event) => event.stopPropagation()}
@@ -1300,6 +1339,30 @@ export function JobsPage() {
                               value={job.appeal}
                               compact
                               onChange={(appeal) => void handleSetAppeal(job.id, appeal)}
+                            />
+                          </div>
+                          <div
+                            className="flex items-center gap-1.5"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                          >
+                            <label
+                              htmlFor={`application-ease-${job.id}`}
+                              className="text-xs text-[var(--faint)]"
+                              title={APPLICATION_EASE_SCALE_LABEL}
+                            >
+                              Ease
+                            </label>
+                            <ApplicationEaseSelect
+                              id={`application-ease-${job.id}`}
+                              value={job.applicationEase}
+                              compact
+                              onChange={(applicationEase) =>
+                                void handleSetApplicationEase(job.id, applicationEase)
+                              }
                             />
                           </div>
                           <button

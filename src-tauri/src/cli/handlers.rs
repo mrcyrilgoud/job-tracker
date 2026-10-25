@@ -344,6 +344,11 @@ pub fn handle_update(
         } else {
             args.appeal.map(Some)
         },
+        application_ease: if args.clear_application_ease {
+            Some(None)
+        } else {
+            args.application_ease.map(Some)
+        },
         salary_min: None,
         salary_max: None,
     };
@@ -369,6 +374,13 @@ pub fn handle_update(
             match updated.job.appeal {
                 Some(score) => format!("{score} (1-5, 5 = most appealing)"),
                 None => "— (1-5, 5 = most appealing)".to_string(),
+            }
+        );
+        println!(
+            "  Ease:     {}",
+            match updated.job.application_ease {
+                Some(score) => format!("{score} (1-5, 5 = easiest to apply)"),
+                None => "— (1-5, 5 = easiest to apply)".to_string(),
             }
         );
     }
@@ -558,6 +570,7 @@ pub fn handle_note(
             is_new_from_watch: None,
             is_favorite: None,
             appeal: None,
+            application_ease: None,
             salary_min: None,
             salary_max: None,
         },

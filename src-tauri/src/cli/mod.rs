@@ -236,6 +236,8 @@ mod tests {
                 assert!(!args.unfavorite);
                 assert_eq!(args.appeal, None);
                 assert!(!args.clear_appeal);
+                assert_eq!(args.application_ease, None);
+                assert!(!args.clear_application_ease);
             }
             _ => panic!("Expected Update command"),
         }
@@ -276,6 +278,67 @@ mod tests {
             "--appeal",
             "5",
             "--clear-appeal"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn parses_application_ease_bounds() {
+        let cli = Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_123",
+            "--application-ease",
+            "5",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Commands::Update(args)) => {
+                assert_eq!(args.application_ease, Some(5));
+                assert!(!args.clear_application_ease);
+                assert_eq!(args.appeal, None);
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        let cleared = Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_123",
+            "--clear-application-ease",
+        ])
+        .unwrap();
+        match cleared.command {
+            Some(Commands::Update(args)) => {
+                assert_eq!(args.application_ease, None);
+                assert!(args.clear_application_ease);
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        assert!(Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_123",
+            "--application-ease",
+            "0"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_123",
+            "--application-ease",
+            "6"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_123",
+            "--application-ease",
+            "1",
+            "--clear-application-ease"
         ])
         .is_err());
     }
@@ -408,6 +471,8 @@ mod tests {
             unarchive: false,
             appeal: None,
             clear_appeal: false,
+            application_ease: None,
+            clear_application_ease: false,
         };
         handlers::handle_update(&conn, &paths, update_args, true, true).unwrap();
 
@@ -530,6 +595,8 @@ mod tests {
             unarchive: false,
             appeal: Some(4),
             clear_appeal: false,
+            application_ease: None,
+            clear_application_ease: false,
         };
         handlers::handle_update(&conn, &paths, set_appeal, true, true).unwrap();
         let scored = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -543,8 +610,16 @@ mod tests {
             .iter()
             .position(|header| header == "appeal")
             .unwrap();
-        assert_eq!(parsed[0].last().map(String::as_str), Some("appeal"));
+        assert_eq!(
+            parsed[0].last().map(String::as_str),
+            Some("application_ease")
+        );
         assert_eq!(parsed[1][appeal_idx], "4");
+        let ease_idx = parsed[0]
+            .iter()
+            .position(|header| header == "application_ease")
+            .unwrap();
+        assert_eq!(parsed[1][ease_idx], "");
 
         let clear_appeal = UpdateArgs {
             target: job_id.clone(),
@@ -563,6 +638,8 @@ mod tests {
             unarchive: false,
             appeal: None,
             clear_appeal: true,
+            application_ease: None,
+            clear_application_ease: false,
         };
         handlers::handle_update(&conn, &paths, clear_appeal, true, true).unwrap();
         let cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -573,6 +650,80 @@ mod tests {
         let cleared_csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
         let cleared_rows = crate::jobs::csv::parse_csv(&cleared_csv);
         assert_eq!(cleared_rows[1][appeal_idx], "");
+
+        // 11. Set and clear application ease without touching favorite or appeal.
+        let set_ease = UpdateArgs {
+            target: job_id.clone(),
+            status: None,
+            applied_at: None,
+            notes: None,
+            append_note: None,
+            description: None,
+            clear_description: false,
+            title: None,
+            company: None,
+            location: None,
+            favorite: false,
+            unfavorite: false,
+            archive: false,
+            unarchive: false,
+            appeal: None,
+            clear_appeal: false,
+            application_ease: Some(2),
+            clear_application_ease: false,
+        };
+        handlers::handle_update(&conn, &paths, set_ease, true, true).unwrap();
+        let eased = crate::jobs::service::get_job_detail(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(eased.job.application_ease, Some(2));
+        assert_eq!(eased.job.appeal, None);
+        assert!(eased.job.is_favorite);
+        let eased_json = serde_json::to_value(&eased).unwrap();
+        assert_eq!(eased_json["job"]["applicationEase"], 2);
+        let listed = crate::jobs::service::list_jobs(
+            &conn,
+            crate::jobs::service::JobFilters {
+                status: Some("interviewing".to_string()),
+                ..crate::jobs::service::JobFilters::default()
+            },
+        )
+        .unwrap();
+        let listed_json = serde_json::to_value(&listed).unwrap();
+        assert_eq!(listed_json[0]["job"]["applicationEase"], 2);
+        let eased_csv = std::fs::read_to_string(&paths.jobs_csv_path).unwrap();
+        let eased_rows = crate::jobs::csv::parse_csv(&eased_csv);
+        assert_eq!(eased_rows[1][ease_idx], "2");
+
+        let clear_ease = UpdateArgs {
+            target: job_id.clone(),
+            status: None,
+            applied_at: None,
+            notes: None,
+            append_note: None,
+            description: None,
+            clear_description: false,
+            title: None,
+            company: None,
+            location: None,
+            favorite: false,
+            unfavorite: false,
+            archive: false,
+            unarchive: false,
+            appeal: None,
+            clear_appeal: false,
+            application_ease: None,
+            clear_application_ease: true,
+        };
+        handlers::handle_update(&conn, &paths, clear_ease, true, true).unwrap();
+        let ease_cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ease_cleared.job.application_ease, None);
+        assert!(ease_cleared.job.is_favorite);
+        let ease_cleared_rows =
+            crate::jobs::csv::parse_csv(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap());
+        assert_eq!(ease_cleared_rows[1][ease_idx], "");
     }
 
     fn insert_job(conn: &Connection, url: &str, title: &str) -> String {
@@ -828,6 +979,8 @@ mod tests {
                 unarchive: false,
                 appeal: None,
                 clear_appeal: false,
+                application_ease: None,
+                clear_application_ease: false,
             },
             true,
             true,

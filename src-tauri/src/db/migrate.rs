@@ -37,6 +37,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5)),
+      application_ease INTEGER CHECK (application_ease IS NULL OR (application_ease >= 1 AND application_ease <= 5)),
       salary_min INTEGER,
       salary_max INTEGER,
       CHECK (salary_min IS NULL OR salary_min >= 0),
@@ -190,6 +191,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if !has_appeal {
         conn.execute(
             "ALTER TABLE jobs ADD COLUMN appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5))",
+            [],
+        )?;
+    }
+
+    // Application ease is one nullable 1–5 score (5 = easiest to apply).
+    // Existing rows stay unscored (NULL); there is no default. The CHECK
+    // rejects values outside 1–5 and still allows NULL. Idempotent for older DBs.
+    let has_application_ease = table_columns.iter().any(|name| name == "application_ease");
+    if !has_application_ease {
+        conn.execute(
+            "ALTER TABLE jobs ADD COLUMN application_ease INTEGER CHECK (application_ease IS NULL OR (application_ease >= 1 AND application_ease <= 5))",
             [],
         )?;
     }
@@ -399,6 +411,7 @@ mod tests {
         assert!(cols.contains(&"description".to_string()));
         assert!(cols.contains(&"watch_filtered".to_string()));
         assert!(cols.contains(&"appeal".to_string()));
+        assert!(cols.contains(&"application_ease".to_string()));
 
         let watch_cols = conn
             .prepare("PRAGMA table_info(company_watches)")
@@ -430,6 +443,12 @@ mod tests {
             1
         );
         assert_eq!(cols.iter().filter(|name| *name == "appeal").count(), 1);
+        assert_eq!(
+            cols.iter()
+                .filter(|name| *name == "application_ease")
+                .count(),
+            1
+        );
 
         let watch_cols = conn
             .prepare("PRAGMA table_info(company_watches)")
@@ -529,6 +548,36 @@ mod tests {
             .unwrap();
         assert_eq!(cleared, None);
 
+        let application_ease: Option<i64> = conn
+            .query_row(
+                "SELECT application_ease FROM jobs WHERE id = 'j1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(application_ease, None);
+        conn.execute("UPDATE jobs SET application_ease = 5 WHERE id = 'j1'", [])
+            .unwrap();
+        assert!(conn
+            .execute("UPDATE jobs SET application_ease = 0 WHERE id = 'j1'", [])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE jobs SET application_ease = 6 WHERE id = 'j1'", [])
+            .is_err());
+        conn.execute(
+            "UPDATE jobs SET application_ease = NULL WHERE id = 'j1'",
+            [],
+        )
+        .unwrap();
+        let cleared_ease: Option<i64> = conn
+            .query_row(
+                "SELECT application_ease FROM jobs WHERE id = 'j1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cleared_ease, None);
+
         migrate(&conn).unwrap();
         let cols = conn
             .prepare("PRAGMA table_info(jobs)")
@@ -538,6 +587,12 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         assert_eq!(cols.iter().filter(|name| *name == "appeal").count(), 1);
+        assert_eq!(
+            cols.iter()
+                .filter(|name| *name == "application_ease")
+                .count(),
+            1
+        );
         assert_eq!(cols.iter().filter(|name| *name == "salary_min").count(), 1);
         assert_eq!(cols.iter().filter(|name| *name == "salary_max").count(), 1);
     }

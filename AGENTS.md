@@ -53,6 +53,7 @@ Always pass **`--json`** for automation. Use **`-q` / `--quiet`** when you only 
 | Detail + history | `jt get <id_or_url> --json` |
 | Add from URL | `jt add "<url>" --status wishlist --notes "…" --json` |
 | Status / applied date | `jt update <id> --status applied --applied-at today --json` |
+| Application ease (1–5, 5 = easiest; null if unset) | `jt update <id> --application-ease 4 --json` |
 | Permanently delete | `jt delete <id> [<id>...] --yes --json` |
 | Append note | `jt note <id> "Recruiter screen Friday" --json` |
 | Watch triage | `jt watches list --new-only --json` |
@@ -61,6 +62,8 @@ Always pass **`--json`** for automation. Use **`-q` / `--quiet`** when you only 
 `closed` is a normal persisted status: setting it (GUI, `jt update --status closed`, or a CSV row) keeps the job, records a `status_changed` event, preserves history, round-trips through CSV, and is counted in stats / `jt list --status closed`. It no longer deletes the job. Archiving (`archived`) is separate. Permanent deletion is `jt delete <id> --yes` (or the explicit Delete action in the app). Pass `--yes` so the command does not prompt; a missing or ambiguous id deletes nothing and exits nonzero.
 
 Do **not** pass `-f` / `--favorite` unless the human explicitly asked to favorite. Prefer leaving favorites for manual UI use.
+
+Application ease is a per-job score for how easy that posting is to apply to: `jt update <id> --application-ease 1..5 --json`. `5` is easiest. Omit the flag to leave the stored score unchanged. `--clear-application-ease` sets it back to null. `jt get` and `jt list --json` return it as `applicationEase` (`null` when unscored). It does not favorite the job.
 
 ### What not to build against
 
