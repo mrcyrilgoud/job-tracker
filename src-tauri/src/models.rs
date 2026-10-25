@@ -37,6 +37,9 @@ pub struct Job {
     /// Overall appeal from 1 (least appealing) to 5 (most appealing).
     /// `None` means the job has not been scored.
     pub appeal: Option<i64>,
+    /// How easy this posting is to apply to, from 1 (hardest) to 5 (easiest).
+    /// `None` means the job has not been scored.
+    pub application_ease: Option<i64>,
     /// Optional annual USD salary bounds. A missing bound is open-ended.
     pub salary_min: Option<i64>,
     pub salary_max: Option<i64>,
@@ -124,6 +127,9 @@ pub struct JobSummary {
     pub is_favorite: bool,
     pub updated_at: String,
     pub appeal: Option<i64>,
+    /// How easy this posting is to apply to, from 1 (hardest) to 5 (easiest).
+    /// `None` means the job has not been scored.
+    pub application_ease: Option<i64>,
     pub location: Option<String>,
 }
 
@@ -271,6 +277,17 @@ pub fn checked_appeal(score: i64) -> Result<i64, &'static str> {
         Ok(score)
     } else {
         Err(APPEAL_RANGE_MESSAGE)
+    }
+}
+
+pub const APPLICATION_EASE_RANGE_MESSAGE: &str =
+    "Application ease must be an integer from 1 to 5 (5 = easiest to apply)";
+
+pub fn checked_application_ease(score: i64) -> Result<i64, &'static str> {
+    if (1..=5).contains(&score) {
+        Ok(score)
+    } else {
+        Err(APPLICATION_EASE_RANGE_MESSAGE)
     }
 }
 

@@ -38,6 +38,7 @@ function makeJob(id: string, title: string, companyName = "Thinking Machines Lab
       isFavorite: false,
       source: "manual",
       appeal: null,
+      applicationEase: null,
       appliedAt: null,
       lastCheckedAt: null,
       salaryMin: null,

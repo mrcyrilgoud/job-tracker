@@ -122,6 +122,8 @@ export type UpdateJobInput = {
   isFavorite?: boolean;
   /** 1–5, where 5 is most appealing. Null clears the score. */
   appeal?: number | null;
+  /** 1–5, where 5 is easiest to apply. Null clears the score. */
+  applicationEase?: number | null;
   salaryMin?: number | null;
   salaryMax?: number | null;
 };

@@ -75,6 +75,8 @@ export type Job = {
   updatedAt: string;
   /** Overall appeal from 1 (least) to 5 (most). Null when unscored. */
   appeal: number | null;
+  /** How easy this posting is to apply to, from 1 (hardest) to 5 (easiest). Null when unscored. */
+  applicationEase: number | null;
   /** Optional annual USD salary bounds; a missing bound is open-ended. */
   salaryMin: number | null;
   salaryMax: number | null;
@@ -176,6 +178,7 @@ export type JobSummary = Pick<
   | "isFavorite"
   | "updatedAt"
   | "appeal"
+  | "applicationEase"
   | "location"
 >;
 

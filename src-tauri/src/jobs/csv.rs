@@ -30,6 +30,7 @@ pub const CSV_HEADERS: &[&str] = &[
     "posting_state",
     "updated_at",
     "appeal",
+    "application_ease",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +51,13 @@ pub struct EditableFields {
     /// clear a score that was set in the app. Not stored in the sync sidecar.
     #[serde(skip)]
     pub appeal_in_file: bool,
+    /// How easy the posting is to apply to, 1–5 (5 = easiest). `None` is unscored.
+    #[serde(default)]
+    pub application_ease: Option<i64>,
+    /// True when the CSV file has an `application_ease` column. Absent columns
+    /// must not clear a score that was set in the app. Not stored in the sync sidecar.
+    #[serde(skip)]
+    pub application_ease_in_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -296,6 +304,8 @@ fn editable_from_db(job: &Job, company_name: &str, latest_note: Option<String>) 
         latest_note,
         appeal: job.appeal,
         appeal_in_file: false,
+        application_ease: job.application_ease,
+        application_ease_in_file: false,
     }
 }
 
@@ -358,6 +368,10 @@ fn export_jobs_csv_with_last_import_at(
             job.updated_at.clone(),
             fields
                 .appeal
+                .map(|score| score.to_string())
+                .unwrap_or_default(),
+            fields
+                .application_ease
                 .map(|score| score.to_string())
                 .unwrap_or_default(),
         ]);
@@ -482,9 +496,10 @@ const EDITABLE_KEYS: &[&str] = &[
     "location",
     "latestNote",
     "appeal",
+    "applicationEase",
 ];
 
-fn parse_appeal_cell(raw: &str) -> Result<Option<i64>, String> {
+fn parse_score_cell(raw: &str, label: &str, hint: &str) -> Result<Option<i64>, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -492,9 +507,17 @@ fn parse_appeal_cell(raw: &str) -> Result<Option<i64>, String> {
     match trimmed.parse::<i64>() {
         Ok(score) if (1..=5).contains(&score) => Ok(Some(score)),
         _ => Err(format!(
-            "Invalid appeal '{trimmed}'. Use an integer from 1 to 5 (5 = most appealing), or leave blank"
+            "Invalid {label} '{trimmed}'. Use an integer from 1 to 5 ({hint}), or leave blank"
         )),
     }
+}
+
+fn parse_appeal_cell(raw: &str) -> Result<Option<i64>, String> {
+    parse_score_cell(raw, "appeal", "5 = most appealing")
+}
+
+fn parse_application_ease_cell(raw: &str) -> Result<Option<i64>, String> {
+    parse_score_cell(raw, "application ease", "5 = easiest to apply")
 }
 
 fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
@@ -508,6 +531,7 @@ fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
         "location" => fields.location.as_deref(),
         "latestNote" => fields.latest_note.as_deref(),
         "appeal" => return fields.appeal.map(|score| score.to_string()),
+        "applicationEase" => return fields.application_ease.map(|score| score.to_string()),
         _ => None,
     };
     normalize_nullable(raw)
@@ -612,6 +636,22 @@ pub fn import_jobs_csv(
         } else {
             None
         };
+        let application_ease_in_file = header_map.contains_key("application_ease");
+        let application_ease = if application_ease_in_file {
+            match parse_application_ease_cell(&get("application_ease")) {
+                Ok(value) => value,
+                Err(message) => {
+                    result.summary.skipped += 1;
+                    result.errors.push(serde_json::json!({
+                        "row": row_number,
+                        "message": message
+                    }));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let csv_fields = EditableFields {
             url: get("url").trim().to_string(),
             title: get("title").trim().to_string(),
@@ -623,6 +663,8 @@ pub fn import_jobs_csv(
             latest_note: normalize_nullable(Some(&get("latest_note"))),
             appeal,
             appeal_in_file,
+            application_ease,
+            application_ease_in_file,
         };
         let id = normalize_nullable(Some(&get("id")));
         let key = id.clone().unwrap_or_else(|| {
@@ -734,15 +776,15 @@ fn process_row(
                     "fields": ["latestNote"]
                 }));
             }
-            if csv_fields.appeal.is_some() {
-                update_job(
-                    conn,
-                    &created.0.id,
-                    UpdateJobInput {
-                        appeal: Some(csv_fields.appeal),
-                        ..UpdateJobInput::default()
-                    },
-                )?;
+            if csv_fields.appeal.is_some() || csv_fields.application_ease.is_some() {
+                let mut updates = UpdateJobInput::default();
+                if csv_fields.appeal.is_some() {
+                    updates.appeal = Some(csv_fields.appeal);
+                }
+                if csv_fields.application_ease.is_some() {
+                    updates.application_ease = Some(csv_fields.application_ease);
+                }
+                update_job(conn, &created.0.id, updates)?;
             }
             seen_job_ids.insert(created.0.id.clone());
             result.changes.push(serde_json::json!({
@@ -784,6 +826,9 @@ fn process_row(
             continue;
         }
         if *field == "appeal" && !csv_fields.appeal_in_file {
+            continue;
+        }
+        if *field == "applicationEase" && !csv_fields.application_ease_in_file {
             continue;
         }
         let csv_changed = field_norm(csv_fields, field) != field_norm(&baseline, field);
@@ -888,6 +933,9 @@ fn process_row(
             }
             if apply_fields.iter().any(|f| f == "appeal") {
                 updates.appeal = Some(csv_fields.appeal);
+            }
+            if apply_fields.iter().any(|f| f == "applicationEase") {
+                updates.application_ease = Some(csv_fields.application_ease);
             }
             update_job(conn, &existing.id, updates)?;
         }
@@ -1311,10 +1359,16 @@ mod tests {
         assert!(!legacy.appeal_in_file);
 
         let parsed = parse_csv(&fs::read_to_string(&csv_path).unwrap());
-        assert_eq!(parsed[0].last().map(String::as_str), Some("appeal"));
+        assert_eq!(
+            parsed[0].last().map(String::as_str),
+            Some("application_ease")
+        );
         assert_eq!(parsed[0].len(), parsed[1].len());
-        assert_eq!(parsed[1].last().map(String::as_str), Some(""));
-        let appeal_idx = parsed[0].len() - 1;
+        let appeal_idx = parsed[0]
+            .iter()
+            .position(|header| header == "appeal")
+            .unwrap();
+        assert_eq!(parsed[1][appeal_idx], "");
 
         let mut scored = parsed.clone();
         scored[1][appeal_idx] = "5".to_string();
@@ -1332,8 +1386,12 @@ mod tests {
 
         let without_column = parse_csv(&fs::read_to_string(&csv_path).unwrap());
         let mut stripped = without_column.clone();
+        let drop_appeal = stripped[0]
+            .iter()
+            .position(|header| header == "appeal")
+            .unwrap();
         for row in &mut stripped {
-            row.pop();
+            row.remove(drop_appeal);
         }
         assert!(!stripped[0].iter().any(|header| header == "appeal"));
         fs::write(&csv_path, serialize_csv(&stripped)).unwrap();
@@ -1389,6 +1447,152 @@ https://example.com/job/new-appeal,New role,Globex,wishlist,2
             .find(|(job, _)| job.url.contains("new-appeal"))
             .unwrap();
         assert_eq!(new_job.0.appeal, Some(2));
+        assert_eq!(new_job.0.application_ease, None);
+        assert!(!new_job.0.is_favorite);
+    }
+
+    #[test]
+    fn application_ease_csv_round_trip_preserves_blank_and_other_scores() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("job-tracker.db");
+        let csv_path = dir.path().join("jobs.csv");
+        let job_id = {
+            let conn = Connection::open(&db_path).unwrap();
+            migrate(&conn).unwrap();
+            let (job, _) = create_job_from_url(
+                &conn,
+                "https://example.com/job/easy",
+                "Easy role",
+                Some("Acme"),
+                Some("wishlist"),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(job.application_ease, None);
+            update_job(
+                &conn,
+                &job.id,
+                UpdateJobInput {
+                    appeal: Some(Some(4)),
+                    ..UpdateJobInput::default()
+                },
+            )
+            .unwrap();
+            crate::jobs::service::set_job_favorite(&conn, &job.id, true).unwrap();
+            export_jobs_csv(&conn, &csv_path, None).unwrap();
+            job.id
+        };
+
+        let old_sync = r#"{"url":"https://example.com/job/easy","title":"Easy role","company":"Acme","status":"wishlist","appliedAt":null,"notes":null,"location":null,"latestNote":null,"appeal":4}"#;
+        let legacy: EditableFields = serde_json::from_str(old_sync).unwrap();
+        assert_eq!(legacy.application_ease, None);
+        assert!(!legacy.application_ease_in_file);
+        assert_eq!(legacy.appeal, Some(4));
+
+        let parsed = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let ease_idx = parsed[0]
+            .iter()
+            .position(|header| header == "application_ease")
+            .unwrap();
+        let appeal_idx = parsed[0]
+            .iter()
+            .position(|header| header == "appeal")
+            .unwrap();
+        assert_eq!(parsed[1][ease_idx], "");
+        assert_eq!(parsed[1][appeal_idx], "4");
+
+        let mut scored = parsed.clone();
+        scored[1][ease_idx] = "5".to_string();
+        fs::write(&csv_path, serialize_csv(&scored)).unwrap();
+        let imported =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(imported.summary.updated, 1);
+        assert!(imported.errors.is_empty());
+
+        let conn = Connection::open(&db_path).unwrap();
+        let job = get_job_by_id(&conn, &job_id).unwrap().unwrap();
+        assert_eq!(job.application_ease, Some(5));
+        assert_eq!(job.appeal, Some(4));
+        assert!(job.is_favorite);
+        drop(conn);
+
+        let without_column = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let mut stripped = without_column.clone();
+        let drop_ease = stripped[0]
+            .iter()
+            .position(|header| header == "application_ease")
+            .unwrap();
+        for row in &mut stripped {
+            row.remove(drop_ease);
+        }
+        assert!(!stripped[0]
+            .iter()
+            .any(|header| header == "application_ease"));
+        fs::write(&csv_path, serialize_csv(&stripped)).unwrap();
+        let kept = import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(kept.summary.updated, 0);
+        let conn = Connection::open(&db_path).unwrap();
+        let job = get_job_by_id(&conn, &job_id).unwrap().unwrap();
+        assert_eq!(job.application_ease, Some(5));
+        assert_eq!(job.appeal, Some(4));
+        assert!(job.is_favorite);
+        drop(conn);
+
+        let mut cleared = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let clear_idx = cleared[0]
+            .iter()
+            .position(|header| header == "application_ease")
+            .unwrap();
+        cleared[1][clear_idx].clear();
+        fs::write(&csv_path, serialize_csv(&cleared)).unwrap();
+        import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        let cleared_job = get_job_by_id(&conn, &job_id).unwrap().unwrap();
+        assert_eq!(cleared_job.application_ease, None);
+        assert_eq!(cleared_job.appeal, Some(4));
+        drop(conn);
+
+        let mut invalid = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        invalid[1][clear_idx] = "9".to_string();
+        fs::write(&csv_path, serialize_csv(&invalid)).unwrap();
+        let rejected =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(rejected.summary.skipped, 1);
+        assert!(rejected.errors[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid application ease"));
+        let conn = Connection::open(&db_path).unwrap();
+        assert_eq!(
+            get_job_by_id(&conn, &job_id)
+                .unwrap()
+                .unwrap()
+                .application_ease,
+            None
+        );
+
+        let create_csv = "\
+url,title,company,status,application_ease
+https://example.com/job/new-ease,New role,Globex,wishlist,2
+";
+        let created = import_jobs_csv(
+            &db_path,
+            &csv_path,
+            Some(create_csv),
+            false,
+            ImportMode::Merge,
+        )
+        .unwrap();
+        assert_eq!(created.summary.created, 1);
+        let jobs = load_job_rows(&conn).unwrap();
+        let new_job = jobs
+            .iter()
+            .find(|(job, _)| job.url.contains("new-ease"))
+            .unwrap();
+        assert_eq!(new_job.0.application_ease, Some(2));
+        assert_eq!(new_job.0.appeal, None);
         assert!(!new_job.0.is_favorite);
     }
 }

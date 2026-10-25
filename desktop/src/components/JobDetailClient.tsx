@@ -2,6 +2,10 @@ import { formatDistanceToNow } from "date-fns";
 import { useCallback, useEffect, useState } from "react";
 
 import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
+import {
+  APPLICATION_EASE_SCALE_LABEL,
+  ApplicationEaseSelect,
+} from "@/components/ApplicationEaseSelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { AlertIcon, ArchiveIcon, ArrowUpRightIcon, CheckIcon, TrashIcon } from "@/components/icons";
 import { api } from "@/lib/api";
@@ -28,6 +32,7 @@ type Initial = {
   isNewFromWatch: boolean;
   isFavorite: boolean;
   appeal: number | null;
+  applicationEase: number | null;
   salaryMin: number | null;
   salaryMax: number | null;
 };
@@ -43,6 +48,7 @@ type Draft = {
   description: string;
   isFavorite: boolean;
   appeal: number | null;
+  applicationEase: number | null;
   salaryMin: string;
   salaryMax: string;
 };
@@ -61,6 +67,7 @@ function toDraft(initial: Initial): Draft {
     description: initial.description ?? "",
     isFavorite: initial.isFavorite,
     appeal: initial.appeal,
+    applicationEase: initial.applicationEase,
     salaryMin: initial.salaryMin === null ? "" : String(initial.salaryMin),
     salaryMax: initial.salaryMax === null ? "" : String(initial.salaryMax),
   };
@@ -76,6 +83,7 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.description === b.description &&
     a.isFavorite === b.isFavorite &&
     a.appeal === b.appeal &&
+    a.applicationEase === b.applicationEase &&
     a.salaryMin === b.salaryMin &&
     a.salaryMax === b.salaryMax
   );
@@ -190,6 +198,7 @@ export function JobDetailClient({
         isNewFromWatch: false,
         isFavorite: attempted.isFavorite,
         appeal: attempted.appeal,
+        applicationEase: attempted.applicationEase,
         salaryMin: attempted.salaryMin.trim() === "" ? null : Number(attempted.salaryMin),
         salaryMax: attempted.salaryMax.trim() === "" ? null : Number(attempted.salaryMax),
       });
@@ -203,6 +212,7 @@ export function JobDetailClient({
         description: detail.job.description ?? "",
         isFavorite: detail.job.isFavorite,
         appeal: detail.job.appeal,
+        applicationEase: detail.job.applicationEase,
         salaryMin: detail.job.salaryMin === null ? "" : String(detail.job.salaryMin),
         salaryMax: detail.job.salaryMax === null ? "" : String(detail.job.salaryMax),
       };
@@ -276,6 +286,7 @@ export function JobDetailClient({
           notes: detail.job.notes,
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
+          applicationEase: detail.job.applicationEase,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         });
@@ -295,6 +306,7 @@ export function JobDetailClient({
           notes: detail.job.notes,
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
+          applicationEase: detail.job.applicationEase,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         });
@@ -465,6 +477,19 @@ export function JobDetailClient({
               />
               <p className="mt-1.5 text-xs text-[var(--faint)]">
                 One overall score for salary, growth, industry, and role fit. Leave unscored until you decide.
+              </p>
+            </div>
+            <div>
+              <label htmlFor="job-application-ease" className="field-label" title={APPLICATION_EASE_SCALE_LABEL}>
+                {APPLICATION_EASE_SCALE_LABEL}
+              </label>
+              <ApplicationEaseSelect
+                id="job-application-ease"
+                value={draft.applicationEase}
+                onChange={(applicationEase) => update("applicationEase", applicationEase)}
+              />
+              <p className="mt-1.5 text-xs text-[var(--faint)]">
+                How easy this posting is to apply to. 5 is easiest. Leave unscored until you decide.
               </p>
             </div>
             <div className="sm:col-span-2">
