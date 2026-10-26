@@ -34,6 +34,9 @@ const NewRolesPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("@/pages/SettingsPage").then(({ SettingsPage: Page }) => ({ default: Page })),
 );
+const EnhancementsDemo = lazy(() =>
+  import("@/pages/EnhancementsDemo").then(({ EnhancementsDemo: Page }) => ({ default: Page })),
+);
 
 function RouteLoadingFallback() {
   return (
@@ -100,6 +103,7 @@ export function App() {
               <Route path="companies" element={<LazyRoute><CompaniesPage /></LazyRoute>} />
               <Route path="companies/:id" element={<LazyRoute><CompanyDetailPage /></LazyRoute>} />
               <Route path="settings" element={<LazyRoute><SettingsPage /></LazyRoute>} />
+              <Route path="enhancements-demo" element={<LazyRoute><EnhancementsDemo /></LazyRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>
