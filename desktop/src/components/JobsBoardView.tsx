@@ -4,10 +4,10 @@ import { Link } from "react-router-dom";
 
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ArchiveIcon, statusIcons, TrashIcon } from "@/components/icons";
-import { jobStatuses, type JobListSummary, type JobStatus } from "@/lib/schema";
+import { StatusQuickChange } from "@/components/StatusQuickChange";
+import { type JobListSummary, type JobStatus } from "@/lib/schema";
 import {
   jobStatusPresentation,
-  nextActiveJobStage,
   postingStateMatters,
   postingStatePresentation,
   toneClasses,
@@ -25,6 +25,9 @@ export function JobsBoardView({
   onDeleteJob,
   selection,
   isPendingFavorite,
+  isPendingStatus,
+  statusError,
+  onRetryStatus,
 }: {
   jobs: JobListSummary[];
   onToggleFavorite: (jobId: string) => void;
@@ -37,6 +40,9 @@ export function JobsBoardView({
     onToggle: (jobId: string) => void;
   };
   isPendingFavorite?: (jobId: string) => boolean;
+  isPendingStatus?: (jobId: string) => boolean;
+  statusError?: (jobId: string) => string | null | undefined;
+  onRetryStatus?: (jobId: string) => void;
 }) {
   const [expandedStages, setExpandedStages] = useState<Set<JobStatus>>(new Set());
   const jobsByStage = useMemo(() => {
@@ -72,7 +78,6 @@ export function JobsBoardView({
           const isExpanded = expandedStages.has(stage);
           const visibleJobs = isExpanded ? stageJobs : stageJobs.slice(0, BOARD_PAGE_SIZE);
           const remainingJobs = stageJobs.length - visibleJobs.length;
-          const nextStage = nextActiveJobStage(stage);
 
           return (
             <div
@@ -196,40 +201,15 @@ export function JobsBoardView({
                           </span>
 
                           <div className="flex items-center gap-2">
-                            {onUpdateStatus && nextStage ? (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onUpdateStatus(job.id, nextStage);
-                                }}
-                                className="rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-xs font-semibold text-[var(--accent-ink)] transition-colors hover:bg-[var(--accent)] hover:text-white"
-                              >
-                                Move to {jobStatusPresentation(nextStage).label}
-                              </button>
-                            ) : null}
                             {onUpdateStatus ? (
-                              <label className="flex items-center gap-1.5 text-xs font-medium text-[var(--muted)]">
-                                <span>Move to</span>
-                                <select
-                                  value={job.status}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onUpdateStatus(job.id, e.target.value as JobStatus);
-                                  }}
-                                  aria-label="Move to another stage"
-                                  className="cursor-pointer rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs font-medium text-[var(--foreground)] hover:border-[var(--accent)]"
-                                >
-                                  {jobStatuses.map((st) => (
-                                    <option key={st} value={st}>
-                                      {jobStatusPresentation(st).label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
+                              <StatusQuickChange
+                                currentStatus={job.status as Exclude<JobStatus, "archived">}
+                                size="sm"
+                                pending={isPendingStatus?.(job.id)}
+                                error={statusError?.(job.id)}
+                                onRetry={onRetryStatus ? () => onRetryStatus(job.id) : undefined}
+                                onStatusChange={(nextStatus) => onUpdateStatus(job.id, nextStatus)}
+                              />
                             ) : null}
                           </div>
                         </div>
@@ -294,6 +274,16 @@ export function JobsBoardView({
                   </p>
                 </div>
                 <div className="flex items-center gap-1">
+                  {onUpdateStatus && job.status !== "archived" ? (
+                    <StatusQuickChange
+                      currentStatus={job.status}
+                      size="sm"
+                      pending={isPendingStatus?.(job.id)}
+                      error={statusError?.(job.id)}
+                      onRetry={onRetryStatus ? () => onRetryStatus(job.id) : undefined}
+                      onStatusChange={(nextStatus) => onUpdateStatus(job.id, nextStatus)}
+                    />
+                  ) : null}
                   {onToggleArchive ? (
                     <button
                       type="button"

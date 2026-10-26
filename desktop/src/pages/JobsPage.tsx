@@ -16,11 +16,11 @@ import {
   ListIcon,
   SendIcon,
   StarIcon,
-  statusIcons,
   TrashIcon,
   TrophyIcon,
 } from "@/components/icons";
 import { JobsBoardView } from "@/components/JobsBoardView";
+import { StatusQuickChange } from "@/components/StatusQuickChange";
 import { api } from "@/lib/api";
 import {
   DEFAULT_APPLIED_SORT,
@@ -73,6 +73,14 @@ const JOB_SORTS: readonly JobSort[] = [
   "appealLowToHigh",
   "companyAz",
 ];
+
+type StatusMutation = {
+  requestId: number;
+  previousStatus: JobStatus;
+  nextStatus: JobStatus;
+  pending: boolean;
+  error?: string;
+};
 
 export function JobsPage() {
   const navigate = useNavigate();
@@ -155,6 +163,8 @@ export function JobsPage() {
     isBulk: boolean;
   } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [statusMutations, setStatusMutations] = useState<Record<string, StatusMutation>>({});
+  const [statusAnnouncement, setStatusAnnouncement] = useState("");
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPopoverRef = useRef<HTMLDivElement>(null);
   const salaryMinInputRef = useRef<HTMLInputElement>(null);
@@ -164,6 +174,9 @@ export function JobsPage() {
   const appliedSearchRef = useRef(appliedSearch);
   appliedSearchRef.current = appliedSearch;
   const activeRequestKeyRef = useRef("");
+  const statusRequestSequenceRef = useRef(0);
+  const statusRequestByJobRef = useRef(new Map<string, number>());
+  const statusOverridesRef = useRef(new Map<string, { requestId: number; status: JobStatus }>());
   const jobsQueueRef = useRef<{
     running: boolean;
     activeKey: string | null;
@@ -347,9 +360,18 @@ export function JobsPage() {
             );
             if (request.sequence === loadSequenceRef.current && request.key === activeRequestKeyRef.current) {
               setJobs((previous) => {
-                if (!request.cursor) return result.jobs;
+                const mergedJobs = result.jobs.map((item) => {
+                  const override = statusOverridesRef.current.get(item.job.id);
+                  if (!override) return item;
+                  if (item.job.status === override.status) {
+                    statusOverridesRef.current.delete(item.job.id);
+                    return item;
+                  }
+                  return { ...item, job: { ...item.job, status: override.status } };
+                });
+                if (!request.cursor) return mergedJobs;
                 const seen = new Set(previous.map((item) => item.job.id));
-                return [...previous, ...result.jobs.filter((item) => !seen.has(item.job.id))];
+                return [...previous, ...mergedJobs.filter((item) => !seen.has(item.job.id))];
               });
               setNextCursor(result.nextCursor);
               setLoadedRequestKey(request.key);
@@ -526,19 +548,69 @@ export function JobsPage() {
   }
 
   async function handleUpdateStatus(jobId: string, nextStatus: JobStatus) {
-    // Optimistic update
+    const currentItem = jobs.find((item) => item.job.id === jobId);
+    const currentMutation = statusMutations[jobId];
+    if (!currentItem || currentItem.job.status === nextStatus || currentMutation?.pending) return;
+    const previousStatus = currentItem.job.status;
+    const requestId = ++statusRequestSequenceRef.current;
+    statusRequestByJobRef.current.set(jobId, requestId);
+    statusOverridesRef.current.set(jobId, { requestId, status: nextStatus });
+    setStatusMutations((current) => ({
+      ...current,
+      [jobId]: { requestId, previousStatus, nextStatus, pending: true },
+    }));
     setJobs((prev) =>
       prev.map((item) =>
         item.job.id === jobId ? { ...item, job: { ...item.job, status: nextStatus } } : item,
       ),
     );
     try {
-      await api.updateJob(jobId, { status: nextStatus });
+      const res = await api.updateJob(jobId, { status: nextStatus });
+      if (statusRequestByJobRef.current.get(jobId) !== requestId) return;
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId
+            ? {
+                ...item,
+                job: {
+                  ...item.job,
+                  status: res.detail.job.status,
+                  appliedAt: res.detail.job.appliedAt,
+                  updatedAt: res.detail.job.updatedAt,
+                },
+              }
+            : item,
+        ),
+      );
+      statusOverridesRef.current.set(jobId, { requestId, status: res.detail.job.status });
+      setStatusMutations((current) => {
+        const next = { ...current };
+        delete next[jobId];
+        return next;
+      });
+      statusRequestByJobRef.current.delete(jobId);
+      setStatusAnnouncement(`Moved ${currentItem.job.title} to ${jobStatusPresentation(res.detail.job.status).label}.`);
       await load({ quiet: true });
     } catch (err) {
-      await load({ quiet: true });
-      setError(err instanceof Error ? err.message : "Failed to update job status");
+      if (statusRequestByJobRef.current.get(jobId) !== requestId) return;
+      const message = err instanceof Error ? err.message : "Failed to update job status";
+      statusOverridesRef.current.delete(jobId);
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId ? { ...item, job: { ...item.job, status: previousStatus } } : item,
+        ),
+      );
+      setStatusMutations((current) => ({
+        ...current,
+        [jobId]: { requestId, previousStatus, nextStatus, pending: false, error: message },
+      }));
+      setStatusAnnouncement(`Could not move ${currentItem.job.title}.`);
     }
+  }
+
+  function retryStatus(jobId: string) {
+    const mutation = statusMutations[jobId];
+    if (mutation && !mutation.pending) void handleUpdateStatus(jobId, mutation.nextStatus);
   }
 
   async function handleToggleArchive(jobId: string, currentStatus: JobStatus) {
@@ -1431,6 +1503,7 @@ export function JobsPage() {
               {error}
             </p>
           ) : null}
+          <p className="sr-only" aria-live="polite">{statusAnnouncement}</p>
 
           {loading && jobs.length === 0 ? (
             <div className="space-y-3">
@@ -1507,16 +1580,17 @@ export function JobsPage() {
                 onToggle: toggleJobSelection,
               } : undefined}
               isPendingFavorite={(id) => togglingFavId === id}
+              isPendingStatus={(id) => statusMutations[id]?.pending ?? false}
+              statusError={(id) => statusMutations[id]?.error}
+              onRetryStatus={retryStatus}
             />
           ) : (
             <ul className="space-y-3">
               {jobs.map(({ job, companyName }) => {
-                const statusInfo = jobStatusPresentation(job.status);
                 const postingInfo = postingStateMatters(job.status)
                       ? postingStatePresentation(job.postingState, job.lastCheckedAt)
                   : null;
                 const source = jobSourceLabel(job.source);
-                const StageIcon = statusIcons[job.status];
                 const selected = selectedJobIds.has(job.id);
                 return (
                   <li
@@ -1532,10 +1606,17 @@ export function JobsPage() {
                       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`pill ${toneClasses[statusInfo.tone]}`}>
-                              <StageIcon size={12} />
-                              {statusInfo.label}
-                            </span>
+                            {job.status !== "archived" ? (
+                              <StatusQuickChange
+                                currentStatus={job.status}
+                                pending={statusMutations[job.id]?.pending ?? false}
+                                error={statusMutations[job.id]?.error}
+                                onRetry={() => retryStatus(job.id)}
+                                onStatusChange={(nextStatus) => handleUpdateStatus(job.id, nextStatus)}
+                              />
+                            ) : (
+                              <span className="pill bg-[var(--stone-soft)] text-[var(--stone-ink)]">Archived</span>
+                            )}
                             {postingInfo ? (
                               <span className={`pill ${toneClasses[postingInfo.tone]}`}>
                                 <span className="pill-dot" />

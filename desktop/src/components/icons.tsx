@@ -98,6 +98,14 @@ export function CheckIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function ChevronDownIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 export function AlertIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>
