@@ -39,6 +39,7 @@ export function promoteAppBundle(options: AppPromotionOptions): void {
   }
 
   const sourceHash = options.hashExecutable(options.sourceBundle);
+  let verifiedHash = sourceHash;
   let stageOwned = true;
   let oldAppMoved = false;
   let newAppInstalled = false;
@@ -48,6 +49,10 @@ export function promoteAppBundle(options: AppPromotionOptions): void {
       throw new Error("Source and staged app executable hashes do not match.");
     }
     options.verifyBundle(stage);
+    // Verification may ad-hoc sign the bundle. Signing can rewrite the
+    // executable, so the installed comparison must use the post-verification
+    // hash rather than the pre-signing source hash.
+    verifiedHash = options.hashExecutable(stage);
     options.beforeReplace?.();
 
     if (fs.existsSync(options.installedBundle)) {
@@ -57,7 +62,7 @@ export function promoteAppBundle(options: AppPromotionOptions): void {
     fs.renameSync(stage, options.installedBundle);
     stageOwned = false;
     newAppInstalled = true;
-    if (options.hashExecutable(options.installedBundle) !== sourceHash) {
+    if (options.hashExecutable(options.installedBundle) !== verifiedHash) {
       throw new Error("Installed app executable hash does not match the build.");
     }
     options.verifyBundle(options.installedBundle);

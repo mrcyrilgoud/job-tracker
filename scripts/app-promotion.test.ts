@@ -54,6 +54,30 @@ test("promotion verifies staged and installed apps and rotates one previous bund
   assert.equal(fs.readdirSync(root).filter((name) => name.includes("previous")).length, 1);
 });
 
+test("promotion accepts a verifier that rewrites the staged executable", () => {
+  const source = bundle("unsigned binary");
+  const oldApp = bundle("old binary");
+  const { installed } = installPaths();
+  fs.renameSync(oldApp, installed);
+
+  promoteAppBundle({
+    sourceBundle: source,
+    installedBundle: installed,
+    hashExecutable,
+    verifyBundle: (bundlePath) => {
+      const executable = path.join(bundlePath, "Contents/MacOS/job-tracker");
+      if (!fs.readFileSync(executable, "utf8").endsWith(" signed")) {
+        fs.appendFileSync(executable, " signed");
+      }
+    },
+  });
+
+  assert.equal(
+    fs.readFileSync(path.join(installed, "Contents/MacOS/job-tracker"), "utf8"),
+    "unsigned binary signed",
+  );
+});
+
 test("verification failure before promotion leaves the installed app untouched", () => {
   const source = bundle("new binary");
   const oldApp = bundle("old binary");
