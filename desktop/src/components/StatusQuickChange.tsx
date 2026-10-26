@@ -172,7 +172,15 @@ export function StatusQuickChange({
         <span className="status-quick-error" role="alert">
           <span>{error}</span>
           {onRetry ? (
-            <button type="button" onClick={onRetry} disabled={pending}>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onRetry();
+              }}
+              disabled={pending}
+            >
               Retry
             </button>
           ) : null}
