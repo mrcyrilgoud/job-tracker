@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<!--
+  DESIGN MOCKUP ONLY. This is not app code.
+  Spec: .kiro/specs/companies-sidebar-sort-filter (design.md, "UI Mockups").
+  Self-contained: inline CSS and JS, no network requests, no build step.
+  Fonts load from the repo's local desktop/node_modules/@fontsource files when
+  present (same fonts as the app); otherwise system serif/sans fallbacks are used.
+  Colors, radii, and spacing are copied from desktop/src/index.css (.dark tokens,
+  .card, .field, .status-quick-menu) and SidebarLink in desktop/src/pages/JobsPage.tsx.
+-->
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: Companies sidebar sort &amp; filter</title>
+<style>
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 400; src: url("../../../desktop/node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 500; src: url("../../../desktop/node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-500-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Plus Jakarta Sans"; font-weight: 600; src: url("../../../desktop/node_modules/@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-600-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Fraunces"; font-weight: 400; src: url("../../../desktop/node_modules/@fontsource/fraunces/files/fraunces-latin-400-normal.woff2") format("woff2"); }
+  @font-face { font-family: "Fraunces"; font-weight: 600; src: url("../../../desktop/node_modules/@fontsource/fraunces/files/fraunces-latin-600-normal.woff2") format("woff2"); }
+
+  /* Tokens copied from desktop/src/index.css (.dark) */
+  .dark {
+    --background: #0f172a;
+    --surface: #1e293b;
+    --surface-muted: #334155;
+    --foreground: #f8fafc;
+    --muted: #94a3b8;
+    --faint: #94a3b8;
+    --border: #334155;
+    --accent: #e98261;
+    --accent-hover: #f59d7e;
+    --accent-soft: rgba(233, 130, 97, 0.16);
+    --accent-ink: #ffd1c1;
+    --danger: #ef4444;
+    --danger-soft: rgba(239, 68, 68, 0.15);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --font-jakarta: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    --font-fraunces: "Fraunces", ui-serif, Georgia, serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-jakarta);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, .font-display { font-family: var(--font-fraunces); }
+  a { color: inherit; text-decoration: none; }
+  button, input { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; }
+
+  .page { padding: 2rem; }
+  .page-header { margin-bottom: 1.5rem; max-width: 60rem; }
+  .page-header h1 { margin: 0 0 0.25rem; font-size: 1.875rem; font-weight: 600; letter-spacing: -0.01em; }
+  .page-header p { margin: 0; color: var(--muted); font-size: 0.875rem; line-height: 1.5; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; gap: 2rem; align-items: start; }
+  .section-label { margin: 0 0 0.75rem; color: var(--muted); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-jakarta); }
+
+  /* Demo controls (not part of the design) */
+  .demo-controls { margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.375rem; }
+  .demo-controls button {
+    border: 1px dashed var(--border); border-radius: 0.625rem; padding: 0.3rem 0.6rem;
+    font-size: 0.6875rem; color: var(--muted);
+  }
+  .demo-controls button:hover { color: var(--foreground); border-color: var(--muted); }
+  .demo-controls button[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent); }
+
+  /* Gallery */
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, 240px); gap: 1.5rem 1.25rem; }
+  .gallery figure { margin: 0; }
+  .gallery figcaption { margin-top: 0.5rem; font-size: 0.6875rem; line-height: 1.4; color: var(--muted); }
+  .gallery figcaption strong { display: block; color: var(--foreground); font-weight: 600; font-size: 0.75rem; }
+  .gallery .frame { min-height: 23rem; }
+
+  /* App primitives copied from index.css */
+  .card { background: var(--surface); border-radius: 1rem; box-shadow: var(--shadow-sm); padding: 1.25rem; }
+  .field {
+    width: 100%; min-height: 2.75rem;
+    border-radius: 0.75rem; border: 1px solid var(--border); background: var(--surface);
+    padding: 0.5rem 0.875rem; font-size: 0.75rem; color: var(--foreground);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .field::placeholder { color: var(--faint); }
+  .field:focus, .field:focus-visible {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  /* Companies card */
+  .cs-head { margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between; }
+  .cs-head h2 { margin: 0; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: var(--muted); }
+  .cs-manage { font-size: 0.75rem; font-weight: 500; color: var(--accent); }
+  .cs-controls { position: relative; margin-bottom: 0.75rem; display: flex; align-items: stretch; gap: 0.375rem; }
+  .cs-controls .field { min-width: 0; flex: 1 1 auto; }
+
+  .cs-iconbtn {
+    position: relative; flex: none; width: 2.25rem;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 0.75rem; background: var(--surface);
+    color: var(--muted);
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .cs-iconbtn:hover { background: var(--surface-muted); color: var(--foreground); }
+  .cs-iconbtn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+  .cs-iconbtn.is-active { color: var(--accent-ink); }
+  .cs-iconbtn:focus-visible, .cs-item:focus-visible, .cs-link:focus-visible, .cs-reset:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .cs-dot {
+    position: absolute; top: 0.3rem; right: 0.3rem; width: 0.4375rem; height: 0.4375rem;
+    border-radius: 9999px; background: var(--accent); box-shadow: 0 0 0 2px var(--surface);
+  }
+  .cs-badge {
+    position: absolute; top: -0.35rem; right: -0.35rem; min-width: 1.05rem; height: 1.05rem;
+    padding: 0 0.25rem; border-radius: 9999px; background: var(--accent); color: #fff;
+    font-size: 0.625rem; font-weight: 600; line-height: 1.05rem; text-align: center;
+    box-shadow: 0 0 0 2px var(--surface);
+  }
+
+  /* Menus: modeled on .status-quick-menu / .status-quick-option */
+  .cs-menu {
+    position: absolute; z-index: 20; top: calc(100% + 0.375rem); right: 0;
+    width: 12.5rem; display: flex; flex-direction: column; gap: 0.15rem;
+    border: 1px solid var(--border); border-radius: 0.875rem; background: var(--surface);
+    box-shadow: var(--shadow-lg); padding: 0.4rem;
+  }
+  .cs-item {
+    display: flex; width: 100%; min-height: 2.25rem; align-items: center; gap: 0.5rem;
+    border-radius: 0.625rem; padding: 0.4rem 0.55rem; text-align: left;
+    font-size: 0.8125rem; font-weight: 500; color: var(--foreground);
+  }
+  .cs-item:hover { background: var(--surface-muted); }
+  .cs-item[aria-checked="true"] { font-weight: 600; }
+  .cs-item[role="menuitemradio"][aria-checked="true"] { background: var(--surface-muted); }
+  .cs-check { width: 1rem; flex: none; display: inline-flex; color: var(--accent); }
+  .cs-box {
+    width: 1rem; height: 1rem; flex: none; display: inline-flex; align-items: center; justify-content: center;
+    border: 1.5px solid var(--muted); border-radius: 0.3rem; color: #fff;
+  }
+  .cs-item[aria-checked="true"] .cs-box { background: var(--accent); border-color: var(--accent); }
+  .cs-sep { height: 1px; margin: 0.25rem 0.25rem; background: var(--border); }
+  .cs-item.cs-clear { color: var(--accent); }
+  .cs-item.cs-clear[aria-disabled="true"] { color: var(--faint); opacity: 0.55; cursor: not-allowed; }
+  .cs-item.cs-clear[aria-disabled="true"]:hover { background: none; }
+
+  /* List and SidebarLink */
+  .cs-count { margin: 0 0 0.5rem; padding: 0 0.25rem; font-size: 0.75rem; color: var(--muted); }
+  .cs-list { max-height: 20rem; overflow-y: auto; padding-right: 0.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
+  .cs-link {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem;
+    color: var(--foreground); transition: background-color 0.15s ease;
+  }
+  .cs-link:hover { background: var(--surface-muted); }
+  .cs-link[aria-current="true"] { background: var(--accent-soft); font-weight: 500; color: var(--accent-ink); }
+  .cs-link .cs-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cs-link .cs-n { font-family: var(--font-fraunces); font-size: 0.875rem; color: var(--faint); }
+  .cs-link[aria-current="true"] .cs-n { color: var(--accent-ink); }
+
+  .cs-empty { margin: 0; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: var(--faint); }
+  .cs-empty.is-bare { padding: 0; }
+  .cs-reset { margin: 0 0.75rem; font-size: 0.75rem; font-weight: 600; color: var(--accent); border-radius: 0.375rem; padding: 0.15rem 0; }
+  .cs-reset:hover { color: var(--accent-hover); }
+  .cs-error { margin: 0; padding: 0.625rem 0.75rem; border-radius: 0.625rem; background: var(--danger-soft); color: var(--danger); font-size: 0.8125rem; }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+  @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { * { transition-duration: 0.001ms !important; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="page-header">
+    <h1>Companies sidebar: sort &amp; filter</h1>
+    <p>Design mockup for the <code>companies-sidebar-sort-filter</code> spec. The card on the left is interactive with 12 fake companies. The gallery on the right shows each state side by side. Sizes match the 240px sidebar column.</p>
+  </header>
+
+  <div class="layout">
+    <div>
+      <p class="section-label">Interactive</p>
+      <div id="live"></div>
+      <div class="demo-controls" aria-label="Demo controls">
+        <button type="button" id="demo-error" aria-pressed="false">Simulate load error</button>
+        <button type="button" id="demo-empty" aria-pressed="false">Zero companies</button>
+        <button type="button" id="demo-reset">Reset demo</button>
+      </div>
+    </div>
+    <div>
+      <p class="section-label">States (static)</p>
+      <div class="gallery" id="gallery"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---- Fake data (CompanyRow-shaped, flattened) ----
+  const ROWS = [
+    { id: "c01", name: "Abby Care",      createdAt: "2026-06-02T10:00:00Z", open: 4,  tracked: 2, watched: true,  attention: false },
+    { id: "c02", name: "Abridge",        createdAt: "2026-07-14T10:00:00Z", open: 12, tracked: 0, watched: true,  attention: true  },
+    { id: "c03", name: "Aerdos",         createdAt: "2026-05-20T10:00:00Z", open: 0,  tracked: 1, watched: false, attention: false },
+    { id: "c04", name: "Airbase",        createdAt: "2026-08-01T10:00:00Z", open: 3,  tracked: 0, watched: true,  attention: false },
+    { id: "c05", name: "AKASA",          createdAt: "2026-09-10T10:00:00Z", open: 0,  tracked: 3, watched: true,  attention: true  },
+    { id: "c06", name: "beta Robotics",  createdAt: "2026-04-11T10:00:00Z", open: 0,  tracked: 0, watched: false, attention: false },
+    { id: "c07", name: "Brightline",     createdAt: "2026-09-28T10:00:00Z", open: 9,  tracked: 7, watched: true,  attention: false },
+    { id: "c08", name: "Cobalt Health",  createdAt: "2026-03-03T10:00:00Z", open: 0,  tracked: 2, watched: false, attention: true  },
+    { id: "c09", name: "Dovetail",       createdAt: "2026-06-30T10:00:00Z", open: 2,  tracked: 0, watched: true,  attention: false },
+    { id: "c10", name: "Écho Labs",      createdAt: "2026-07-01T10:00:00Z", open: 0,  tracked: 0, watched: false, attention: false },
+    { id: "c11", name: "Fernway",        createdAt: "2026-08-19T10:00:00Z", open: 5,  tracked: 4, watched: true,  attention: false },
+    { id: "c12", name: "Granite AI",     createdAt: "2026-02-15T10:00:00Z", open: 1,  tracked: 6, watched: false, attention: false },
+  ];
+
+  const SORTS = [
+    { value: "nameAsc", label: "Name A–Z" },
+    { value: "nameDesc", label: "Name Z–A" },
+    { value: "openPositionsDesc", label: "Most open positions" },
+    { value: "trackedJobsDesc", label: "Most tracked jobs" },
+    { value: "recentlyAdded", label: "Recently added" },
+  ];
+  const FILTERS = [
+    { value: "watched", label: "Watched" },
+    { value: "hasOpenPositions", label: "Has open positions" },
+    { value: "hasTrackedJobs", label: "Has tracked jobs" },
+    { value: "needsAttention", label: "Needs attention" },
+  ];
+
+  // ---- Pure logic (mirrors design: company-sidebar.ts) ----
+  const collator = new Intl.Collator(undefined, { sensitivity: "accent" });
+  const sign = (n) => (n > 0 ? 1 : n < 0 ? -1 : 0);
+  const byName = (a, b) => collator.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const ts = (r) => { const t = Date.parse(r.createdAt); return Number.isNaN(t) ? -Infinity : t; };
+  const cmp = {
+    nameAsc: byName,
+    nameDesc: (a, b) => byName(b, a),
+    openPositionsDesc: (a, b) => sign(b.open - a.open) || byName(a, b),
+    trackedJobsDesc: (a, b) => sign(b.tracked - a.tracked) || byName(a, b),
+    recentlyAdded: (a, b) => (ts(a) === ts(b) ? 0 : ts(b) > ts(a) ? 1 : -1) || byName(a, b),
+  };
+  const pred = {
+    watched: (r) => r.watched,
+    hasOpenPositions: (r) => r.open > 0,
+    hasTrackedJobs: (r) => r.tracked > 0,
+    needsAttention: (r) => r.attention,
+  };
+  function derive(s) {
+    const q = s.search.trim().toLowerCase();
+    const visible = s.rows
+      .filter((r) => !q || r.name.toLowerCase().includes(q))
+      .filter((r) => [...s.filters].every((f) => pred[f](r)))
+      .sort(cmp[s.sort]);
+    return { visible, total: s.rows.length, refined: s.filters.size > 0 || q !== "" };
+  }
+  const countFor = (r, sort) => (sort === "openPositionsDesc" ? r.open : sort === "trackedJobsDesc" ? r.tracked : null);
+  const sortLabel = (v) => SORTS.find((o) => o.value === v).label;
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // ---- Icons (inline SVG, lucide-style strokes) ----
+  const svg = (d, size = 16) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${d}</svg>`;
+  const ICON_SORT = svg('<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>');
+  const ICON_FUNNEL = svg('<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>');
+  const ICON_CHECK = svg('<path d="M20 6 9 17l-5-5"/>', 14);
+  const ICON_CHECK_SM = svg('<path d="M20 6 9 17l-5-5"/>', 11);
+
+  // ---- Rendering ----
+  function render(s, uid) {
+    const d = derive(s);
+    const n = s.filters.size;
+    let html = `<section class="card" aria-labelledby="${uid}-h">
+      <div class="cs-head"><h2 id="${uid}-h">Companies</h2><a class="cs-manage" href="#" data-act="noop">Manage</a></div>`;
+
+    if (s.load === "ready" && s.rows.length > 0) {
+      html += `<div class="cs-controls">
+        <input type="search" class="field" placeholder="Search companies…" aria-label="Search companies" value="${esc(s.search)}" data-act="search">
+        <button type="button" class="cs-iconbtn${s.sort !== "nameAsc" ? " is-active" : ""}" aria-label="Sort companies"
+          aria-haspopup="menu" aria-expanded="${s.openMenu === "sort"}" aria-controls="${uid}-sortmenu"
+          aria-describedby="${uid}-sortdesc" data-act="sortbtn">${ICON_SORT}${s.sort !== "nameAsc" ? '<span class="cs-dot" aria-hidden="true"></span>' : ""}</button>
+        <span class="sr-only" id="${uid}-sortdesc">Sorted by ${esc(sortLabel(s.sort))}</span>
+        <button type="button" class="cs-iconbtn${n ? " is-active" : ""}" aria-label="Filter companies"
+          aria-haspopup="menu" aria-expanded="${s.openMenu === "filter"}" aria-controls="${uid}-filtermenu"
+          aria-describedby="${uid}-filterdesc" data-act="filterbtn">${ICON_FUNNEL}${n ? `<span class="cs-badge" aria-hidden="true">${n}</span>` : ""}</button>
+        <span class="sr-only" id="${uid}-filterdesc">${n ? `${n} filter${n === 1 ? "" : "s"} active` : "No filters active"}</span>`;
+
+      if (s.openMenu === "sort") {
+        html += `<div class="cs-menu" role="menu" id="${uid}-sortmenu" aria-label="Sort companies">` +
+          SORTS.map((o) => `<button type="button" class="cs-item" role="menuitemradio" aria-checked="${o.value === s.sort}" data-act="sort" data-value="${o.value}">
+            <span class="cs-check">${o.value === s.sort ? ICON_CHECK : ""}</span>${esc(o.label)}</button>`).join("") +
+          `</div>`;
+      }
+      if (s.openMenu === "filter") {
+        html += `<div class="cs-menu" role="menu" id="${uid}-filtermenu" aria-label="Filter companies">` +
+          FILTERS.map((f) => `<button type="button" class="cs-item" role="menuitemcheckbox" aria-checked="${s.filters.has(f.value)}" data-act="filter" data-value="${f.value}">
+            <span class="cs-box">${s.filters.has(f.value) ? ICON_CHECK_SM : ""}</span>${esc(f.label)}</button>`).join("") +
+          `<div class="cs-sep" role="separator"></div>
+           <button type="button" class="cs-item cs-clear" role="menuitem" aria-disabled="${n === 0}" data-act="clear">Clear filters</button>
+          </div>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `<div data-region="list">${renderList(s, d)}</div></section>`;
+    return html;
+  }
+
+  function renderList(s, d = derive(s)) {
+    if (s.load === "loading") return "";
+    if (s.load === "error") return `<p class="cs-error" role="alert">Couldn't load companies.</p>`;
+    if (s.rows.length === 0) return `<p class="cs-empty is-bare">No companies yet.</p>`;
+    let html = d.refined ? `<p class="cs-count" aria-live="polite">${d.visible.length} of ${d.total} companies</p>` : "";
+    if (d.visible.length === 0) {
+      const msg = s.search.trim() ? "No matching companies." : "No companies match the selected filters.";
+      return html + `<p class="cs-empty">${msg}</p><button type="button" class="cs-reset" data-act="reset">Reset</button>`;
+    }
+    html += `<div class="cs-list">` + d.visible.map((r) => {
+      const c = countFor(r, s.sort);
+      return `<a class="cs-link" href="#" data-act="pick" data-id="${r.id}"${r.id === s.activeId ? ' aria-current="true"' : ""}>
+        <span class="cs-name">${esc(r.name)}</span>${c === null ? "" : `<span class="cs-n">${c}</span>`}</a>`;
+    }).join("") + `</div>`;
+    return html;
+  }
+
+  // ---- Static gallery ----
+  const base = () => ({ rows: ROWS, load: "ready", sort: "nameAsc", filters: new Set(), search: "", openMenu: null, activeId: null });
+  const GALLERY = [
+    { title: "a. Default", note: "Search, sort ↕, filter funnel on one row. Name A–Z, case-insensitive. Req 1.1, 1.2, 2.5, 2.10", s: {} },
+    { title: "b. Sort menu open", note: "Five options, checkmark on the active one. Req 1.3, 2.1, 2.2", s: { openMenu: "sort" } },
+    { title: "c. Most tracked jobs", note: "Dot on sort button; counts right-aligned. Req 2.8, 2.11, 2.14", s: { sort: "trackedJobsDesc" } },
+    { title: "d. Filter menu, 2 checked", note: "Badge \"2\"; Clear filters last. Req 1.4, 3.1, 3.5, 3.6", s: { openMenu: "filter", filters: new Set(["watched", "hasOpenPositions"]) } },
+    { title: "e. Filtered + search", note: "\"N of M companies\"; selected company highlighted. Req 5.1, 5.9, 5.11", s: { filters: new Set(["watched", "hasTrackedJobs"]), search: "a", activeId: "c05" } },
+    { title: "f1. No search match", note: "Message + Reset. Req 7.2, 7.3, 7.5", s: { search: "zzz" } },
+    { title: "f2. No filter match", note: "Message + Reset. Req 7.4, 7.3, 7.5", s: { filters: new Set(["hasOpenPositions", "hasTrackedJobs", "needsAttention"]) } },
+    { title: "f3. Load error", note: "Error instead of \"No companies yet.\"; no controls. Req 7.7", s: { load: "error" } },
+    { title: "f4. Zero companies", note: "Controls hidden; no Reset. Req 1.9, 7.1", s: { rows: [] } },
+  ];
+  const gallery = document.getElementById("gallery");
+  gallery.innerHTML = GALLERY.map((g, i) => `<figure>
+      <div class="frame" inert>${render({ ...base(), ...g.s }, "g" + i)}</div>
+      <figcaption><strong>${esc(g.title)}</strong>${esc(g.note)}</figcaption>
+    </figure>`).join("");
+
+  // ---- Interactive card ----
+  const STORAGE_KEY = "jobTracker.companiesSidebar.view.v1.mockup";
+  const live = document.getElementById("live");
+  let state = base();
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (raw && SORTS.some((o) => o.value === raw.sort)) state.sort = raw.sort;
+    if (raw && Array.isArray(raw.filters)) state.filters = new Set(raw.filters.filter((f) => f in pred));
+  } catch { /* ignore, defaults */ }
+
+  function persist() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, sort: state.sort, filters: FILTERS.map((f) => f.value).filter((f) => state.filters.has(f)) }));
+    } catch { /* keep in-memory state */ }
+  }
+
+  function paint(focusSel) {
+    live.innerHTML = render(state, "live");
+    if (focusSel) live.querySelector(focusSel)?.focus();
+  }
+
+  live.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-act]");
+    if (!el) return;
+    const act = el.dataset.act;
+    if (act === "noop") { e.preventDefault(); return; }
+    if (act === "sortbtn" || act === "filterbtn") {
+      const which = act === "sortbtn" ? "sort" : "filter";
+      const opening = state.openMenu !== which;
+      state.openMenu = opening ? which : null;
+      paint(opening
+        ? (which === "sort" ? '[role="menuitemradio"][aria-checked="true"]' : '[role="menuitemcheckbox"]')
+        : `[data-act="${act}"]`);
+    } else if (act === "sort") {
+      if (el.dataset.value !== state.sort) { state.sort = el.dataset.value; persist(); }
+      state.openMenu = null;
+      paint('[data-act="sortbtn"]');
+    } else if (act === "filter") {
+      const f = el.dataset.value;
+      const next = new Set(state.filters);
+      next.has(f) ? next.delete(f) : next.add(f);
+      state.filters = next; persist();
+      paint(`[data-act="filter"][data-value="${f}"]`);
+    } else if (act === "clear") {
+      if (state.filters.size === 0) return;
+      state.filters = new Set(); persist();
+      paint('[data-act="clear"]');
+    } else if (act === "reset") {
+      state.search = ""; state.filters = new Set(); persist();
+      paint('[data-act="search"]');
+    } else if (act === "pick") {
+      e.preventDefault();
+      state.activeId = el.dataset.id;
+      paint(`[data-act="pick"][data-id="${el.dataset.id}"]`);
+    }
+  });
+
+  // Search: update only the list region so the caret is kept.
+  live.addEventListener("input", (e) => {
+    if (e.target.dataset.act !== "search") return;
+    state.search = e.target.value;
+    live.querySelector('[data-region="list"]').innerHTML = renderList(state);
+  });
+
+  live.addEventListener("keydown", (e) => {
+    if (!state.openMenu) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      const btn = state.openMenu === "sort" ? "sortbtn" : "filterbtn";
+      state.openMenu = null;
+      paint(`[data-act="${btn}"]`);
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const items = [...live.querySelectorAll(".cs-menu .cs-item")];
+      const i = items.indexOf(document.activeElement);
+      if (i === -1) return;
+      e.preventDefault();
+      items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+    }
+  });
+
+  document.addEventListener("pointerdown", (e) => {
+    if (!state.openMenu) return;
+    const menu = live.querySelector(".cs-menu");
+    const btn = live.querySelector(`[data-act="${state.openMenu === "sort" ? "sortbtn" : "filterbtn"}"]`);
+    if (menu?.contains(e.target) || btn?.contains(e.target)) return;
+    state.openMenu = null;
+    paint();
+  });
+
+  // Demo controls
+  const errBtn = document.getElementById("demo-error");
+  const emptyBtn = document.getElementById("demo-empty");
+  errBtn.addEventListener("click", () => {
+    const on = state.load !== "error";
+    state.load = on ? "error" : "ready"; state.openMenu = null;
+    errBtn.setAttribute("aria-pressed", String(on)); paint();
+  });
+  emptyBtn.addEventListener("click", () => {
+    const on = state.rows.length > 0;
+    state.rows = on ? [] : ROWS; state.openMenu = null;
+    emptyBtn.setAttribute("aria-pressed", String(on)); paint();
+  });
+  document.getElementById("demo-reset").addEventListener("click", () => {
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    state = base();
+    errBtn.setAttribute("aria-pressed", "false"); emptyBtn.setAttribute("aria-pressed", "false");
+    paint();
+  });
+
+  paint();
+})();
+</script>
+</body>
+</html>

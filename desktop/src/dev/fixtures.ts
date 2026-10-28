@@ -194,6 +194,7 @@ export function createFixtureBackend() {
       openPositionCount: jobs.filter(
         (j) => j.companyId === c.id && j.postingState === "active" && j.source !== "manual",
       ).length,
+      trackedJobCount: jobs.filter((j) => j.companyId === c.id && j.status !== "archived").length,
     }));
   }
 

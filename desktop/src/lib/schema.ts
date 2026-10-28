@@ -271,6 +271,8 @@ export type CompanyRow = {
   watches: CompanyWatch[];
   reviews: CareersPageReview[];
   openPositionCount: number;
+  /** Jobs linked to this company whose status is not "archived". */
+  trackedJobCount: number;
 };
 
 export type DocumentListItem = Document & {

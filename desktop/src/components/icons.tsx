@@ -106,6 +106,22 @@ export function ChevronDownIcon({ size = 16, className }: IconProps) {
   );
 }
 
+export function SortIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16" />
+    </svg>
+  );
+}
+
+export function FunnelIcon({ size = 16, className }: IconProps) {
+  return (
+    <svg {...svgProps(size)} className={className}>
+      <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
+    </svg>
+  );
+}
+
 export function AlertIcon({ size = 16, className }: IconProps) {
   return (
     <svg {...svgProps(size)} className={className}>

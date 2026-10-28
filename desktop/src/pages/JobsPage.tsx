@@ -19,7 +19,9 @@ import {
   TrashIcon,
   TrophyIcon,
 } from "@/components/icons";
+import { CompaniesSidebar, type CompaniesLoadStatus } from "@/components/CompaniesSidebar";
 import { JobsBoardView } from "@/components/JobsBoardView";
+import { SidebarLink } from "@/components/SidebarLink";
 import { StatusQuickChange } from "@/components/StatusQuickChange";
 import { api } from "@/lib/api";
 import {
@@ -31,7 +33,6 @@ import {
 import {
   countActiveFilterDimensions,
   encodeStatusesToUrl,
-  filterCompaniesBySearch,
   filterDraftFromUrl,
   parseDateFilterFromUrl,
   parseRemoteModeFromUrl,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/job-filters";
 import {
   jobStatuses,
+  type CompanyRow,
   type JobListPageCursor,
   type JobListSummary,
   type JobListSort,
@@ -139,8 +141,8 @@ export function JobsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
-  const [companies, setCompanies] = useState<Array<{ id: string; name: string }>>([]);
-  const [companySidebarSearch, setCompanySidebarSearch] = useState("");
+  const [companyRows, setCompanyRows] = useState<CompanyRow[]>([]);
+  const [companiesLoad, setCompaniesLoad] = useState<CompaniesLoadStatus>("loading");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterDraft, setFilterDraft] = useState(() => filterDraftFromUrl(search ?? null, postingState ?? null, salaryMinParam, salaryMaxParam, searchParams));
@@ -405,15 +407,24 @@ export function JobsPage() {
   const load = useCallback(async (opts?: { quiet?: boolean }) => {
     const searchText = appliedSearchRef.current;
     loadJobs(searchText, opts?.quiet ?? false, true);
-    try {
-      const [dashboardResult, companiesResult] = await Promise.all([
-        api.getJobsDashboard(),
-        api.listCompanies(),
-      ]);
-      setCounts(dashboardResult.counts);
-      setActivity(dashboardResult.weeklyActivity);
-      setCompanies(companiesResult.companies.map((row) => row.company));
-    } catch (err) {
+    // Settle independently so a companies failure is reported in the sidebar
+    // and a dashboard failure keeps its existing error/refresh-failed handling.
+    const [dashboardResult, companiesResult] = await Promise.allSettled([
+      api.getJobsDashboard(),
+      api.listCompanies(),
+    ]);
+    if (companiesResult.status === "fulfilled") {
+      setCompanyRows(companiesResult.value.companies);
+      setCompaniesLoad("ready");
+    } else {
+      setCompanyRows([]);
+      setCompaniesLoad("error");
+    }
+    if (dashboardResult.status === "fulfilled") {
+      setCounts(dashboardResult.value.counts);
+      setActivity(dashboardResult.value.weeklyActivity);
+    } else {
+      const err: unknown = dashboardResult.reason;
       const message = err instanceof Error ? err.message : "Failed to load jobs";
       setError(message);
       if (opts?.quiet) reportRefreshFailed(message);
@@ -894,10 +905,6 @@ export function JobsPage() {
   }
 
   const activeJobsCount = Math.max(0, (counts.all ?? 0) - (counts.archivedTotal ?? 0));
-  const visibleCompanies = useMemo(
-    () => filterCompaniesBySearch(companies, companySidebarSearch),
-    [companies, companySidebarSearch],
-  );
   const normalizedLiveSearch = liveSearch.trim();
   const suggestionsReady = normalizedLiveSearch.length >= SUGGESTION_MIN_LENGTH
     && normalizedLiveSearch === appliedSearch
@@ -951,31 +958,12 @@ export function JobsPage() {
                 Manage
               </Link>
             </div>
-            {companies.length > 0 ? (
-              <input
-                type="search"
-                value={companySidebarSearch}
-                onChange={(event) => setCompanySidebarSearch(event.target.value)}
-                placeholder="Search companies…"
-                aria-label="Search companies"
-                className="field mb-3 py-2 text-xs"
-              />
-            ) : null}
-            <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
-              {visibleCompanies.map((company) => (
-                <SidebarLink
-                  key={company.id}
-                  to={withCurrentSort(`/?companyId=${company.id}`)}
-                  active={companyId === company.id}
-                  label={company.name}
-                />
-              ))}
-              {companies.length === 0 ? (
-                <p className="text-sm text-[var(--faint)]">No companies yet.</p>
-              ) : visibleCompanies.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-[var(--faint)]">No matching companies.</p>
-              ) : null}
-            </div>
+            <CompaniesSidebar
+              rows={companyRows}
+              load={companiesLoad}
+              activeCompanyId={companyId}
+              hrefForCompany={(id) => withCurrentSort(`/?companyId=${id}`)}
+            />
           </section>
         </aside>
 
@@ -1930,41 +1918,3 @@ function PipelineSummary({
   );
 }
 
-function SidebarLink({
-  to,
-  label,
-  count,
-  active,
-  Icon,
-}: {
-  to: string;
-  label: string;
-  count?: number;
-  active?: boolean;
-  Icon?: (props: { size?: number; className?: string; filled?: boolean }) => React.JSX.Element;
-}) {
-  return (
-    <Link
-      to={to}
-      className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors ${
-        active
-          ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-ink)]"
-          : "text-[var(--foreground)] hover:bg-[var(--surface-muted)]"
-      }`}
-    >
-      <span className="flex items-center gap-2">
-        {Icon ? <Icon size={14} className={active ? "text-[var(--accent-ink)]" : "text-[var(--faint)]"} filled={active} /> : null}
-        <span>{label}</span>
-      </span>
-      {typeof count === "number" ? (
-        <span
-          className={`font-display text-sm ${
-            active ? "text-[var(--accent-ink)]" : "text-[var(--faint)]"
-          }`}
-        >
-          {count}
-        </span>
-      ) : null}
-    </Link>
-  );
-}

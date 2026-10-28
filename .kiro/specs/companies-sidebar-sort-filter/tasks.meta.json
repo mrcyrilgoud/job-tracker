@@ -1,0 +1,637 @@
+{
+  "pbtResults": {
+    "4.2 Write property test for sort key ordering": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172686918
+    },
+    "1.2 Write property test for tracked job counts": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172701126
+    },
+    "4.3 Write property test for Name Z–A reversal": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172760054
+    },
+    "1.3 Write property test for unchanged existing fields and order": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172768510
+    },
+    "4.4 Write property test for sort permutation, idempotence, and determinism": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172845947
+    },
+    "4.5 Write property test for filter conjunction": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172923051
+    },
+    "4.6 Write property test for filter toggling": {
+      "status": "passed",
+      "lastRunTimestamp": 1793172969809
+    },
+    "4.8 Write property test for filter activation order": {
+      "status": "passed",
+      "lastRunTimestamp": 1793173091164
+    },
+    "4.9 Write property test for the derived list model": {
+      "status": "passed",
+      "lastRunTimestamp": 1793173137023
+    },
+    "4.10 Write property test for search/filter commutativity": {
+      "status": "passed",
+      "lastRunTimestamp": 1793173187843
+    },
+    "4.11 Write property test for empty-state precedence": {
+      "status": "passed",
+      "lastRunTimestamp": 1793173232247
+    },
+    "4.13 Write property test for the persistence round trip": {
+      "status": "passed",
+      "lastRunTimestamp": 1793173304851
+    },
+    "4.14 Write property test for sanitizing stored state": {
+      "status": "passed",
+      "lastRunTimestamp": 1793173391683
+    }
+  },
+  "executionHistory": {
+    "1.1 Compute tracked job counts in `list_companies_with_watches`": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780452
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170787312
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170849621
+      }
+    ],
+    "2.1 Add `trackedJobCount: number` to `CompanyRow`": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780486
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170788013
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170851179
+      }
+    ],
+    "3. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780509
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172863381
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172891584
+      }
+    ],
+    "4.1 Create sort and filter primitives in `desktop/src/lib/company-sidebar.ts`": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780530
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170856197
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170954034
+      }
+    ],
+    "4.7 Add search composition and empty-state selection": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780552
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172978181
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173057362
+      }
+    ],
+    "4.12 Add view-state persistence codec and storage wrappers": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780585
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173202640
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173259074
+      }
+    ],
+    "5. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780601
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173529410
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173553455
+      }
+    ],
+    "6.1 Extract `SidebarLink` into a shared export": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780618
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170856413
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170954748
+      }
+    ],
+    "6.2 Create `desktop/src/components/CompaniesSidebar.tsx` with search, list, count, and empty states": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780635
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173265318
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173342209
+      }
+    ],
+    "6.3 Add the Sort_Button and Sort_Menu": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780653
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173344230
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173446236
+      }
+    ],
+    "6.4 Add the Filter_Button and Filter_Menu": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780671
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173448249
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173528535
+      }
+    ],
+    "6.5 Add shared menu dismissal and keyboard handling": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780691
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173553196
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173639112
+      }
+    ],
+    "7.1 Replace the inline sidebar in `desktop/src/pages/JobsPage.tsx`": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780710
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173558348
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173640571
+      }
+    ],
+    "8. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170780729
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173886951
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173930634
+      }
+    ],
+    "1. Add `trackedJobCount` to the company data service": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170849651
+      }
+    ],
+    "2. Update the `CompanyRow` type and existing fixtures": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793170851202
+      }
+    ],
+    "1.2 Write property test for tracked job counts": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172602084
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172636092
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172725735
+      }
+    ],
+    "1.3 Write property test for unchanged existing fields and order": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172603263
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172733314
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172791901
+      }
+    ],
+    "1.4 Write unit test for the error path": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172604410
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172797111
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172854757
+      }
+    ],
+    "4.2 Write property test for sort key ordering": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172605668
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172636118
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172726853
+      }
+    ],
+    "4.3 Write property test for Name Z–A reversal": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172606799
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172733367
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172792942
+      }
+    ],
+    "4.4 Write property test for sort permutation, idempotence, and determinism": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172607997
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172797505
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172855880
+      }
+    ],
+    "4.5 Write property test for filter conjunction": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172609193
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172896784
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172936559
+      }
+    ],
+    "4.6 Write property test for filter toggling": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172610414
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172937609
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172977352
+      }
+    ],
+    "4.8 Write property test for filter activation order": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172611601
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173058426
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173105818
+      }
+    ],
+    "4.9 Write property test for the derived list model": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172612425
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173106830
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173150510
+      }
+    ],
+    "4.10 Write property test for search/filter commutativity": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172613621
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173151467
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173197098
+      }
+    ],
+    "4.11 Write property test for empty-state precedence": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172614810
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173196376
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173258183
+      }
+    ],
+    "4.13 Write property test for the persistence round trip": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172615998
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173259731
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173341913
+      }
+    ],
+    "4.14 Write property test for sanitizing stored state": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172617205
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173343411
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173445135
+      }
+    ],
+    "4.15 Write unit tests for module examples": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172618390
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173447441
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173527023
+      }
+    ],
+    "6.6 Write component tests for menus, focus, and ARIA": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172619601
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173641451
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173781733
+      }
+    ],
+    "6.7 Write component tests for persistence, search, list, and empty states": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172620800
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173783464
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173886291
+      }
+    ],
+    "7.2 Write JobsPage integration tests for the companies sidebar": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793172621706
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173642820
+      },
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173782541
+      }
+    ],
+    "4. Implement the pure sidebar logic module": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173259105
+      }
+    ],
+    "6. Build the `CompaniesSidebar` component": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173639142
+      }
+    ],
+    "7. Wire `CompaniesSidebar` into the Jobs page": [
+      {
+        "executionId": "26cb1094-4772-4e8b-ac80-4ef0a42efa65",
+        "chatSessionId": "sess_efafd7b8-993a-477b-88ab-b0cf45eb9fe6",
+        "timestamp": 1793173640594
+      }
+    ]
+  }
+}
