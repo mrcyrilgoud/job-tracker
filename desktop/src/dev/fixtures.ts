@@ -195,7 +195,38 @@ export function createFixtureBackend() {
         (j) => j.companyId === c.id && j.postingState === "active" && j.source !== "manual",
       ).length,
       trackedJobCount: jobs.filter((j) => j.companyId === c.id && j.status !== "archived").length,
+      ...pipelineAggregates(c.id),
     }));
+  }
+
+  /** Mirrors the Rust Pipeline_Job aggregates in `list_companies_with_watches`. */
+  function pipelineAggregates(companyId: string) {
+    const pipeline = jobs.filter(
+      (j) =>
+        j.companyId === companyId &&
+        j.status !== "archived" &&
+        !j.isNewFromWatch &&
+        j.watchDisposition !== "dismissed",
+    );
+    const appliedStatuses: JobStatus[] = ["applied", "interviewing", "offer", "rejected", "withdrawn"];
+    const wishlist = pipeline.filter((j) => j.status === "wishlist");
+    const eases = wishlist
+      .map((j) => j.applicationEase)
+      .filter((e): e is number => e != null && Number.isInteger(e) && e >= 1 && e <= 5);
+    // Fixture timestamps share one ISO format, so string max equals instant max.
+    const latest = (values: (string | null)[]) =>
+      values.reduce<string | null>((best, v) => (v != null && (best == null || v > best) ? v : best), null);
+    return {
+      wishlistJobCount: wishlist.length,
+      appliedJobCount: pipeline.filter(
+        (j) => appliedStatuses.includes(j.status) || (j.status === "closed" && j.appliedAt != null),
+      ).length,
+      interviewingJobCount: pipeline.filter((j) => j.status === "interviewing" || j.status === "offer").length,
+      // Fixture jobs carry no event log; updatedAt stands in for the latest user activity.
+      lastActivityAt: latest(pipeline.map((j) => j.updatedAt)),
+      lastAppliedAt: latest(pipeline.map((j) => j.appliedAt)),
+      wishlistEaseAverage: eases.length ? eases.reduce((a, b) => a + b, 0) / eases.length : null,
+    };
   }
 
   function jobListItems(filters?: Record<string, unknown> | null): JobListItem[] {

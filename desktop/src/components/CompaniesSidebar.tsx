@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CheckIcon, FunnelIcon, SortIcon } from "./icons";
 import { SidebarLink } from "./SidebarLink";
 import {
@@ -10,7 +10,7 @@ import {
   deriveCompanyList,
   loadCompanyViewState,
   saveCompanyViewState,
-  sortCountFor,
+  sortAnnotationFor,
   toggleCompanyFilter,
   type CompanyFilter,
   type CompanySortOption,
@@ -29,6 +29,21 @@ export type CompaniesSidebarProps = {
 };
 
 type OpenMenu = "sort" | "filter" | null;
+
+/** Sort_Menu offset below the Sort_Button plus bottom margin, in px. */
+const SORT_MENU_VIEWPORT_GAP = 14;
+/** Smallest Sort_Menu max-height, in px, so a very short window still shows a few options. */
+const SORT_MENU_MIN_HEIGHT = 120;
+
+/**
+ * Focuses a menu item without letting the browser scroll ancestors, then scrolls the
+ * menu's own box just enough to show the whole item (Req 2.5). jsdom lacks scrollIntoView.
+ */
+function focusMenuItem(item: HTMLElement | null | undefined) {
+  if (!item) return;
+  item.focus({ preventScroll: true });
+  item.scrollIntoView?.({ block: "nearest" });
+}
 
 /** `window.localStorage`, or undefined when storage access throws (e.g. disabled storage). */
 function safeLocalStorage(): Storage | undefined {
@@ -67,8 +82,25 @@ export function CompaniesSidebar({ rows, load, activeCompanyId, hrefForCompany }
   // Focus the active sort option when the Sort_Menu opens (Req 1.3),
   // or the first filter toggle when the Filter_Menu opens (Req 1.4).
   useEffect(() => {
-    if (openMenu === "sort") activeSortItemRef.current?.focus();
-    else if (openMenu === "filter") firstFilterItemRef.current?.focus();
+    if (openMenu === "sort") focusMenuItem(activeSortItemRef.current);
+    else if (openMenu === "filter") focusMenuItem(firstFilterItemRef.current);
+  }, [openMenu]);
+
+  // Cap the Sort_Menu height to the space below the Sort_Button so it scrolls internally (Req 2.5).
+  // A layout effect runs before the passive focus effect above, so the menu is sized before the
+  // active item is scrolled into view.
+  useLayoutEffect(() => {
+    if (openMenu !== "sort") return;
+    function sizeSortMenu() {
+      const menu = sortMenuRef.current;
+      const button = sortButtonRef.current;
+      if (!menu || !button) return;
+      const available = window.innerHeight - button.getBoundingClientRect().bottom - SORT_MENU_VIEWPORT_GAP;
+      menu.style.maxHeight = `${Math.max(SORT_MENU_MIN_HEIGHT, Math.floor(available))}px`;
+    }
+    sizeSortMenu();
+    window.addEventListener("resize", sizeSortMenu);
+    return () => window.removeEventListener("resize", sizeSortMenu);
   }, [openMenu]);
 
   // Shared dismissal and keyboard handling for whichever menu is open (Req 1.5, 1.6, 1.8),
@@ -108,7 +140,7 @@ export function CompaniesSidebar({ rows, load, activeCompanyId, hrefForCompany }
       const current = items.findIndex((item) => item === active);
       const step = event.key === "ArrowDown" ? 1 : -1;
       const next = current === -1 ? (step === 1 ? 0 : items.length - 1) : (current + step + items.length) % items.length;
-      items[next]?.focus();
+      focusMenuItem(items[next]);
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -120,6 +152,11 @@ export function CompaniesSidebar({ rows, load, activeCompanyId, hrefForCompany }
   }, [openMenu]);
 
   const derived = useMemo(() => deriveCompanyList(rows, search, view), [rows, search, view]);
+  // Annotations derive from the same view as the order, so a sort change updates both in one render (Req 6.10).
+  const visibleRows = useMemo(() => {
+    const ctx = { now: new Date() };
+    return derived.visible.map((row) => ({ row, annotation: sortAnnotationFor(row, view.sort, ctx) }));
+  }, [derived.visible, view.sort]);
   const emptyState = companyEmptyState({
     load,
     total: derived.total,
@@ -219,26 +256,29 @@ export function CompaniesSidebar({ rows, load, activeCompanyId, hrefForCompany }
               id={sortMenuId}
               role="menu"
               aria-label="Sort companies"
-              className="companies-sidebar-menu"
+              className="companies-sidebar-menu companies-sidebar-menu--sort"
             >
-              {COMPANY_SORT_OPTIONS.map((option) => {
+              {COMPANY_SORT_OPTIONS.map((option, index) => {
                 const checked = option.value === view.sort;
+                const startsGroup = index > 0 && COMPANY_SORT_OPTIONS[index - 1]?.group !== option.group;
                 return (
-                  <button
-                    key={option.value}
-                    ref={checked ? activeSortItemRef : undefined}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={checked}
-                    tabIndex={0}
-                    onClick={() => selectSort(option.value)}
-                    className="companies-sidebar-item"
-                  >
-                    <span className="companies-sidebar-check" aria-hidden="true">
-                      {checked ? <CheckIcon size={14} /> : null}
-                    </span>
-                    {option.label}
-                  </button>
+                  <Fragment key={option.value}>
+                    {startsGroup ? <div role="separator" className="companies-sidebar-sep" /> : null}
+                    <button
+                      ref={checked ? activeSortItemRef : undefined}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={checked}
+                      tabIndex={0}
+                      onClick={() => selectSort(option.value)}
+                      className="companies-sidebar-item"
+                    >
+                      <span className="companies-sidebar-check" aria-hidden="true">
+                        {checked ? <CheckIcon size={14} /> : null}
+                      </span>
+                      {option.label}
+                    </button>
+                  </Fragment>
                 );
               })}
             </div>
@@ -315,13 +355,13 @@ export function CompaniesSidebar({ rows, load, activeCompanyId, hrefForCompany }
         </p>
       ) : null}
       <div className="max-h-80 space-y-1 overflow-y-auto pr-1">
-        {derived.visible.map((row) => (
+        {visibleRows.map(({ row, annotation }) => (
           <SidebarLink
             key={row.company.id}
             to={hrefForCompany(row.company.id)}
             active={activeCompanyId === row.company.id}
             label={row.company.name}
-            count={sortCountFor(row, view.sort) ?? undefined}
+            annotation={annotation ?? undefined}
           />
         ))}
         {emptyState === "noCompanies" ? (

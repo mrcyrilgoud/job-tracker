@@ -172,6 +172,7 @@ export function JobsPage() {
   const salaryMinInputRef = useRef<HTMLInputElement>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const loadSequenceRef = useRef(0);
+  const companiesLoadedRef = useRef(false);
   const selectAllSequenceRef = useRef(0);
   const appliedSearchRef = useRef(appliedSearch);
   appliedSearchRef.current = appliedSearch;
@@ -416,7 +417,10 @@ export function JobsPage() {
     if (companiesResult.status === "fulfilled") {
       setCompanyRows(companiesResult.value.companies);
       setCompaniesLoad("ready");
-    } else {
+      companiesLoadedRef.current = true;
+    } else if (!companiesLoadedRef.current) {
+      // Only the first load shows the error state. A failed reload after a
+      // successful one keeps the previous rows so sort and filters stay put.
       setCompanyRows([]);
       setCompaniesLoad("error");
     }

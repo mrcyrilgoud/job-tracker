@@ -583,6 +583,18 @@ button {
   padding: 0.4rem;
 }
 
+/* Sort menu: wider for the longest label; scrolls inside an inline max-height set by the component. */
+.companies-sidebar-menu--sort {
+  width: 14rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Keep items and separators at full height when the menu is height-capped. */
+.companies-sidebar-menu--sort > * {
+  flex-shrink: 0;
+}
+
 .companies-sidebar-item {
   display: flex;
   min-height: 2.25rem;

@@ -62,6 +62,12 @@ function makeRow(
     reviews: [],
     openPositionCount: opts.openPositionCount ?? 0,
     trackedJobCount: opts.trackedJobCount ?? 0,
+    wishlistJobCount: 0,
+    appliedJobCount: 0,
+    interviewingJobCount: 0,
+    lastActivityAt: null,
+    lastAppliedAt: null,
+    wishlistEaseAverage: null,
   } as unknown as CompanyRow;
 }
 
@@ -158,6 +164,13 @@ describe("JobsPage companies sidebar integration", () => {
   function companyLinks(): HTMLAnchorElement[] {
     return [...companiesSection().querySelectorAll<HTMLAnchorElement>("a")]
       .filter((a) => a.textContent !== "Manage");
+  }
+
+  /** Link text a sighted user sees: name plus visible annotation, without the screen-reader label. */
+  function visibleLinkText(a: HTMLAnchorElement): string {
+    const clone = a.cloneNode(true) as HTMLAnchorElement;
+    clone.querySelectorAll(".sr-only").forEach((el) => el.remove());
+    return clone.textContent ?? "";
   }
 
   function companyNames(): string[] {
@@ -329,7 +342,7 @@ describe("JobsPage companies sidebar integration", () => {
     await toggleFilter("Has tracked jobs");
     await click(button("Filter companies"));
     expect(companyNames()).toEqual(["beta", "AKASA", "Abby Care"]);
-    expect(companyLinks().map((a) => a.textContent)).toEqual(["beta4", "AKASA2", "Abby Care1"]);
+    expect(companyLinks().map(visibleLinkText)).toEqual(["beta4", "AKASA2", "Abby Care1"]);
 
     apiMocks.listCompanies.mockResolvedValue({
       companies: [
@@ -347,13 +360,42 @@ describe("JobsPage companies sidebar integration", () => {
     await flush();
 
     expect(apiMocks.listCompanies.mock.calls.length).toBeGreaterThan(callsBefore);
-    expect(companyLinks().map((a) => a.textContent)).toEqual(["AKASA9", "beta4"]);
+    expect(companyLinks().map(visibleLinkText)).toEqual(["AKASA9", "beta4"]);
     expect(button("Filter companies").textContent).toContain("1");
     expect(storedView()).toEqual({ version: 1, sort: "trackedJobsDesc", filters: ["hasTrackedJobs"] });
 
     // Remount restores the same view against the latest data.
     await unmountPage();
     await mount("/");
-    expect(companyLinks().map((a) => a.textContent)).toEqual(["AKASA9", "beta4"]);
+    expect(companyLinks().map(visibleLinkText)).toEqual(["AKASA9", "beta4"]);
+  });
+
+  it("a rejected reload after a successful load keeps the list order, sort, and filters (Req 8.8)", async () => {
+    await mount("/");
+    await selectSort("Most open positions");
+    await toggleFilter("Watched");
+    await click(button("Filter companies"));
+    expect(companyLinks().map(visibleLinkText)).toEqual(["beta5", "AKASA3"]);
+
+    apiMocks.listCompanies.mockRejectedValue(new Error("reload failed"));
+    const callsBefore = apiMocks.listCompanies.mock.calls.length;
+    expect(runSettledCallbacks.length).toBeGreaterThan(0);
+    await act(async () => {
+      for (const callback of runSettledCallbacks) callback();
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(apiMocks.listCompanies.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(companiesSection().querySelector('[role="alert"]')).toBeNull();
+    expect(companiesSection().textContent).not.toContain("Couldn");
+    expect(companyLinks().map(visibleLinkText)).toEqual(["beta5", "AKASA3"]);
+    expect(button("Filter companies").textContent).toContain("1");
+    expect(storedView()).toEqual({ version: 1, sort: "openPositionsDesc", filters: ["watched"] });
+
+    await click(button("Sort companies"));
+    const checked = [...companiesSection().querySelectorAll('[role="menuitemradio"][aria-checked="true"]')];
+    expect(checked.map((item) => item.textContent)).toEqual([expect.stringContaining("Most open positions")]);
+    await click(button("Sort companies"));
   });
 });

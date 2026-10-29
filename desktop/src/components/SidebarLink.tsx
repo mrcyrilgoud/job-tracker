@@ -4,12 +4,15 @@ export type SidebarLinkProps = {
   to: string;
   label: string;
   count?: number;
+  /** Text shown in the count slot, with a screen-reader label. Takes precedence over `count`. */
+  annotation?: { text: string; label: string };
   active?: boolean;
   Icon?: (props: { size?: number; className?: string; filled?: boolean }) => React.JSX.Element;
 };
 
-/** Sidebar navigation row with an optional icon and right-aligned count. */
-export function SidebarLink({ to, label, count, active, Icon }: SidebarLinkProps) {
+/** Sidebar navigation row with an optional icon and right-aligned count or annotation. */
+export function SidebarLink({ to, label, count, annotation, active, Icon }: SidebarLinkProps) {
+  const trailingClass = `font-display text-sm ${active ? "text-[var(--accent-ink)]" : "text-[var(--faint)]"}`;
   return (
     <Link
       to={to}
@@ -23,14 +26,13 @@ export function SidebarLink({ to, label, count, active, Icon }: SidebarLinkProps
         {Icon ? <Icon size={14} className={active ? "text-[var(--accent-ink)]" : "text-[var(--faint)]"} filled={active} /> : null}
         <span>{label}</span>
       </span>
-      {typeof count === "number" ? (
-        <span
-          className={`font-display text-sm ${
-            active ? "text-[var(--accent-ink)]" : "text-[var(--faint)]"
-          }`}
-        >
-          {count}
+      {annotation ? (
+        <span className={trailingClass}>
+          <span aria-hidden="true">{annotation.text}</span>
+          <span className="sr-only">{annotation.label}</span>
         </span>
+      ) : typeof count === "number" ? (
+        <span className={trailingClass}>{count}</span>
       ) : null}
     </Link>
   );

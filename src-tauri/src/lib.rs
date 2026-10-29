@@ -6,6 +6,7 @@ mod db;
 mod documents;
 mod error;
 pub mod filtering;
+mod instant;
 mod jobs;
 mod models;
 mod runner;

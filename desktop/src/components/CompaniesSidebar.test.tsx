@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompaniesSidebar, type CompaniesSidebarProps } from "./CompaniesSidebar";
 import { COMPANY_SORT_OPTIONS, COMPANY_VIEW_STORAGE_KEY } from "@/lib/company-sidebar";
+import { formatShortDate } from "@/lib/instant";
 import type { CompanyRow } from "@/lib/schema";
+
+// The sidebar must sort and filter in memory; any backend call would show up on these mocks.
+const apiMocks = vi.hoisted(() => ({ listCompanies: vi.fn() }));
+vi.mock("@/lib/api", () => ({ api: apiMocks }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,6 +23,12 @@ function row(id: string, name: string, overrides: Partial<Omit<CompanyRow, "comp
     reviews: [],
     openPositionCount: 0,
     trackedJobCount: 0,
+    wishlistJobCount: 0,
+    appliedJobCount: 0,
+    interviewingJobCount: 0,
+    lastActivityAt: null,
+    lastAppliedAt: null,
+    wishlistEaseAverage: null,
     ...overrides,
   };
 }
@@ -230,7 +241,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
     expectKeyboardOperable([...filterItems(), clearButton()]);
   });
 
-  it("lists the five sort options in order with exactly one checked item for each active option (Req 2.1, 2.2)", () => {
+  it("lists all sort options in order with exactly one checked item for each active option (Req 2.1, 2.2)", () => {
     render();
     for (const option of COMPANY_SORT_OPTIONS) {
       click(sortButton());
@@ -277,10 +288,10 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
     expect(description().textContent).toContain("Name A–Z");
 
     click(sortButton());
-    click(sortItem("Recently added"));
+    click(sortItem("Recently added company"));
     expect(host.querySelector(".companies-sidebar-dot")).not.toBeNull();
     expect(sortButton().className).toContain("is-active");
-    expect(description().textContent).toContain("Recently added");
+    expect(description().textContent).toContain("Recently added company");
 
     click(sortButton());
     click(sortItem("Name A–Z"));
@@ -288,7 +299,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
     expect(description().textContent).toContain("Name A–Z");
   });
 
-  it("lists four filter toggles with checked state; toggling keeps menu open and focus (Req 3.1, 3.2)", () => {
+  it("lists six filter toggles with checked state; toggling keeps menu open and focus (Req 3.1, 3.2, 7.1)", () => {
     render();
     click(filterButton());
     expect(filterItems().map((el) => el.textContent)).toEqual([
@@ -296,6 +307,8 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       "Has open positions",
       "Has tracked jobs",
       "Needs attention",
+      "Has wishlist jobs",
+      "Has applied jobs",
     ]);
     for (const el of filterItems()) expect(el.getAttribute("aria-checked")).toBe("false");
 
@@ -306,7 +319,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
     expect(document.activeElement).toBe(filterItem("Has tracked jobs"));
     expect(filterItem("Has tracked jobs").getAttribute("aria-checked")).toBe("true");
     expect(filterItem("Has tracked jobs").querySelector("svg")).not.toBeNull();
-    for (const label of ["Watched", "Has open positions", "Needs attention"]) {
+    for (const label of ["Watched", "Has open positions", "Needs attention", "Has wishlist jobs", "Has applied jobs"]) {
       expect(filterItem(label).getAttribute("aria-checked")).toBe("false");
     }
     expect(linkNames()).toEqual(["Abby Care", "AKASA"]);
@@ -414,7 +427,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       const setItem = vi.spyOn(localStorage, "setItem");
       click(sortButton());
       act(() => {
-        sortItem("Recently added").click();
+        sortItem("Recently added company").click();
         // Checked before act flushes renders/effects: the write happened in the handler itself.
         expect(setItem).toHaveBeenCalledTimes(1);
       });
@@ -597,6 +610,295 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       expect(filterItem("Has open positions").getAttribute("aria-checked")).toBe("true");
       expect(linkNames()).toEqual(["beta", "AKASA"]);
       expect(host.querySelector('[role="alert"]')).toBeNull();
+    });
+  });
+
+  describe("companies-tab-sorting: sort menu layout, annotations, and pipeline filters", () => {
+    const PIPELINE_ROWS: CompanyRow[] = [
+      row("p1", "Acme", { wishlistJobCount: 1, appliedJobCount: 3, lastActivityAt: "2026-03-04" }),
+      row("p2", "Bolt", { wishlistJobCount: 3, appliedJobCount: 0, lastActivityAt: null }),
+      row("p3", "Cora", { wishlistJobCount: 0, appliedJobCount: 1, lastActivityAt: "2025-03-04" }),
+    ];
+    const LABELS = [
+      "Name A–Z",
+      "Name Z–A",
+      "Recently added company",
+      "Most open positions",
+      "Most tracked jobs",
+      "Most wishlist jobs",
+      "Fewest wishlist jobs",
+      "Most applied jobs",
+      "Fewest applied jobs",
+      "Most interviews",
+      "Recently updated job",
+      "Recently applied",
+      "Easiest wishlist to apply",
+    ];
+
+    /** Visible text and sr-only label of each link's trailing annotation, or null when absent. */
+    const annotations = () =>
+      Array.from(host.querySelectorAll("a")).map((a) => {
+        const trailing = a.children[1];
+        if (!trailing) return null;
+        return [
+          trailing.querySelector('[aria-hidden="true"]')?.textContent,
+          trailing.querySelector(".sr-only")?.textContent,
+        ];
+      });
+    const badge = () => filterButton().querySelector(".companies-sidebar-badge")?.textContent ?? null;
+    const countLine = () =>
+      Array.from(host.querySelectorAll("p")).find((p) => / of \d+ companies$/.test(p.textContent ?? ""))?.textContent;
+    const stored = () => JSON.parse(localStorage.getItem(COMPANY_VIEW_STORAGE_KEY)!);
+
+    function arrow(key: "ArrowDown" | "ArrowUp") {
+      act(() => {
+        (document.activeElement ?? document.body).dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+        );
+      });
+    }
+
+    function selectSort(label: string) {
+      click(sortButton());
+      click(sortItem(label));
+    }
+
+    beforeEach(() => {
+      apiMocks.listCompanies.mockReset();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    });
+
+    it("renders 13 sort options in order with two non-focusable separators at the group boundaries (Req 2.1, 2.2)", () => {
+      render();
+      click(sortButton());
+      expect(sortItems().map((el) => el.textContent)).toEqual(LABELS);
+      const children = Array.from(sortMenu()!.children);
+      const separators = children.filter((el) => el.getAttribute("role") === "separator");
+      expect(separators).toHaveLength(2);
+      for (const sep of separators) {
+        expect(sep.hasAttribute("tabindex")).toBe(false);
+        const before = children[children.indexOf(sep) - 1]?.textContent;
+        const after = children[children.indexOf(sep) + 1]?.textContent;
+        expect([before, after]).toEqual(
+          sep === separators[0] ? ["Recently added company", "Most open positions"] : ["Most interviews", "Recently updated job"],
+        );
+      }
+    });
+
+    it("arrow keys skip separators and wrap (Req 2.3)", () => {
+      render();
+      click(sortButton());
+      expect(document.activeElement).toBe(sortItem("Name A–Z"));
+      arrow("ArrowUp");
+      expect(document.activeElement).toBe(sortItem("Easiest wishlist to apply"));
+      arrow("ArrowDown");
+      expect(document.activeElement).toBe(sortItem("Name A–Z"));
+      // A full cycle visits every option once and never lands on a separator.
+      const visited: string[] = [];
+      for (let i = 0; i < LABELS.length; i += 1) {
+        arrow("ArrowDown");
+        expect(document.activeElement?.getAttribute("role")).toBe("menuitemradio");
+        visited.push(document.activeElement!.textContent!);
+      }
+      expect(visited).toEqual([...LABELS.slice(1), LABELS[0]]);
+    });
+
+    it("selecting each option checks exactly that item and persists it (Req 2.4, 2.8, 9.3)", () => {
+      render();
+      for (const label of [...LABELS.slice(1), LABELS[0]]) {
+        selectSort(label);
+        const value = COMPANY_SORT_OPTIONS.find((o) => o.label === label)!.value;
+        expect(stored()).toEqual({ version: 1, sort: value, filters: [] });
+        click(sortButton());
+        const checked = sortItems().filter((el) => el.getAttribute("aria-checked") === "true");
+        expect(checked.map((el) => el.textContent)).toEqual([label]);
+        click(sortButton());
+      }
+    });
+
+    it("caps the Sort_Menu height to the window, tracks resize, and scrolls focused items into view (Req 2.5)", () => {
+      const scrolls: Array<[Element, unknown]> = [];
+      Element.prototype.scrollIntoView = function (this: Element, arg?: boolean | ScrollIntoViewOptions) {
+        scrolls.push([this, arg]);
+      };
+      vi.stubGlobal("innerHeight", 600);
+      render();
+      vi.spyOn(sortButton(), "getBoundingClientRect").mockReturnValue({ bottom: 400 } as DOMRect);
+      click(sortButton());
+      const menu = sortMenu()!;
+      expect(menu.classList.contains("companies-sidebar-menu--sort")).toBe(true);
+      expect(menu.style.maxHeight).toBe("186px");
+      expect(scrolls.at(-1)).toEqual([sortItem("Name A–Z"), { block: "nearest" }]);
+
+      arrow("ArrowDown");
+      arrow("ArrowDown");
+      arrow("ArrowDown");
+      expect(scrolls.at(-1)).toEqual([sortItem("Most open positions"), { block: "nearest" }]);
+
+      vi.stubGlobal("innerHeight", 450);
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      // 450 - 400 - 14 = 36, clamped to the 120px minimum.
+      expect(menu.style.maxHeight).toBe("120px");
+    });
+
+    it("switching sort reorders and replaces annotations together (Req 6.10)", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-06-01T12:00:00Z"));
+      render({ rows: PIPELINE_ROWS });
+      expect(annotations()).toEqual([null, null, null]);
+
+      selectSort("Most wishlist jobs");
+      expect(linkNames()).toEqual(["Bolt", "Acme", "Cora"]);
+      expect(annotations()).toEqual([
+        ["3", "3 wishlist jobs"],
+        ["1", "1 wishlist job"],
+        ["0", "0 wishlist jobs"],
+      ]);
+
+      selectSort("Fewest applied jobs");
+      expect(linkNames()).toEqual(["Cora", "Acme", "Bolt"]);
+      expect(annotations()).toEqual([
+        ["1", "1 applied job"],
+        ["3", "3 applied jobs"],
+        ["0", "0 applied jobs"],
+      ]);
+
+      selectSort("Recently updated job");
+      const now = new Date();
+      const recent = formatShortDate({ year: 2026, month: 3, day: 4 }, now);
+      const older = formatShortDate({ year: 2025, month: 3, day: 4 }, now);
+      expect(older).toContain("2025");
+      expect(recent).not.toContain("2026");
+      expect(linkNames()).toEqual(["Acme", "Cora", "Bolt"]);
+      expect(annotations()).toEqual([
+        [recent, `Last activity ${recent}`],
+        [older, `Last activity ${older}`],
+        null,
+      ]);
+
+      selectSort("Name A–Z");
+      expect(annotations()).toEqual([null, null, null]);
+    });
+
+    it("new rows reorder and reannotate without changing sort or filters (Req 1.11, 3.11, 4.9, 8.6)", () => {
+      render({ rows: PIPELINE_ROWS });
+      selectSort("Most wishlist jobs");
+      click(filterButton());
+      click(filterItem("Has wishlist jobs"));
+      expect(linkNames()).toEqual(["Bolt", "Acme"]);
+      const view = localStorage.getItem(COMPANY_VIEW_STORAGE_KEY);
+
+      render({
+        rows: [
+          row("p1", "Acme", { wishlistJobCount: 5 }),
+          row("p2", "Bolt", { wishlistJobCount: 0 }),
+          row("p3", "Cora", { wishlistJobCount: 2 }),
+          row("p4", "Dune", { wishlistJobCount: 2 }),
+        ],
+      });
+      expect(linkNames()).toEqual(["Acme", "Cora", "Dune"]);
+      expect(annotations()).toEqual([
+        ["5", "5 wishlist jobs"],
+        ["2", "2 wishlist jobs"],
+        ["2", "2 wishlist jobs"],
+      ]);
+      expect(filterItem("Has wishlist jobs").getAttribute("aria-checked")).toBe("true");
+      expect(badge()).toBe("1");
+      expect(sortButton().className).toContain("is-active");
+      expect(localStorage.getItem(COMPANY_VIEW_STORAGE_KEY)).toBe(view);
+    });
+
+    it("pipeline filters update list, count line, and badge in memory; Clear filters clears all six (Req 7.2, 7.7, 7.8)", () => {
+      render({ rows: PIPELINE_ROWS });
+      selectSort("Most applied jobs");
+      act(() => {
+        const input = search();
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(input, "o");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(linkNames()).toEqual(["Cora", "Bolt"]);
+
+      click(filterButton());
+      for (const label of ["Has wishlist jobs", "Has applied jobs"]) {
+        const el = filterItem(label);
+        expect(el.getAttribute("role")).toBe("menuitemcheckbox");
+        expect(el.getAttribute("aria-checked")).toBe("false");
+        expect(el.tabIndex).toBe(0);
+      }
+
+      click(filterItem("Has wishlist jobs"));
+      expect(linkNames()).toEqual(["Bolt"]);
+      expect(countLine()).toBe("1 of 3 companies");
+      expect(badge()).toBe("1");
+
+      click(filterItem("Has wishlist jobs"));
+      click(filterItem("Has applied jobs"));
+      expect(linkNames()).toEqual(["Cora"]);
+      expect(badge()).toBe("1");
+
+      click(filterItem("Has wishlist jobs"));
+      expect(linkNames()).toEqual([]);
+      // Search is also active, so the prior spec's precedence shows the search empty state; never "No companies yet."
+      expect(host.textContent).toContain("No matching companies.");
+      expect(host.textContent).not.toContain("No companies yet.");
+      expect(countLine()).toBe("0 of 3 companies");
+      expect(badge()).toBe("2");
+
+      for (const label of ["Watched", "Has open positions", "Has tracked jobs", "Needs attention"]) {
+        click(filterItem(label));
+      }
+      expect(badge()).toBe("6");
+
+      click(clearButton());
+      for (const el of filterItems()) expect(el.getAttribute("aria-checked")).toBe("false");
+      expect(badge()).toBeNull();
+      expect(search().value).toBe("o");
+      expect(linkNames()).toEqual(["Cora", "Bolt"]);
+      expect(stored()).toEqual({ version: 1, sort: "appliedJobsDesc", filters: [] });
+      expect(apiMocks.listCompanies).not.toHaveBeenCalled();
+    });
+
+    it("keeps a new sort and filter applied when setItem throws, and never stores search text (Req 9.8, 9.9)", () => {
+      const writes: string[] = [];
+      vi.stubGlobal("localStorage", {
+        getItem: () => null,
+        setItem: (_key: string, value: string) => {
+          writes.push(value);
+          throw new Error("QuotaExceededError");
+        },
+        removeItem: () => {},
+        clear: () => {},
+      });
+      render({ rows: PIPELINE_ROWS });
+      act(() => {
+        const input = search();
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(input, "zz-secret-or-a");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      act(() => {
+        const input = search();
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(input, "");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      selectSort("Fewest wishlist jobs");
+      expect(linkNames()).toEqual(["Acme", "Bolt", "Cora"]);
+      click(filterButton());
+      click(filterItem("Has applied jobs"));
+      expect(linkNames()).toEqual(["Acme", "Cora"]);
+      expect(filterItem("Has applied jobs").getAttribute("aria-checked")).toBe("true");
+      expect(sortButton().className).toContain("is-active");
+      expect(host.querySelector('[role="alert"]')).toBeNull();
+      expect(writes.length).toBeGreaterThan(0);
+      for (const value of writes) expect(value).not.toContain("zz-secret");
     });
   });
 });

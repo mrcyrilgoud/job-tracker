@@ -1,3 +1,4 @@
+import { calendarDateOf, formatShortDate, parseInstant, type Instant } from "./instant";
 import { filterCompaniesBySearch } from "./job-filters";
 import type { CompanyRow } from "./schema";
 
@@ -7,15 +8,29 @@ import type { CompanyRow } from "./schema";
  * storage is always injected by the caller.
  */
 
+/**
+ * Sort_Menu entries, top to bottom. `group` is internal: the menu renders a separator
+ * wherever it changes between adjacent entries (name | count | activity).
+ */
 export const COMPANY_SORT_OPTIONS = [
-  { value: "nameAsc", label: "Name A–Z" },
-  { value: "nameDesc", label: "Name Z–A" },
-  { value: "openPositionsDesc", label: "Most open positions" },
-  { value: "trackedJobsDesc", label: "Most tracked jobs" },
-  { value: "recentlyAdded", label: "Recently added" },
+  { value: "nameAsc", label: "Name A–Z", group: "name" },
+  { value: "nameDesc", label: "Name Z–A", group: "name" },
+  { value: "recentlyAdded", label: "Recently added company", group: "name" },
+  { value: "openPositionsDesc", label: "Most open positions", group: "count" },
+  { value: "trackedJobsDesc", label: "Most tracked jobs", group: "count" },
+  { value: "wishlistJobsDesc", label: "Most wishlist jobs", group: "count" },
+  { value: "wishlistJobsAsc", label: "Fewest wishlist jobs", group: "count" },
+  { value: "appliedJobsDesc", label: "Most applied jobs", group: "count" },
+  { value: "appliedJobsAsc", label: "Fewest applied jobs", group: "count" },
+  { value: "interviewingJobsDesc", label: "Most interviews", group: "count" },
+  { value: "recentActivity", label: "Recently updated job", group: "activity" },
+  { value: "recentlyApplied", label: "Recently applied", group: "activity" },
+  { value: "easiestWishlist", label: "Easiest wishlist to apply", group: "activity" },
 ] as const;
 
 export type CompanySortOption = (typeof COMPANY_SORT_OPTIONS)[number]["value"];
+
+export type CompanySortGroup = (typeof COMPANY_SORT_OPTIONS)[number]["group"];
 
 export const DEFAULT_COMPANY_SORT: CompanySortOption = "nameAsc";
 
@@ -24,6 +39,9 @@ export const COMPANY_FILTERS = [
   { value: "hasOpenPositions", label: "Has open positions" },
   { value: "hasTrackedJobs", label: "Has tracked jobs" },
   { value: "needsAttention", label: "Needs attention" },
+  // Appended (not inserted) so pre-feature serialized states stay byte-identical.
+  { value: "hasWishlistJobs", label: "Has wishlist jobs" },
+  { value: "hasAppliedJobs", label: "Has applied jobs" },
 ] as const;
 
 export type CompanyFilter = (typeof COMPANY_FILTERS)[number]["value"];
@@ -61,24 +79,115 @@ export function compareByNameOrder(a: CompanyRow, b: CompanyRow): number {
   return compareCodeUnits(a.company.id, b.company.id);
 }
 
+// ---------------------------------------------------------------------------
+// Sanitizers and accessors for the pipeline aggregates (Req 3.10, 5.5).
+// The backend contract types these fields, but rows from an older backend or a
+// malformed payload may omit them or carry bad values, so every read goes through here.
+// ---------------------------------------------------------------------------
+
+/** Whole number ≥ 0, else 0. Rejects NaN, ±Infinity, fractions, negatives, non-numbers. */
+export function sanitizeCount(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+/** Finite number in [1, 5], else null. */
+export function sanitizeEase(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1 && value <= 5 ? value : null;
+}
+
+/** Sanitized Wishlist_Job_Count. */
+export function wishlistCountOf(row: CompanyRow): number {
+  return sanitizeCount((row as Partial<CompanyRow>).wishlistJobCount);
+}
+
+/** Sanitized Applied_Job_Count. */
+export function appliedCountOf(row: CompanyRow): number {
+  return sanitizeCount((row as Partial<CompanyRow>).appliedJobCount);
+}
+
+/** Sanitized Interviewing_Job_Count. */
+export function interviewingCountOf(row: CompanyRow): number {
+  return sanitizeCount((row as Partial<CompanyRow>).interviewingJobCount);
+}
+
+/** Sanitized Wishlist_Ease_Average (unrounded), or null. */
+export function easeOf(row: CompanyRow): number | null {
+  return sanitizeEase((row as Partial<CompanyRow>).wishlistEaseAverage);
+}
+
+/** Last_Activity_At as an Instant, or null when missing or not a Valid_Timestamp. */
+export function lastActivityOf(row: CompanyRow): Instant | null {
+  return parseInstant((row as Partial<CompanyRow>).lastActivityAt);
+}
+
+/** Last_Applied_At as an Instant, or null when missing or not a Valid_Timestamp. */
+export function lastAppliedOf(row: CompanyRow): Instant | null {
+  return parseInstant((row as Partial<CompanyRow>).lastAppliedAt);
+}
+
 /** Parsed `createdAt` in ms; unparseable values sort as the oldest. */
 function createdAtMs(row: CompanyRow): number {
   const ms = Date.parse(row.company.createdAt);
   return Number.isNaN(ms) ? -Infinity : ms;
 }
 
-/** Descending numeric key for the sort, or null for name-only sorts. */
-function sortKey(row: CompanyRow, sort: CompanySortOption): number | null {
+/** Sort_Options ordered by a key vector (everything except the two pure name sorts). */
+type KeyedSortOption = Exclude<CompanySortOption, "nameAsc" | "nameDesc">;
+
+/**
+ * Key vector for a row under `sort`; smaller sorts first, compared element-wise,
+ * then Name_Order. A leading `1` marks a trailing group (Req 8.5) whose remaining
+ * elements are all 0, so Name_Order alone orders it.
+ */
+function sortKeyVector(row: CompanyRow, sort: KeyedSortOption): readonly number[] {
   switch (sort) {
-    case "openPositionsDesc":
-      return row.openPositionCount;
-    case "trackedJobsDesc":
-      return row.trackedJobCount;
     case "recentlyAdded":
-      return createdAtMs(row);
-    default:
-      return null;
+      return [-createdAtMs(row)];
+    case "openPositionsDesc":
+      return [-row.openPositionCount];
+    case "trackedJobsDesc":
+      return [-row.trackedJobCount];
+    case "wishlistJobsDesc":
+      return [-wishlistCountOf(row)];
+    case "appliedJobsDesc":
+      return [-appliedCountOf(row)];
+    case "interviewingJobsDesc":
+      return [-interviewingCountOf(row)];
+    case "wishlistJobsAsc": {
+      const w = wishlistCountOf(row);
+      return w === 0 ? [1, 0] : [0, w];
+    }
+    case "appliedJobsAsc": {
+      const a = appliedCountOf(row);
+      return a === 0 ? [1, 0] : [0, a];
+    }
+    case "recentActivity":
+      return instantKey(lastActivityOf(row));
+    case "recentlyApplied":
+      return instantKey(lastAppliedOf(row));
+    case "easiestWishlist": {
+      const e = easeOf(row);
+      return e === null ? [1, 0, 0] : [0, -e, -wishlistCountOf(row)];
+    }
+    default: {
+      const unreachable: never = sort;
+      throw new Error(`Unhandled company sort option: ${String(unreachable)}`);
+    }
   }
+}
+
+/** Newest instant first; null/invalid timestamps trail. */
+function instantKey(t: Instant | null): readonly number[] {
+  return t === null ? [1, 0, 0] : [0, -t.ms, -t.subMsNanos];
+}
+
+function compareKeyVectors(a: readonly number[], b: readonly number[]): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const c = sign(a[i], b[i]);
+    if (c !== 0) return c;
+  }
+  return 0;
 }
 
 /** Returns a new sorted array; never mutates `rows`. Total order via the `id` tie-break. */
@@ -87,8 +196,8 @@ export function sortCompanies(rows: readonly CompanyRow[], sort: CompanySortOpti
   if (sort === "nameDesc") return [...rows].sort((a, b) => compareByNameOrder(b, a));
 
   // Compute each key once so large lists don't re-parse dates in the comparator.
-  const decorated = rows.map((row) => ({ row, key: sortKey(row, sort) as number }));
-  decorated.sort((a, b) => sign(b.key, a.key) || compareByNameOrder(a.row, b.row));
+  const decorated = rows.map((row) => ({ row, key: sortKeyVector(row, sort) }));
+  decorated.sort((a, b) => compareKeyVectors(a.key, b.key) || compareByNameOrder(a.row, b.row));
   return decorated.map((entry) => entry.row);
 }
 
@@ -103,6 +212,10 @@ export function matchesCompanyFilter(row: CompanyRow, filter: CompanyFilter): bo
     case "needsAttention":
       // `list_companies` returns only pending reviews.
       return row.watches.some((watch) => watch.consecutiveSyncFailures > 0) || row.reviews.length > 0;
+    case "hasWishlistJobs":
+      return wishlistCountOf(row) >= 1;
+    case "hasAppliedJobs":
+      return appliedCountOf(row) >= 1;
   }
 }
 
@@ -116,11 +229,73 @@ export function applyCompanyFilters(
   return rows.filter((row) => active.every((filter) => matchesCompanyFilter(row, filter)));
 }
 
-/** Count shown next to a company name, or null when the sort has no count. */
-export function sortCountFor(row: CompanyRow, sort: CompanySortOption): number | null {
-  if (sort === "openPositionsDesc") return row.openPositionCount;
-  if (sort === "trackedJobsDesc") return row.trackedJobCount;
-  return null;
+export type SortAnnotation = {
+  /** Visible text, e.g. "3", "Mar 4", "4.5". */
+  text: string;
+  /** Accessible label naming measure and value, e.g. "3 wishlist jobs". */
+  label: string;
+};
+
+export type AnnotationContext = { now: Date; locale?: string; timeZone?: string };
+
+/** One decimal, halves away from zero: 4.25 → "4.3", 4 → "4.0". Inputs lie in [1, 5]. */
+export function formatEase(value: number): string {
+  // The 1e-9 nudge rounds non-representable halves (23/20 = 1.1499…) up as the exact mean would.
+  return (Math.round(value * 10 + 1e-9) / 10).toFixed(1);
+}
+
+function countAnnotation(n: number, singular: string, plural: string): SortAnnotation {
+  const text = String(n);
+  return { text, label: `${text} ${n === 1 ? singular : plural}` };
+}
+
+function dateAnnotation(value: unknown, prefix: string, ctx: AnnotationContext): SortAnnotation | null {
+  if (typeof value !== "string") return null;
+  const date = calendarDateOf(value, ctx.timeZone);
+  if (!date) return null;
+  const text = formatShortDate(date, ctx.now, ctx.locale, ctx.timeZone);
+  return { text, label: `${prefix} ${text}` };
+}
+
+/** Annotation for the active sort, or null when the sort has none or the value is null/invalid. */
+export function sortAnnotationFor(
+  row: CompanyRow,
+  sort: CompanySortOption,
+  ctx: AnnotationContext,
+): SortAnnotation | null {
+  switch (sort) {
+    case "nameAsc":
+    case "nameDesc":
+    case "recentlyAdded":
+      return null;
+    case "openPositionsDesc":
+      // Same visible number as before this feature (Req 6.8).
+      return countAnnotation(row.openPositionCount, "open position", "open positions");
+    case "trackedJobsDesc":
+      return countAnnotation(row.trackedJobCount, "tracked job", "tracked jobs");
+    case "wishlistJobsDesc":
+    case "wishlistJobsAsc":
+      return countAnnotation(wishlistCountOf(row), "wishlist job", "wishlist jobs");
+    case "appliedJobsDesc":
+    case "appliedJobsAsc":
+      return countAnnotation(appliedCountOf(row), "applied job", "applied jobs");
+    case "interviewingJobsDesc":
+      return countAnnotation(interviewingCountOf(row), "interview", "interviews");
+    case "recentActivity":
+      return dateAnnotation((row as Partial<CompanyRow>).lastActivityAt, "Last activity", ctx);
+    case "recentlyApplied":
+      return dateAnnotation((row as Partial<CompanyRow>).lastAppliedAt, "Last applied", ctx);
+    case "easiestWishlist": {
+      const e = easeOf(row);
+      if (e === null) return null;
+      const text = formatEase(e);
+      return { text, label: `Average ease ${text}` };
+    }
+    default: {
+      const unreachable: never = sort;
+      throw new Error(`Unhandled company sort option: ${String(unreachable)}`);
+    }
+  }
 }
 
 /** Flips one filter; keeps the sort and every other filter. */

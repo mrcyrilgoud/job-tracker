@@ -273,6 +273,18 @@ export type CompanyRow = {
   openPositionCount: number;
   /** Jobs linked to this company whose status is not "archived". */
   trackedJobCount: number;
+  /** Pipeline_Jobs with status "wishlist". */
+  wishlistJobCount: number;
+  /** Pipeline_Jobs past wishlist (applied…withdrawn, or closed with applied_at). */
+  appliedJobCount: number;
+  /** Pipeline_Jobs with status "interviewing" or "offer". */
+  interviewingJobCount: number;
+  /** Latest user-activity event timestamp, stored string verbatim. */
+  lastActivityAt: string | null;
+  /** Latest applied_at, stored string verbatim. */
+  lastAppliedAt: string | null;
+  /** Mean application_ease of wishlist jobs (1–5), unrounded. */
+  wishlistEaseAverage: number | null;
 };
 
 export type DocumentListItem = Document & {

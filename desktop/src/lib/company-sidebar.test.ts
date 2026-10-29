@@ -13,7 +13,17 @@ import {
   loadCompanyViewState,
   saveCompanyViewState,
   sortCompanies,
-  sortCountFor,
+  sortAnnotationFor,
+  formatEase,
+  appliedCountOf,
+  easeOf,
+  interviewingCountOf,
+  lastActivityOf,
+  lastAppliedOf,
+  matchesCompanyFilter,
+  sanitizeCount,
+  sanitizeEase,
+  wishlistCountOf,
   parseCompanyViewState,
   serializeCompanyViewState,
   toggleCompanyFilter,
@@ -35,6 +45,12 @@ function row(
     reviews: [],
     openPositionCount: 0,
     trackedJobCount: 0,
+    wishlistJobCount: 0,
+    appliedJobCount: 0,
+    interviewingJobCount: 0,
+    lastActivityAt: null,
+    lastAppliedAt: null,
+    wishlistEaseAverage: null,
     ...rest,
   };
 }
@@ -105,6 +121,9 @@ const arbCompanyRows = (maxLength = 30) =>
               createdAt: arbCreatedAt,
               openPositionCount: arbCount,
               trackedJobCount: arbCount,
+              // 0..2 so hasWishlistJobs / hasAppliedJobs both pass and fail often.
+              wishlistJobCount: fc.integer({ min: 0, max: 2 }),
+              appliedJobCount: fc.integer({ min: 0, max: 2 }),
               watches: arbWatches,
               reviews: arbReviews,
             })
@@ -125,15 +144,19 @@ function oracle(r: CompanyRow, f: CompanyFilter): boolean {
       return r.trackedJobCount > 0;
     case "needsAttention":
       return r.watches.some((w) => w.consecutiveSyncFailures > 0) || r.reviews.length > 0;
+    case "hasWishlistJobs":
+      return r.wishlistJobCount >= 1;
+    case "hasAppliedJobs":
+      return r.appliedJobCount >= 1;
   }
 }
 
-const ALL_FILTERS: CompanyFilter[] = ["watched", "hasOpenPositions", "hasTrackedJobs", "needsAttention"];
-/** Any subset of the four Company_Filters (including empty). */
-const arbFilterSet = fc.subarray(ALL_FILTERS).map((fs) => new Set<CompanyFilter>(fs));
-const arbFilter = fc.constantFrom(...ALL_FILTERS);
-/** Any valid Company_View_State. */
-const arbViewState = fc.record({ sort: arbSortOption, filters: arbFilterSet });
+/** All six Company_Filters, in COMPANY_FILTERS order (companies-tab-sorting widens the domain). */
+const SIX_FILTERS: CompanyFilter[] = COMPANY_FILTERS.map((f) => f.value);
+const arbFilter6 = fc.constantFrom(...SIX_FILTERS);
+const arbFilterSet6 = fc.subarray(SIX_FILTERS).map((fs) => new Set<CompanyFilter>(fs));
+/** Any valid Company_View_State over all 13 Sort_Options and six Company_Filters. */
+const arbViewState6 = fc.record({ sort: arbSortOption, filters: arbFilterSet6 });
 
 /**
  * Search text: empty, whitespace-only, substrings of NAME_POOL with random case and
@@ -157,19 +180,34 @@ const arbSearch = fc.oneof(
 );
 
 describe("company sidebar primitives", () => {
-  it("exposes five sort options and four filters in spec order", () => {
-    expect(COMPANY_SORT_OPTIONS.map((o) => o.value)).toEqual([
-      "nameAsc",
-      "nameDesc",
-      "openPositionsDesc",
-      "trackedJobsDesc",
-      "recentlyAdded",
+  it("exposes 13 sort options and six filters in spec order (Req 2.1, 7.1)", () => {
+    expect(COMPANY_SORT_OPTIONS.map((o) => [o.value, o.label])).toEqual([
+      ["nameAsc", "Name A–Z"],
+      ["nameDesc", "Name Z–A"],
+      ["recentlyAdded", "Recently added company"],
+      ["openPositionsDesc", "Most open positions"],
+      ["trackedJobsDesc", "Most tracked jobs"],
+      ["wishlistJobsDesc", "Most wishlist jobs"],
+      ["wishlistJobsAsc", "Fewest wishlist jobs"],
+      ["appliedJobsDesc", "Most applied jobs"],
+      ["appliedJobsAsc", "Fewest applied jobs"],
+      ["interviewingJobsDesc", "Most interviews"],
+      ["recentActivity", "Recently updated job"],
+      ["recentlyApplied", "Recently applied"],
+      ["easiestWishlist", "Easiest wishlist to apply"],
     ]);
-    expect(COMPANY_FILTERS.map((f) => f.value)).toEqual([
-      "watched",
-      "hasOpenPositions",
-      "hasTrackedJobs",
-      "needsAttention",
+    // Group changes between adjacent entries mark the two separator positions (Req 2.2).
+    const breaks = COMPANY_SORT_OPTIONS.flatMap((o, i, all) =>
+      i > 0 && all[i - 1].group !== o.group ? [`${all[i - 1].value}|${o.value}`] : [],
+    );
+    expect(breaks).toEqual(["recentlyAdded|openPositionsDesc", "interviewingJobsDesc|recentActivity"]);
+    expect(COMPANY_FILTERS.map((f) => [f.value, f.label])).toEqual([
+      ["watched", "Watched"],
+      ["hasOpenPositions", "Has open positions"],
+      ["hasTrackedJobs", "Has tracked jobs"],
+      ["needsAttention", "Needs attention"],
+      ["hasWishlistJobs", "Has wishlist jobs"],
+      ["hasAppliedJobs", "Has applied jobs"],
     ]);
     expect(DEFAULT_COMPANY_VIEW_STATE.sort).toBe("nameAsc");
     expect(DEFAULT_COMPANY_VIEW_STATE.filters.size).toBe(0);
@@ -203,6 +241,58 @@ describe("company sidebar primitives", () => {
     expect(ids(sortCompanies(rows, "recentlyAdded"))).toEqual(["new", "old", "bad1", "bad2"]);
   });
 
+  it("sorts pipeline counts descending and ascending with zero-count trailing (Req 3.1–3.7)", () => {
+    const rows = [
+      row("z", "Zero", { wishlistJobCount: 0, appliedJobCount: 0, interviewingJobCount: 0 }),
+      row("b", "Beta", { wishlistJobCount: 1, appliedJobCount: 3, interviewingJobCount: 1 }),
+      row("a", "alpha", { wishlistJobCount: 3, appliedJobCount: 1, interviewingJobCount: 1 }),
+      row("c", "Charlie", { wishlistJobCount: 1, appliedJobCount: 0, interviewingJobCount: 0 }),
+      row("m", "Malformed", { wishlistJobCount: -4, appliedJobCount: NaN, interviewingJobCount: 2.5 }),
+    ];
+    expect(ids(sortCompanies(rows, "wishlistJobsDesc"))).toEqual(["a", "b", "c", "m", "z"]);
+    expect(ids(sortCompanies(rows, "wishlistJobsAsc"))).toEqual(["b", "c", "a", "m", "z"]);
+    expect(ids(sortCompanies(rows, "appliedJobsDesc"))).toEqual(["b", "a", "c", "m", "z"]);
+    expect(ids(sortCompanies(rows, "appliedJobsAsc"))).toEqual(["a", "b", "c", "m", "z"]);
+    expect(ids(sortCompanies(rows, "interviewingJobsDesc"))).toEqual(["a", "b", "c", "m", "z"]);
+  });
+
+  it("sorts timestamps newest instant first with null/invalid trailing (Req 4.1–4.5)", () => {
+    const rows = [
+      row("n", "None"),
+      row("d", "DateOnly", { lastActivityAt: "2026-10-01", lastAppliedAt: "2026-10-01" }),
+      row("t", "Tokyo", { lastActivityAt: "2026-10-01T09:00:00+09:00" }),
+      row("s", "Second", { lastActivityAt: "2026-10-01T00:00:01Z", lastAppliedAt: "2025-01-01" }),
+      row("x", "Bad", { lastActivityAt: "March 4", lastAppliedAt: "now" }),
+      row("f", "Fraction", { lastActivityAt: "2026-10-01T00:00:00.000000001Z" }),
+    ];
+    // DateOnly and Tokyo are the same instant → Name_Order; the 1 ns later one wins over both.
+    expect(ids(sortCompanies(rows, "recentActivity"))).toEqual(["s", "f", "d", "t", "x", "n"]);
+    expect(ids(sortCompanies(rows, "recentlyApplied"))).toEqual(["d", "s", "x", "f", "n", "t"]);
+  });
+
+  it("sorts easiestWishlist by unrounded average, then wishlist count, null averages trailing (Req 5.1–5.4)", () => {
+    const rows = [
+      row("n", "NoEase", { wishlistJobCount: 9 }),
+      row("p", "Point6", { wishlistEaseAverage: 4.6, wishlistJobCount: 1 }),
+      row("q", "Point67", { wishlistEaseAverage: 4.67, wishlistJobCount: 1 }),
+      row("a", "A", { wishlistEaseAverage: 4.6, wishlistJobCount: 4 }),
+      row("o", "OutOfRange", { wishlistEaseAverage: 7, wishlistJobCount: 2 }),
+      row("b", "B", { wishlistEaseAverage: 4.6, wishlistJobCount: 1 }),
+    ];
+    expect(ids(sortCompanies(rows, "easiestWishlist"))).toEqual(["q", "a", "b", "p", "n", "o"]);
+  });
+
+  it("key-vector sorts never mutate input rows or array", () => {
+    const rows = [
+      row("b", "B", { wishlistJobCount: 2, lastActivityAt: "2026-01-01" }),
+      row("a", "A", { wishlistJobCount: 1, wishlistEaseAverage: 3 }),
+    ];
+    const json = JSON.stringify(rows);
+    for (const { value } of COMPANY_SORT_OPTIONS) sortCompanies(rows, value);
+    expect(ids(rows)).toEqual(["b", "a"]);
+    expect(JSON.stringify(rows)).toBe(json);
+  });
+
   it("applies filters as a conjunction and preserves order", () => {
     const rows = [
       row("w", "Watched", { watches: [watch(0)], openPositionCount: 1 }),
@@ -219,13 +309,14 @@ describe("company sidebar primitives", () => {
     ).toEqual(["w"]);
   });
 
-  it("returns sort counts only for count-based sorts", () => {
+  it("returns sort annotations only for count-based sorts among the original five", () => {
     const r = row("x", "X", { openPositionCount: 0, trackedJobCount: 4 });
-    expect(sortCountFor(r, "openPositionsDesc")).toBe(0);
-    expect(sortCountFor(r, "trackedJobsDesc")).toBe(4);
-    expect(sortCountFor(r, "nameAsc")).toBeNull();
-    expect(sortCountFor(r, "nameDesc")).toBeNull();
-    expect(sortCountFor(r, "recentlyAdded")).toBeNull();
+    const now = { now: new Date("2026-06-01T00:00:00Z") };
+    expect(sortAnnotationFor(r, "openPositionsDesc", now)?.text).toBe("0");
+    expect(sortAnnotationFor(r, "trackedJobsDesc", now)?.text).toBe("4");
+    expect(sortAnnotationFor(r, "nameAsc", now)).toBeNull();
+    expect(sortAnnotationFor(r, "nameDesc", now)).toBeNull();
+    expect(sortAnnotationFor(r, "recentlyAdded", now)).toBeNull();
   });
 
   it("toggles one filter at a time and clears filters while keeping sort", () => {
@@ -238,6 +329,24 @@ describe("company sidebar primitives", () => {
     const cleared = clearCompanyFilters(toggled);
     expect(cleared.sort).toBe("trackedJobsDesc");
     expect(cleared.filters.size).toBe(0);
+  });
+
+  it("clears all six filters, including the pipeline filters, and keeps the sort (Req 7.8)", () => {
+    const all = { sort: "appliedJobsAsc" as const, filters: new Set<CompanyFilter>(SIX_FILTERS) };
+    const cleared = clearCompanyFilters(all);
+    expect(cleared.sort).toBe("appliedJobsAsc");
+    expect(cleared.filters.size).toBe(0);
+    expect(all.filters.size).toBe(6); // not mutated
+  });
+
+  it("shows the filtered empty state when pipeline filters exclude every company (Req 7.9)", () => {
+    const rows = [row("a", "A", { wishlistJobCount: 1 }), row("b", "B", { appliedJobCount: 2 })];
+    const view = { sort: "nameAsc" as const, filters: new Set<CompanyFilter>(["hasWishlistJobs", "hasAppliedJobs"]) };
+    const derived = deriveCompanyList(rows, "", view);
+    expect(derived.visible).toEqual([]);
+    expect(
+      companyEmptyState({ load: "ready", total: derived.total, visibleCount: 0, search: "", filterCount: 2 }),
+    ).toBe("noFilterMatch");
   });
 
   it("derives the visible list as search → filters → sort", () => {
@@ -269,6 +378,150 @@ describe("company sidebar primitives", () => {
     expect(companyEmptyState({ ...base, visibleCount: 2, search: "x" })).toBeNull();
     expect(companyEmptyState({ ...base, search: " x " })).toBe("noSearchMatch");
     expect(companyEmptyState({ ...base, search: "   " })).toBe("noFilterMatch");
+  });
+});
+
+describe("pipeline aggregate sanitizers and accessors", () => {
+  it("sanitizeCount keeps whole numbers ≥ 0 and maps everything else to 0 (Req 3.10)", () => {
+    expect([0, 1, 42].map(sanitizeCount)).toEqual([0, 1, 42]);
+    for (const bad of [-1, 1.5, NaN, Infinity, -Infinity, null, undefined, "3", {}]) {
+      expect(sanitizeCount(bad)).toBe(0);
+    }
+  });
+
+  it("sanitizeEase keeps finite values in [1, 5] and maps everything else to null (Req 5.5)", () => {
+    expect([1, 4.666, 5].map(sanitizeEase)).toEqual([1, 4.666, 5]);
+    for (const bad of [0.99, 5.01, 0, NaN, Infinity, null, undefined, "4"]) {
+      expect(sanitizeEase(bad)).toBeNull();
+    }
+  });
+
+  it("accessors read sanitized aggregates, tolerating missing fields", () => {
+    const good = row("a", "A", {
+      wishlistJobCount: 3,
+      appliedJobCount: 2,
+      interviewingJobCount: 1,
+      wishlistEaseAverage: 3.5,
+      lastActivityAt: "2026-10-01T09:00:00+09:00",
+      lastAppliedAt: "2026-10-01",
+    });
+    expect([wishlistCountOf(good), appliedCountOf(good), interviewingCountOf(good)]).toEqual([3, 2, 1]);
+    expect(easeOf(good)).toBe(3.5);
+    expect(lastActivityOf(good)).toEqual(lastAppliedOf(good));
+    expect(lastAppliedOf(good)).not.toBeNull();
+
+    const bad = row("b", "B", {
+      wishlistJobCount: -2,
+      appliedJobCount: 1.5,
+      wishlistEaseAverage: 9,
+      lastActivityAt: "March 4",
+    });
+    delete (bad as Partial<CompanyRow>).interviewingJobCount;
+    delete (bad as Partial<CompanyRow>).lastAppliedAt;
+    expect([wishlistCountOf(bad), appliedCountOf(bad), interviewingCountOf(bad)]).toEqual([0, 0, 0]);
+    expect(easeOf(bad)).toBeNull();
+    expect(lastActivityOf(bad)).toBeNull();
+    expect(lastAppliedOf(bad)).toBeNull();
+  });
+
+  it("hasWishlistJobs / hasAppliedJobs use sanitized counts (Req 7.3, 7.4)", () => {
+    expect(matchesCompanyFilter(row("a", "A", { wishlistJobCount: 1 }), "hasWishlistJobs")).toBe(true);
+    expect(matchesCompanyFilter(row("a", "A", { wishlistJobCount: 0 }), "hasWishlistJobs")).toBe(false);
+    expect(matchesCompanyFilter(row("a", "A", { wishlistJobCount: Infinity }), "hasWishlistJobs")).toBe(false);
+    expect(matchesCompanyFilter(row("a", "A", { appliedJobCount: 2 }), "hasAppliedJobs")).toBe(true);
+    expect(matchesCompanyFilter(row("a", "A", { appliedJobCount: 0.5 }), "hasAppliedJobs")).toBe(false);
+  });
+});
+
+describe("sort annotations", () => {
+  const ctx = { now: new Date("2026-06-15T12:00:00Z"), locale: "en-US", timeZone: "UTC" };
+
+  it("formatEase rounds halves away from zero to one decimal", () => {
+    expect(formatEase(4.25)).toBe("4.3");
+    expect(formatEase(4)).toBe("4.0");
+    expect(formatEase(23 / 20)).toBe("1.2");
+    expect(formatEase(14 / 3)).toBe("4.7");
+    expect(formatEase(4.6)).toBe("4.6");
+  });
+
+  it("sorts 4.67 above 4.6 under easiestWishlist and annotates them 4.7 / 4.6 (Req 5.2, 6.6)", () => {
+    const rows = [
+      row("p", "Point6", { wishlistEaseAverage: 4.6, wishlistJobCount: 1 }),
+      row("q", "Point67", { wishlistEaseAverage: 4.67, wishlistJobCount: 1 }),
+    ];
+    const sorted = sortCompanies(rows, "easiestWishlist");
+    expect(ids(sorted)).toEqual(["q", "p"]);
+    expect(sorted.map((r) => sortAnnotationFor(r, "easiestWishlist", ctx)?.text)).toEqual(["4.7", "4.6"]);
+  });
+
+  it("returns null for name sorts", () => {
+    const r = row("a", "A", { openPositionCount: 2, wishlistJobCount: 3 });
+    for (const sort of ["nameAsc", "nameDesc", "recentlyAdded"] as const) {
+      expect(sortAnnotationFor(r, sort, ctx)).toBeNull();
+    }
+  });
+
+  it("shows counts with singular and plural labels, including 0", () => {
+    const r = row("a", "A", {
+      openPositionCount: 2,
+      trackedJobCount: 1,
+      wishlistJobCount: 1,
+      appliedJobCount: 0,
+      interviewingJobCount: 3,
+    });
+    expect(sortAnnotationFor(r, "openPositionsDesc", ctx)).toEqual({ text: "2", label: "2 open positions" });
+    expect(sortAnnotationFor(r, "trackedJobsDesc", ctx)).toEqual({ text: "1", label: "1 tracked job" });
+    expect(sortAnnotationFor(r, "wishlistJobsDesc", ctx)).toEqual({ text: "1", label: "1 wishlist job" });
+    expect(sortAnnotationFor(r, "wishlistJobsAsc", ctx)).toEqual({ text: "1", label: "1 wishlist job" });
+    expect(sortAnnotationFor(r, "appliedJobsAsc", ctx)).toEqual({ text: "0", label: "0 applied jobs" });
+    expect(sortAnnotationFor(r, "interviewingJobsDesc", ctx)).toEqual({ text: "3", label: "3 interviews" });
+    expect(sortAnnotationFor(row("b", "B", { wishlistJobCount: 3 }), "wishlistJobsDesc", ctx)?.label).toBe(
+      "3 wishlist jobs",
+    );
+  });
+
+  it("keeps the pre-feature visible number for open/tracked sorts", () => {
+    const r = row("a", "A", { openPositionCount: 7, trackedJobCount: 4 });
+    expect(sortAnnotationFor(r, "openPositionsDesc", ctx)?.text).toBe(String(r.openPositionCount));
+    expect(sortAnnotationFor(r, "trackedJobsDesc", ctx)?.text).toBe(String(r.trackedJobCount));
+  });
+
+  it("sanitizes malformed counts to 0", () => {
+    const r = row("a", "A", { wishlistJobCount: -2, appliedJobCount: Number.NaN });
+    expect(sortAnnotationFor(r, "wishlistJobsDesc", ctx)).toEqual({ text: "0", label: "0 wishlist jobs" });
+    expect(sortAnnotationFor(r, "appliedJobsDesc", ctx)).toEqual({ text: "0", label: "0 applied jobs" });
+  });
+
+  it("shows date annotations, with the year only when it differs from now", () => {
+    const r = row("a", "A", { lastAppliedAt: "2026-03-04", lastActivityAt: "2025-03-04T10:00:00Z" });
+    expect(sortAnnotationFor(r, "recentlyApplied", ctx)).toEqual({ text: "Mar 4", label: "Last applied Mar 4" });
+    expect(sortAnnotationFor(r, "recentActivity", ctx)).toEqual({
+      text: "Mar 4, 2025",
+      label: "Last activity Mar 4, 2025",
+    });
+  });
+
+  it("date-only values keep their literal date in any zone; date-times shift", () => {
+    const r = row("a", "A", { lastAppliedAt: "2026-03-04", lastActivityAt: "2026-03-04T02:00:00Z" });
+    const la = { ...ctx, timeZone: "America/Los_Angeles" };
+    expect(sortAnnotationFor(r, "recentlyApplied", la)?.text).toBe("Mar 4");
+    expect(sortAnnotationFor(r, "recentActivity", la)?.text).toBe("Mar 3");
+  });
+
+  it("returns null for null or invalid timestamps", () => {
+    const r = row("a", "A", { lastAppliedAt: "pending", lastActivityAt: null });
+    expect(sortAnnotationFor(r, "recentlyApplied", ctx)).toBeNull();
+    expect(sortAnnotationFor(r, "recentActivity", ctx)).toBeNull();
+  });
+
+  it("shows the rounded ease average, or null when unset or out of range", () => {
+    expect(sortAnnotationFor(row("a", "A", { wishlistEaseAverage: 4.5 }), "easiestWishlist", ctx)).toEqual({
+      text: "4.5",
+      label: "Average ease 4.5",
+    });
+    expect(sortAnnotationFor(row("b", "B", { wishlistEaseAverage: 4.67 }), "easiestWishlist", ctx)?.text).toBe("4.7");
+    expect(sortAnnotationFor(row("c", "C"), "easiestWishlist", ctx)).toBeNull();
+    expect(sortAnnotationFor(row("d", "D", { wishlistEaseAverage: 6 }), "easiestWishlist", ctx)).toBeNull();
   });
 });
 
@@ -346,7 +599,8 @@ describe("company sidebar properties", () => {
     fc.assert(
       fc.property(
         arbCompanyRows(),
-        arbSortOption.filter((o) => o !== "nameDesc"),
+        // The prior spec's five Sort_Options; the new ones are covered by Property 6 of companies-tab-sorting.
+        fc.constantFrom("nameAsc" as const, "openPositionsDesc" as const, "trackedJobsDesc" as const, "recentlyAdded" as const),
         (rows, sort) => {
           const sorted = sortCompanies(rows, sort);
           for (let i = 1; i < sorted.length; i++) {
@@ -446,7 +700,7 @@ describe("company sidebar properties", () => {
   // **Validates: Requirements 3.3, 3.4, 3.7**
   it("Property 4: filters are a conjunction of the glossary predicates", () => {
     fc.assert(
-      fc.property(arbCompanyRows(), arbFilterSet, (rows, filters) => {
+      fc.property(arbCompanyRows(), arbFilterSet6, (rows, filters) => {
         const result = applyCompanyFilters(rows, filters);
         const expected = rows.filter((r) => [...filters].every((f) => oracle(r, f)));
         expect(ids(result)).toEqual(ids(expected));
@@ -461,12 +715,12 @@ describe("company sidebar properties", () => {
   // **Validates: Requirements 3.2**
   it("Property 5: toggling flips exactly one filter", () => {
     fc.assert(
-      fc.property(arbViewState, arbFilter, (view, f) => {
+      fc.property(arbViewState6, arbFilter6, (view, f) => {
         const before = [...view.filters].sort();
         const once = toggleCompanyFilter(view, f);
         expect(once.sort).toBe(view.sort);
 
-        const symDiff = ALL_FILTERS.filter((x) => view.filters.has(x) !== once.filters.has(x));
+        const symDiff = SIX_FILTERS.filter((x) => view.filters.has(x) !== once.filters.has(x));
         expect(symDiff).toEqual([f]);
 
         const twice = toggleCompanyFilter(once, f);
@@ -487,7 +741,7 @@ describe("company sidebar properties", () => {
       fc.property(
         arbCompanyRows(),
         fc
-          .subarray(ALL_FILTERS)
+          .subarray(SIX_FILTERS)
           .chain((fs) =>
             fc.tuple(
               fc.shuffledSubarray(fs, { minLength: fs.length, maxLength: fs.length }),
@@ -519,7 +773,7 @@ describe("company sidebar properties", () => {
   // **Validates: Requirements 5.1, 5.2, 5.3, 5.9, 5.10**
   it("Property 7: derived list matches the search + filter + sort model", () => {
     fc.assert(
-      fc.property(arbCompanyRows(), arbSearch, arbViewState, (rows, search, view) => {
+      fc.property(arbCompanyRows(), arbSearch, arbViewState6, (rows, search, view) => {
         const snapshot = ids(rows);
         const derived = deriveCompanyList(rows, search, view);
 
@@ -562,7 +816,7 @@ describe("company sidebar properties", () => {
       fc.property(
         arbCompanyRows(),
         arbSearch,
-        arbFilterSet,
+        arbFilterSet6,
         arbSortOption,
         (rows, s, filters, sort) => {
           const searchThenFilter = applyCompanyFilters(search(rows, s), filters);
@@ -586,14 +840,14 @@ describe("company sidebar properties", () => {
   it("Property 9: view state persistence round trip", () => {
     // A valid view built from a sort option and any sequence of filter toggles.
     const arbToggledView = fc
-      .tuple(arbSortOption, fc.array(arbFilter, { maxLength: 12 }))
+      .tuple(arbSortOption, fc.array(arbFilter6, { maxLength: 12 }))
       .map(([sort, toggles]) =>
         toggles.reduce<CompanyViewState>(toggleCompanyFilter, { ...DEFAULT_COMPANY_VIEW_STATE, sort }),
       );
     const sorted = (s: ReadonlySet<CompanyFilter>) => [...s].sort();
 
     fc.assert(
-      fc.property(fc.oneof(arbToggledView, arbViewState), (view) => {
+      fc.property(fc.oneof(arbToggledView, arbViewState6), (view) => {
         const serialized = serializeCompanyViewState(view);
         const parsed = parseCompanyViewState(serialized);
 
@@ -612,7 +866,7 @@ describe("company sidebar properties", () => {
       fc.property(
         arbSortOption,
         fc
-          .subarray(ALL_FILTERS)
+          .subarray(SIX_FILTERS)
           .chain((fs) =>
             fc.tuple(
               fc.shuffledSubarray(fs, { minLength: fs.length, maxLength: fs.length }),
@@ -629,14 +883,94 @@ describe("company sidebar properties", () => {
     );
   });
 
+  // Feature: companies-tab-sorting, Property 14: View-state persistence round trip is canonical and backward compatible
+  // **Validates: Requirements 2.8, 9.1, 9.2, 9.4**
+  it("Property 14: view-state persistence round trip is canonical and backward compatible", () => {
+    const LEGACY_SORTS = ["nameAsc", "nameDesc", "openPositionsDesc", "trackedJobsDesc", "recentlyAdded"] as const;
+    const LEGACY_FILTERS: CompanyFilter[] = ["watched", "hasOpenPositions", "hasTrackedJobs", "needsAttention"];
+    const filterIndex = (f: CompanyFilter) => SIX_FILTERS.indexOf(f);
+
+    // Any of the 13 sorts, any subset of the six filters, inserted in two independent orders.
+    const arbStatePair = fc.tuple(
+      arbSortOption,
+      fc.subarray(SIX_FILTERS).chain((fs) =>
+        fc.tuple(
+          fc.shuffledSubarray(fs, { minLength: fs.length, maxLength: fs.length }),
+          fc.shuffledSubarray(fs, { minLength: fs.length, maxLength: fs.length }),
+        ),
+      ),
+    );
+
+    fc.assert(
+      fc.property(arbStatePair, ([sort, [orderA, orderB]]) => {
+        const a: CompanyViewState = { sort, filters: new Set(orderA) };
+        const b: CompanyViewState = { sort, filters: new Set(orderB) };
+        const serialized = serializeCompanyViewState(a);
+
+        // Canonical: same sort and filter set → identical strings regardless of insertion order.
+        expect(serializeCompanyViewState(b)).toBe(serialized);
+
+        // Filters are written in COMPANY_FILTERS order.
+        const written = (JSON.parse(serialized) as { filters: CompanyFilter[] }).filters;
+        expect(written).toEqual([...orderA].sort((x, y) => filterIndex(x) - filterIndex(y)));
+
+        // Round trip through parse.
+        const parsed = parseCompanyViewState(serialized);
+        expect(parsed.sort).toBe(sort);
+        expect([...parsed.filters].sort()).toEqual([...orderA].sort());
+        expect(serializeCompanyViewState(parsed)).toBe(serialized);
+
+        // Round trip through save/load on an in-memory storage under the unchanged key.
+        const store = new Map<string, string>();
+        const storage = {
+          getItem: (k: string) => store.get(k) ?? null,
+          setItem: (k: string, v: string) => void store.set(k, v),
+        };
+        expect(saveCompanyViewState(storage, b)).toBe(true);
+        expect([...store.keys()]).toEqual([COMPANY_VIEW_STORAGE_KEY]);
+        expect(store.get(COMPANY_VIEW_STORAGE_KEY)).toBe(serialized);
+        const loaded = loadCompanyViewState(storage);
+        expect(loaded.sort).toBe(sort);
+        expect([...loaded.filters].sort()).toEqual([...orderA].sort());
+      }),
+      PBT,
+    );
+
+    // Backward compatibility: pre-feature states serialize byte-identically to the old format
+    // and parse back with no new filter active.
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...LEGACY_SORTS),
+        fc.subarray(LEGACY_FILTERS).chain((fs) =>
+          fc.shuffledSubarray(fs, { minLength: fs.length, maxLength: fs.length }).map((shuffled) => ({
+            canonical: fs,
+            shuffled,
+          })),
+        ),
+        (sort, { canonical, shuffled }) => {
+          const expected = `{"version":1,"sort":"${sort}","filters":[${canonical.map((f) => `"${f}"`).join(",")}]}`;
+          const view: CompanyViewState = { sort, filters: new Set(shuffled) };
+          expect(serializeCompanyViewState(view)).toBe(expected);
+
+          const parsed = parseCompanyViewState(expected);
+          expect(parsed.sort).toBe(sort);
+          expect([...parsed.filters].sort()).toEqual([...canonical].sort());
+          expect(parsed.filters.has("hasWishlistJobs")).toBe(false);
+          expect(parsed.filters.has("hasAppliedJobs")).toBe(false);
+        },
+      ),
+      PBT,
+    );
+  });
+
   // Feature: companies-sidebar-sort-filter, Property 10: Parsing stored state never fails and sanitizes
   // **Validates: Requirements 6.5, 6.3, 2.10**
   it("Property 10: parsing stored state never fails and sanitizes", () => {
     const SORT_SET: ReadonlySet<unknown> = new Set(COMPANY_SORT_OPTIONS.map((o) => o.value));
-    const FILTER_SET: ReadonlySet<unknown> = new Set(ALL_FILTERS);
+    const FILTER_SET: ReadonlySet<unknown> = new Set(SIX_FILTERS);
 
     // Filter-array elements: known filters (possibly duplicated), unknown strings, and arbitrary JSON.
-    const arbFilterElement = fc.oneof(arbFilter, arbFilter, fc.string(), fc.jsonValue());
+    const arbFilterElement = fc.oneof(arbFilter6, arbFilter6, fc.string(), fc.jsonValue());
     const arbStoredFilters = fc.oneof(fc.array(arbFilterElement, { maxLength: 12 }), fc.jsonValue());
     const arbStoredSort = fc.oneof(arbSortOption, fc.string(), fc.jsonValue());
 
@@ -690,10 +1024,121 @@ describe("company sidebar properties", () => {
         expect(parsed.sort).toBe(expectedSort);
 
         const expectedFilters = Array.isArray(record.filters)
-          ? ALL_FILTERS.filter((f) => (record.filters as unknown[]).includes(f))
+          ? SIX_FILTERS.filter((f) => (record.filters as unknown[]).includes(f))
           : [];
         expect([...parsed.filters].sort()).toEqual([...expectedFilters].sort());
         for (const f of parsed.filters) expect(FILTER_SET.has(f)).toBe(true);
+      }),
+      PBT,
+    );
+  });
+
+  // Feature: companies-tab-sorting, Property 15: Stored view-state parsing never fails and sanitizes
+  // **Validates: Requirements 2.7, 9.5, 9.6, 9.7**
+  it("Property 15: stored view-state parsing never fails and sanitizes", () => {
+    const SORT_VALUES: readonly unknown[] = COMPANY_SORT_OPTIONS.map((o) => o.value);
+    const FILTER_VALUES: readonly unknown[] = SIX_FILTERS;
+
+    const arbUnknownSort = fc.oneof(
+      fc.string().filter((s) => !SORT_VALUES.includes(s)),
+      fc.constantFrom("NameAsc", "nameasc", "recentlyAdded ", "wishlistJobs", "mostApplied"),
+    );
+    const arbNonStringSort = fc.oneof(fc.integer(), fc.boolean(), fc.constant(null), fc.array(fc.string()), fc.object());
+    const arbUnknownFilter = fc.oneof(
+      fc.string().filter((s) => !FILTER_VALUES.includes(s)),
+      fc.constantFrom("HasWishlistJobs", "hasAppliedJob", "watched ", "starred"),
+    );
+    const arbNonStringFilter = fc.oneof(fc.integer(), fc.boolean(), fc.constant(null), fc.object(), fc.array(arbFilter6));
+    const arbFilterArray = fc.array(fc.oneof(arbFilter6, arbFilter6, arbUnknownFilter, arbNonStringFilter), {
+      maxLength: 16,
+    });
+    const arbNonArrayFilters = fc.oneof(arbFilter6, fc.string(), fc.integer(), fc.constant(null), fc.object());
+
+    type Case = { raw: string | null; sortOk: boolean; filtersArray: unknown[] | null; isObject: boolean; sort?: unknown };
+    const arbObjectCase: fc.Arbitrary<Case> = fc
+      .record(
+        {
+          version: fc.oneof(fc.constant(1), fc.jsonValue()),
+          sort: fc.oneof(arbSortOption, arbUnknownSort, arbNonStringSort),
+          filters: fc.oneof(arbFilterArray, arbFilterArray, arbNonArrayFilters),
+        },
+        { requiredKeys: [] },
+      )
+      .map((obj) => ({
+        raw: JSON.stringify(obj),
+        sortOk: SORT_VALUES.includes(obj.sort),
+        sort: obj.sort,
+        filtersArray: Array.isArray(obj.filters) ? (JSON.parse(JSON.stringify(obj.filters)) as unknown[]) : null,
+        isObject: true,
+      }));
+    const arbNonObjectCase: fc.Arbitrary<Case> = fc
+      .oneof(
+        fc.string().filter((s) => {
+          try {
+            const v: unknown = JSON.parse(s);
+            return typeof v !== "object" || v === null || Array.isArray(v);
+          } catch {
+            return true;
+          }
+        }),
+        fc
+          .jsonValue()
+          .filter((v) => typeof v !== "object" || v === null || Array.isArray(v))
+          .map((v) => JSON.stringify(v)),
+        fc.constant(null),
+      )
+      .map((raw) => ({ raw, sortOk: false, filtersArray: null, isObject: false }));
+
+    fc.assert(
+      fc.property(fc.oneof(arbObjectCase, arbObjectCase, arbNonObjectCase), (c) => {
+        let parsed!: CompanyViewState;
+        expect(() => {
+          parsed = parseCompanyViewState(c.raw);
+        }).not.toThrow();
+
+        if (!c.isObject) {
+          // Req 9.7: non-JSON or non-object input → default state.
+          expect(parsed.sort).toBe("nameAsc");
+          expect(parsed.filters.size).toBe(0);
+        } else {
+          // Req 2.7, 9.5: unknown sort → nameAsc; a valid sort is kept.
+          expect(parsed.sort).toBe(c.sortOk ? c.sort : "nameAsc");
+          // Req 2.7, 9.6: known filters kept once each, everything else dropped,
+          // independent of whether the sort was valid.
+          const expected = c.filtersArray === null ? [] : SIX_FILTERS.filter((f) => c.filtersArray!.includes(f));
+          expect([...parsed.filters].sort()).toEqual([...expected].sort());
+        }
+
+        // The result is always a valid state that serializes canonically and round-trips.
+        expect(SORT_VALUES).toContain(parsed.sort);
+        for (const f of parsed.filters) expect(FILTER_VALUES).toContain(f);
+        const serialized = serializeCompanyViewState(parsed);
+        const reparsed = parseCompanyViewState(serialized);
+        expect(reparsed.sort).toBe(parsed.sort);
+        expect([...reparsed.filters].sort()).toEqual([...parsed.filters].sort());
+        expect(serializeCompanyViewState(reparsed)).toBe(serialized);
+
+        // Loading the same raw value through storage gives the same state.
+        const loaded = loadCompanyViewState({ getItem: () => c.raw });
+        expect(serializeCompanyViewState(loaded)).toBe(serialized);
+      }),
+      PBT,
+    );
+
+    // Req 9.7: a storage that throws on read yields the default state, never an error.
+    fc.assert(
+      fc.property(fc.anything(), (thrown) => {
+        const storage = {
+          getItem: (): string | null => {
+            throw thrown;
+          },
+        };
+        let view!: CompanyViewState;
+        expect(() => {
+          view = loadCompanyViewState(storage);
+        }).not.toThrow();
+        expect(view.sort).toBe("nameAsc");
+        expect(view.filters.size).toBe(0);
       }),
       PBT,
     );
@@ -710,7 +1155,7 @@ describe("company sidebar properties", () => {
         // Bias toward visibleCount === 0 so the search/filter branches are exercised.
         forceZero: fc.boolean(),
         search: arbSearch,
-        filterCount: fc.integer({ min: 0, max: 4 }),
+        filterCount: fc.integer({ min: 0, max: SIX_FILTERS.length }),
       })
       .map(({ visibleFrac, forceZero, ...rest }) => ({
         ...rest,
