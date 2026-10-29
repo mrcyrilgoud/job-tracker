@@ -1,0 +1,149 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration test": {
+      "status": "passed",
+      "failingExample": "Counterexample (seed 696870051, shrunk 2x): {\"filter\":{\"kind\":\"archived\"},\"jobCount\":0,\"hasNextCursor\":false,\"sortField\":\"appliedAt\",\"isAppliedTab\":false}. AssertionError: \"header has md:flex-wrap: expected false to be true\". Fails on the first run, so it holds for any variant: the header container lacks md:flex-wrap, and the title block is a bare <div> with no max-w-full / md:shrink-0.",
+      "lastRunTimestamp": 1793231682116
+    },
+    "2. Write preservation property tests (BEFORE implementing fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1793231823287
+    },
+    "3.2 Verify bug condition exploration test now passes": {
+      "status": "passed",
+      "lastRunTimestamp": 1793231905069
+    },
+    "3.3 Verify preservation tests still pass": {
+      "status": "passed",
+      "lastRunTimestamp": 1793231934081
+    }
+  },
+  "executionHistory": {
+    "1. Write bug condition exploration test": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621470
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231628012
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231694912
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621531
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231698405
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231837030
+      }
+    ],
+    "3.1 Implement the fix": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621561
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231840746
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231887451
+      }
+    ],
+    "3.2 Verify bug condition exploration test now passes": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621595
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231890672
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231910168
+      }
+    ],
+    "3.3 Verify preservation tests still pass": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621621
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231913356
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231940672
+      }
+    ],
+    "3.4 Manual real-browser resize check (user-run)": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621657
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231948377
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793232199885
+      }
+    ],
+    "4. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793231621681
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793232203794
+      },
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793232229081
+      }
+    ],
+    "3. Fix the Jobs page header title collapse": [
+      {
+        "executionId": "1c6c5182-b084-4940-bad3-835646b4e894",
+        "chatSessionId": "sess_b01dc52c-ac51-43fa-9ced-73ca8173fcc6",
+        "timestamp": 1793232199911
+      }
+    ]
+  }
+}

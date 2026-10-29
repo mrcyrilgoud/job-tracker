@@ -968,8 +968,8 @@ export function JobsPage() {
         </aside>
 
         <section className="space-y-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
+          <div className="flex flex-col gap-4 md:flex-row md:flex-wrap md:items-end md:justify-between">
+            <div className="max-w-full md:shrink-0">
               <div className="flex items-center gap-2.5">
                 {isFavoriteFilter ? (
                   <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
