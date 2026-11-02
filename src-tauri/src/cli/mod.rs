@@ -97,6 +97,7 @@ pub async fn run_cli(cli: Cli) -> AppResult<()> {
                 favorites: false,
                 archived: false,
                 limit: None,
+                min_company_stability: None,
             })
         }
     };
@@ -477,6 +478,8 @@ mod tests {
             clear_appeal: false,
             application_ease: None,
             clear_application_ease: false,
+            company_stability: None,
+            clear_company_stability: false,
         };
         handlers::handle_update(&conn, &paths, update_args, true, true).unwrap();
 
@@ -561,6 +564,7 @@ mod tests {
             favorites: false,
             archived: false,
             limit: None,
+            min_company_stability: None,
         };
         let search_results = crate::jobs::service::list_jobs(
             &conn,
@@ -606,6 +610,8 @@ mod tests {
             clear_appeal: false,
             application_ease: None,
             clear_application_ease: false,
+            company_stability: None,
+            clear_company_stability: false,
         };
         handlers::handle_update(&conn, &paths, set_appeal, true, true).unwrap();
         let scored = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -621,7 +627,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             parsed[0].last().map(String::as_str),
-            Some("application_ease")
+            Some("company_stability")
         );
         assert_eq!(parsed[1][appeal_idx], "4");
         let ease_idx = parsed[0]
@@ -649,6 +655,8 @@ mod tests {
             clear_appeal: true,
             application_ease: None,
             clear_application_ease: false,
+            company_stability: None,
+            clear_company_stability: false,
         };
         handlers::handle_update(&conn, &paths, clear_appeal, true, true).unwrap();
         let cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -680,6 +688,8 @@ mod tests {
             clear_appeal: false,
             application_ease: Some(2),
             clear_application_ease: false,
+            company_stability: None,
+            clear_company_stability: false,
         };
         handlers::handle_update(&conn, &paths, set_ease, true, true).unwrap();
         let eased = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -723,6 +733,8 @@ mod tests {
             clear_appeal: false,
             application_ease: None,
             clear_application_ease: true,
+            company_stability: None,
+            clear_company_stability: false,
         };
         handlers::handle_update(&conn, &paths, clear_ease, true, true).unwrap();
         let ease_cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -990,6 +1002,8 @@ mod tests {
                 clear_appeal: false,
                 application_ease: None,
                 clear_application_ease: false,
+                company_stability: None,
+                clear_company_stability: false,
             },
             true,
             true,
@@ -1011,6 +1025,249 @@ mod tests {
             .find(|row| row.first().map(String::as_str) == Some(job_id.as_str()))
             .unwrap();
         assert_eq!(row[status_idx], "closed");
+    }
+
+    /// Parse `jt <argv...>` and return the subcommand, so tests build args the
+    /// same way the binary does.
+    fn parse_command(argv: &[&str]) -> Commands {
+        let mut full = vec!["job-tracker"];
+        full.extend_from_slice(argv);
+        Cli::try_parse_from(full).unwrap().command.unwrap()
+    }
+
+    fn update_args(argv: &[&str]) -> UpdateArgs {
+        let mut full = vec!["update"];
+        full.extend_from_slice(argv);
+        match parse_command(&full) {
+            Commands::Update(args) => args,
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    fn list_args(argv: &[&str]) -> ListArgs {
+        let mut full = vec!["list"];
+        full.extend_from_slice(argv);
+        match parse_command(&full) {
+            Commands::List(args) => args,
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    fn csv_cell(paths: &DataPaths, job_id: &str, column: &str) -> String {
+        let rows =
+            crate::jobs::csv::parse_csv(&std::fs::read_to_string(&paths.jobs_csv_path).unwrap());
+        let idx = rows[0].iter().position(|h| h == column).unwrap();
+        rows.iter()
+            .find(|row| row.first().map(String::as_str) == Some(job_id))
+            .unwrap()[idx]
+            .clone()
+    }
+
+    #[test]
+    fn company_stability_flag_errors_and_help() {
+        use clap::CommandFactory;
+        let message = crate::models::COMPANY_STABILITY_RANGE_MESSAGE;
+        for argv in [
+            ["update", "job_1", "--company-stability", "0"],
+            ["update", "job_1", "--company-stability", "3.5"],
+            ["list", "--min-company-stability", "6", "--json"],
+            ["list", "--min-company-stability", "x", "--json"],
+        ] {
+            let mut full = vec!["job-tracker"];
+            full.extend_from_slice(&argv);
+            let error = Cli::try_parse_from(full).unwrap_err().to_string();
+            assert!(error.contains(message), "{argv:?}: {error}");
+        }
+        assert!(Cli::try_parse_from(["job-tracker", "list", "--min-company-stability"]).is_err());
+
+        // Req 3.5: both flags together is a conflict naming both.
+        let conflict = Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_1",
+            "--company-stability",
+            "3",
+            "--clear-company-stability",
+        ])
+        .unwrap_err();
+        assert_eq!(conflict.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let conflict = conflict.to_string();
+        assert!(conflict.contains("--company-stability"));
+        assert!(conflict.contains("--clear-company-stability"));
+
+        let mut cmd = Cli::command();
+        let update_help = cmd
+            .find_subcommand_mut("update")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        for needle in [
+            "--company-stability",
+            "--clear-company-stability",
+            "1 (least stable) to 5 (most stable)",
+            "leave the job unscored",
+        ] {
+            assert!(update_help.contains(needle), "update help missing {needle:?}");
+        }
+        let list_help = cmd
+            .find_subcommand_mut("list")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        for needle in [
+            "--min-company-stability",
+            ">= N",
+            "1-5",
+            "5 = most stable",
+            "unscored jobs are excluded",
+        ] {
+            assert!(list_help.contains(needle), "list help missing {needle:?}");
+        }
+    }
+
+    #[test]
+    fn company_stability_update_set_keep_clear_and_csv_mirror() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate::migrate(&conn).unwrap();
+        let job_id = insert_job(&conn, "https://example.com/jobs/stable", "Stable role");
+        let other_id = insert_job(&conn, "https://example.com/jobs/other", "Other role");
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[&job_id, "--appeal", "2", "--application-ease", "5"]),
+            true,
+            true,
+        )
+        .unwrap();
+        let get = |id: &str| {
+            crate::jobs::service::get_job_by_id(&conn, id)
+                .unwrap()
+                .unwrap()
+        };
+
+        // Set (Req 3.1, 3.12): only Company_Stability changes; CSV shows it.
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[&job_id, "--company-stability", "4"]),
+            true,
+            true,
+        )
+        .unwrap();
+        let job = get(&job_id);
+        assert_eq!(job.company_stability, Some(4));
+        assert_eq!((job.appeal, job.application_ease), (Some(2), Some(5)));
+        assert_eq!(job.status, "wishlist");
+        assert!(!job.is_favorite);
+        assert_eq!(csv_cell(&paths, &job_id, "company_stability"), "4");
+
+        // Keep (Req 3.3): an update without either flag leaves the score.
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[&job_id, "--status", "applied"]),
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(get(&job_id).company_stability, Some(4));
+        assert_eq!(csv_cell(&paths, &job_id, "company_stability"), "4");
+
+        // Missing id (Req 3.6): fails, nothing changes.
+        let missing = handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&["missing-job", "--company-stability", "1"]),
+            true,
+            true,
+        );
+        assert!(missing.unwrap_err().to_string().contains("No job found"));
+        assert_eq!(get(&job_id).company_stability, Some(4));
+        assert_eq!(get(&other_id).company_stability, None);
+
+        // Table and detail output print to stdout, which libtest captures and
+        // the tests cannot read; run them as smoke checks only (Req 3.8, 3.9).
+        let listed = crate::jobs::service::list_jobs(
+            &conn,
+            crate::jobs::service::JobFilters::default(),
+        )
+        .unwrap();
+        super::output::format_jobs_table(&listed);
+        let detail = crate::jobs::service::get_job_detail(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        super::output::format_job_detail(&detail);
+        handlers::handle_update(&conn, &paths, update_args(&[&job_id]), false, false).unwrap();
+
+        // Clear (Req 3.2): twice, the second time on an already-unscored job.
+        for _ in 0..2 {
+            handlers::handle_update(
+                &conn,
+                &paths,
+                update_args(&[&job_id, "--clear-company-stability"]),
+                true,
+                true,
+            )
+            .unwrap();
+            let job = get(&job_id);
+            assert_eq!(job.company_stability, None);
+            assert_eq!((job.appeal, job.application_ease), (Some(2), Some(5)));
+            assert_eq!(csv_cell(&paths, &job_id, "company_stability"), "");
+        }
+    }
+
+    #[test]
+    fn list_min_company_stability_filter() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate::migrate(&conn).unwrap();
+        let scored = insert_job(&conn, "https://example.com/jobs/scored", "Scored");
+        let unscored = insert_job(&conn, "https://example.com/jobs/unscored", "Unscored");
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[&scored, "--company-stability", "3"]),
+            true,
+            true,
+        )
+        .unwrap();
+
+        // Without the flag (Req 8.2) the parsed args carry no minimum, and the
+        // same filters handle_list builds include unscored jobs.
+        let plain = list_args(&["--json"]);
+        assert_eq!(plain.min_company_stability, None);
+        handlers::handle_list(&conn, &paths, plain, true).unwrap();
+        let ids = |min: Option<i64>| -> Vec<String> {
+            crate::jobs::service::list_jobs(
+                &conn,
+                crate::jobs::service::JobFilters {
+                    is_archived: Some(false),
+                    min_company_stability: min,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .into_iter()
+            .map(|item| item.job.id)
+            .collect()
+        };
+        let all = ids(None);
+        assert!(all.contains(&scored) && all.contains(&unscored));
+        assert_eq!(ids(Some(3)), vec![scored.clone()]);
+
+        // No matches with --json (Req 8.3): succeeds and the payload is `[]`.
+        let strict = list_args(&["--min-company-stability", "5", "--json"]);
+        assert_eq!(strict.min_company_stability, Some(5));
+        handlers::handle_list(&conn, &paths, strict, true).unwrap();
+        let empty = ids(Some(5));
+        assert!(empty.is_empty());
+        let none: Vec<crate::models::JobListItem> = Vec::new();
+        assert_eq!(serde_json::to_string_pretty(&none).unwrap(), "[]");
     }
 }
 

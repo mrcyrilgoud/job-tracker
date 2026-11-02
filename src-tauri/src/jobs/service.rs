@@ -6,10 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
-    checked_appeal, checked_application_ease, is_job_status, AttachedDocument, Company, Document,
+    checked_appeal, checked_application_ease, checked_company_stability, is_job_status, AttachedDocument, Company, Document,
     Job, JobDetail, JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor,
     JobListSort, JobListSortDirection, JobListSortField, JobListSummary, JobPageCursor, JobSort,
-    JobSummary, WeeklyActivity, WeeklyDay,
+    JobSummary, WeeklyActivity, WeeklyDay, COMPANY_STABILITY_RANGE_MESSAGE,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
 
@@ -51,6 +51,7 @@ pub const JOB_COLUMNS: &[&str] = &[
     "salary_min",
     "salary_max",
     "application_ease",
+    "company_stability",
 ];
 
 pub const JOB_COL_COUNT: usize = JOB_COLUMNS.len();
@@ -93,6 +94,7 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         salary_min: row.get(22)?,
         salary_max: row.get(23)?,
         application_ease: row.get(24)?,
+        company_stability: row.get(25)?,
     })
 }
 
@@ -320,6 +322,9 @@ pub struct JobFilters {
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
     pub is_archived: Option<bool>,
+    /// Minimum_Stability_Filter: when `Some(n)`, keep only jobs whose
+    /// `company_stability >= n`; unscored jobs are excluded. Callers validate 1–5.
+    pub min_company_stability: Option<i64>,
     /// Optional row cap applied as `LIMIT ?` — used to cap watch-preview fetches.
     pub limit: Option<usize>,
 }
@@ -364,6 +369,12 @@ fn jobs_page_order_by(sort_spec: JobListSort, applied_tab: bool) -> &'static str
         (JobListSortField::PostingDate, JobListSortDirection::Descending) => {
             " ORDER BY j.created_at DESC, j.id ASC"
         }
+        (JobListSortField::CompanyStability, JobListSortDirection::Ascending) => {
+            " ORDER BY (j.company_stability IS NULL) ASC, j.company_stability ASC, j.id ASC"
+        }
+        (JobListSortField::CompanyStability, JobListSortDirection::Descending) => {
+            " ORDER BY (j.company_stability IS NULL) ASC, j.company_stability DESC, j.id ASC"
+        }
         (JobListSortField::Appeal, JobListSortDirection::Ascending) => {
             " ORDER BY (j.appeal IS NULL) ASC, j.appeal ASC, j.id ASC"
         }
@@ -377,6 +388,36 @@ fn jobs_page_order_by(sort_spec: JobListSort, applied_tab: bool) -> &'static str
             " ORDER BY c.name COLLATE NOCASE DESC, j.id ASC"
         }
     }
+}
+
+/// Keyset predicate for a nullable 1–5 score column sorted null-last with an
+/// `j.id ASC` tie-break. `column` must be a static, trusted column name.
+fn append_nullable_score_cursor(
+    where_sql: &mut String,
+    values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    column: &'static str,
+    direction: JobListSortDirection,
+    cursor: &JobListPageCursor,
+) -> AppResult<()> {
+    if let Some(value) = &cursor.sort_value {
+        let score = value
+            .parse::<i64>()
+            .map_err(|_| AppError::from("Invalid Jobs pagination cursor"))?;
+        let comparison = match direction {
+            JobListSortDirection::Ascending => ">",
+            JobListSortDirection::Descending => "<",
+        };
+        where_sql.push_str(&format!(
+            " AND ({column} IS NULL OR {column} {comparison} ? OR ({column} = ? AND j.id > ?))"
+        ));
+        values.push(Box::new(score));
+        values.push(Box::new(score));
+        values.push(Box::new(cursor.id.clone()));
+    } else {
+        where_sql.push_str(&format!(" AND {column} IS NULL AND j.id > ?"));
+        values.push(Box::new(cursor.id.clone()));
+    }
+    Ok(())
 }
 
 fn append_sort_spec_cursor(
@@ -420,24 +461,16 @@ fn append_sort_spec_cursor(
             values.push(Box::new(cursor.id.clone()));
         }
         JobListSortField::Appeal => {
-            if let Some(value) = &cursor.sort_value {
-                let score = value
-                    .parse::<i64>()
-                    .map_err(|_| AppError::from("Invalid Jobs pagination cursor"))?;
-                let comparison = match sort_spec.direction {
-                    JobListSortDirection::Ascending => ">",
-                    JobListSortDirection::Descending => "<",
-                };
-                where_sql.push_str(&format!(
-                    " AND (j.appeal IS NULL OR j.appeal {comparison} ? OR (j.appeal = ? AND j.id > ?))"
-                ));
-                values.push(Box::new(score));
-                values.push(Box::new(score));
-                values.push(Box::new(cursor.id.clone()));
-            } else {
-                where_sql.push_str(" AND j.appeal IS NULL AND j.id > ?");
-                values.push(Box::new(cursor.id.clone()));
-            }
+            append_nullable_score_cursor(where_sql, values, "j.appeal", sort_spec.direction, cursor)?;
+        }
+        JobListSortField::CompanyStability => {
+            append_nullable_score_cursor(
+                where_sql,
+                values,
+                "j.company_stability",
+                sort_spec.direction,
+                cursor,
+            )?;
         }
         JobListSortField::CompanyName => {
             let value = cursor
@@ -698,6 +731,12 @@ fn append_job_filters(
     } else if filters.is_archived == Some(false) {
         sql.push_str(" AND j.status NOT IN ('archived', 'rejected', 'withdrawn', 'closed')");
     }
+    // Minimum_Stability_Filter (Req 7.2–7.4, 7.10, 8.1, 8.5): `n` is bound as a
+    // param; the `IS NOT NULL` guard excludes unscored jobs. `None` adds nothing.
+    if let Some(minimum) = filters.min_company_stability {
+        sql.push_str(" AND j.company_stability IS NOT NULL AND j.company_stability >= ?");
+        values.push(Box::new(minimum));
+    }
     if filters.new_from_watch == Some(true) {
         sql.push_str(" AND j.is_new_from_watch = 1");
     } else {
@@ -888,6 +927,20 @@ pub fn list_jobs_page(
     requested_sort_spec: Option<JobListSort>,
     cursor: Option<JobListPageCursor>,
 ) -> AppResult<JobListPage> {
+    list_jobs_page_sized(conn, filters, sort, requested_sort_spec, cursor, JOB_PAGE_SIZE)
+}
+
+/// Same as [`list_jobs_page`] with an explicit page size, so tests can page
+/// small fixtures. `total_count` uses the filter WHERE clause only (no cursor
+/// predicate, no LIMIT), so it is identical on every page of one query.
+pub(crate) fn list_jobs_page_sized(
+    conn: &Connection,
+    filters: JobFilters,
+    sort: JobSort,
+    requested_sort_spec: Option<JobListSort>,
+    cursor: Option<JobListPageCursor>,
+    page_size: usize,
+) -> AppResult<JobListPage> {
     let (mut where_sql, mut values) = job_filter_sql(&filters);
     let applied_tab = filters.status.as_deref() == Some("applied");
     let sort_spec =
@@ -897,6 +950,15 @@ pub fn list_jobs_page(
             "Date applied sorting is only available in the Applied view",
         ));
     }
+    let total_count = {
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}"
+        );
+        let count_params: Vec<&dyn rusqlite::types::ToSql> =
+            values.iter().map(|v| v.as_ref()).collect();
+        conn.query_row(&count_sql, count_params.as_slice(), |row| row.get::<_, i64>(0))
+            .map_err(map_sqlite)?
+    };
     if let Some(cursor) = &cursor {
         append_jobs_page_cursor(
             &mut where_sql,
@@ -907,11 +969,12 @@ pub fn list_jobs_page(
             cursor,
         )?;
     }
-    values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
+    values.push(Box::new((page_size + 1) as i64));
     let sql = format!(
         "SELECT j.id, j.title, j.status, j.applied_at, j.posting_state,
                 j.last_checked_at, j.source, j.is_new_from_watch, j.is_favorite,
-                j.updated_at, j.appeal, j.location, c.name, j.created_at, j.application_ease
+                j.updated_at, j.appeal, j.location, c.name, j.created_at, j.application_ease,
+                j.company_stability
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
          {} LIMIT ?",
         jobs_page_order_by(sort_spec, applied_tab)
@@ -934,6 +997,7 @@ pub fn list_jobs_page(
                     updated_at: row.get(9)?,
                     appeal: row.get(10)?,
                     application_ease: row.get(14)?,
+                    company_stability: row.get(15)?,
                     location: row.get(11)?,
                 },
                 company_name: row.get(12)?,
@@ -942,9 +1006,9 @@ pub fn list_jobs_page(
         })
         .map_err(map_sqlite)?;
     let mut page_rows = rows.collect::<Result<Vec<_>, _>>().map_err(map_sqlite)?;
-    let has_more = page_rows.len() > JOB_PAGE_SIZE;
+    let has_more = page_rows.len() > page_size;
     if has_more {
-        page_rows.pop();
+        page_rows.truncate(page_size);
     }
     let next_cursor = if has_more {
         page_rows
@@ -956,6 +1020,10 @@ pub fn list_jobs_page(
                     JobListSortField::AppliedAt => item.job.applied_at.clone(),
                     JobListSortField::PostingDate => Some(created_at.clone()),
                     JobListSortField::Appeal => item.job.appeal.map(|score| score.to_string()),
+                    JobListSortField::CompanyStability => item
+                        .job
+                        .company_stability
+                        .map(|score| score.to_string()),
                     JobListSortField::CompanyName => Some(item.company_name.clone()),
                 },
                 applied_tab,
@@ -965,7 +1033,11 @@ pub fn list_jobs_page(
         None
     };
     let jobs = page_rows.into_iter().map(|(item, _)| item).collect();
-    Ok(JobListPage { jobs, next_cursor })
+    Ok(JobListPage {
+        jobs,
+        next_cursor,
+        total_count,
+    })
 }
 
 /// Fetch IDs using the same SQL predicates as the paged list, for archived
@@ -1309,6 +1381,26 @@ where
     Ok(Some(serde::Deserialize::deserialize(deserializer)?))
 }
 
+/// Tri-state like [`deserialize_optional_update`], but any value that is not
+/// null or an integer fails with the stability range message, so the IPC
+/// error names the 1–5 range. The range itself is checked in `update_job`.
+fn deserialize_company_stability_update<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .map(|score| Some(Some(score)))
+            .ok_or_else(|| D::Error::custom(COMPANY_STABILITY_RANGE_MESSAGE)),
+        _ => Err(D::Error::custom(COMPANY_STABILITY_RANGE_MESSAGE)),
+    }
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateJobInput {
@@ -1335,6 +1427,9 @@ pub struct UpdateJobInput {
     /// `Some(Some(n))` sets it when `n` is 1–5 (5 = easiest to apply).
     #[serde(default, deserialize_with = "deserialize_optional_update")]
     pub application_ease: Option<Option<i64>>,
+    /// None = keep; Some(None) = clear; Some(Some(n)) = set (range-checked in update_job).
+    #[serde(default, deserialize_with = "deserialize_company_stability_update")]
+    pub company_stability: Option<Option<i64>>,
 }
 
 use serde::Deserialize;
@@ -1446,11 +1541,20 @@ pub fn update_job(
         }
         None => existing.application_ease,
     };
+    let company_stability = match updates.company_stability {
+        Some(next) => {
+            if let Some(score) = next {
+                checked_company_stability(score).map_err(AppError::from)?;
+            }
+            next
+        }
+        None => existing.company_stability,
+    };
 
     conn.execute(
         r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14, application_ease=?15, updated_at=?16
-           WHERE id=?17"#,
+           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14, application_ease=?15, updated_at=?16, company_stability=?17
+           WHERE id=?18"#,
         params![
             title,
             company_id,
@@ -1468,6 +1572,7 @@ pub fn update_job(
             salary_max,
             application_ease,
             timestamp,
+            company_stability,
             job_id
         ],
     )
@@ -2160,6 +2265,11 @@ mod tests {
             ["page-200", "page-201", "page-202", "page-203", "page-204"]
         );
         assert!(third.next_cursor.is_none());
+        // total_count ignores the cursor, so it is the same on every page.
+        assert_eq!(
+            [first.total_count, second.total_count, third.total_count],
+            [205, 205, 205]
+        );
 
         let json = serde_json::to_value(&first.jobs[0]).unwrap();
         assert!(json["job"].get("description").is_none());
@@ -3968,6 +4078,201 @@ mod tests {
         assert_eq!(listed_json["job"]["applicationEase"], 3);
     }
 
+    // ---- Company stability (spec company-stability-score, task 2.2) ----
+
+    fn stability_job(conn: &Connection, slug: &str) -> Job {
+        create_job_from_url(
+            conn,
+            &format!("https://example.com/jobs/{slug}"),
+            "Stability role",
+            Some("Acme"),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .0
+    }
+
+    fn stability_of(conn: &Connection, job_id: &str) -> Option<i64> {
+        get_job_by_id(conn, job_id).unwrap().unwrap().company_stability
+    }
+
+    /// Req 1.6, 2.1, 2.2, 2.3: every read path returns the stored value and the
+    /// serialized job always carries the `companyStability` key.
+    #[test]
+    fn company_stability_round_trips_through_every_read_path() {
+        let conn = test_connection();
+        let job = stability_job(&conn, "stability-round-trip");
+        for value in [None, Some(1), Some(2), Some(3), Some(4), Some(5), None] {
+            let updated = update_job(
+                &conn,
+                &job.id,
+                UpdateJobInput {
+                    company_stability: Some(value),
+                    ..UpdateJobInput::default()
+                },
+            )
+            .unwrap();
+            let detail = get_job_detail(&conn, &job.id).unwrap().unwrap();
+            let listed = list_jobs(&conn, JobFilters::default()).unwrap();
+            let page =
+                list_jobs_page(&conn, JobFilters::default(), JobSort::NewestPosting, None, None)
+                    .unwrap();
+            let expected = serde_json::json!(value);
+            for job_json in [
+                serde_json::to_value(&updated.job).unwrap(),
+                serde_json::to_value(&detail.job).unwrap(),
+                serde_json::to_value(&listed[0].job).unwrap(),
+                serde_json::to_value(&page.jobs[0].job).unwrap(),
+            ] {
+                let object = job_json.as_object().unwrap();
+                assert!(object.contains_key("companyStability"), "{value:?}");
+                assert_eq!(object["companyStability"], expected, "{value:?}");
+            }
+        }
+    }
+
+    /// Req 2.7, 2.8, 2.11: other edits, archive, unarchive, and `closed` keep the
+    /// score; a stability-only update keeps the other scores, favorite, status.
+    #[test]
+    fn company_stability_is_independent_of_other_job_fields() {
+        let conn = test_connection();
+        let job = stability_job(&conn, "stability-independent");
+        set_job_favorite(&conn, &job.id, true).unwrap();
+        update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                appeal: Some(Some(2)),
+                application_ease: Some(Some(5)),
+                company_stability: Some(Some(4)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+
+        let edited = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                notes: Some(Some("recruiter call".into())),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(edited.job.company_stability, Some(4));
+        assert_eq!(archive_job(&conn, &job.id).unwrap().job.company_stability, Some(4));
+        assert_eq!(
+            unarchive_job(&conn, &job.id, None).unwrap().job.company_stability,
+            Some(4)
+        );
+        let closed = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                status: Some("closed".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(closed.job.company_stability, Some(4));
+
+        let rescored = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_stability: Some(Some(1)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap()
+        .job;
+        assert_eq!(rescored.company_stability, Some(1));
+        assert_eq!(rescored.appeal, Some(2));
+        assert_eq!(rescored.application_ease, Some(5));
+        assert!(rescored.is_favorite);
+        assert_eq!(rescored.status, "closed");
+    }
+
+    /// Req 2.4, 2.5, 2.6: invalid payloads, alone or bundled with a valid change,
+    /// fail with the range message and leave the job (incl. `updated_at`) intact.
+    #[test]
+    fn invalid_company_stability_rejects_whole_update_and_keeps_job() {
+        let conn = test_connection();
+        let job = stability_job(&conn, "stability-invalid");
+        update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_stability: Some(Some(3)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        set_updated_at(&conn, &job.id, "2020-01-01T00:00:00.000Z");
+        let before = serde_json::to_value(get_job_by_id(&conn, &job.id).unwrap().unwrap()).unwrap();
+
+        let bad_values = ["0", "6", "3.5", "3.0", r#""3""#, "true", "[]", "{}"];
+        for bad in bad_values {
+            for payload in [
+                format!(r#"{{"companyStability":{bad}}}"#),
+                format!(r#"{{"title":"Renamed","companyStability":{bad}}}"#),
+            ] {
+                let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+                let error = match serde_json::from_value::<UpdateJobInput>(value) {
+                    Err(error) => error.to_string(),
+                    Ok(input) => update_job(&conn, &job.id, input).unwrap_err().to_string(),
+                };
+                assert!(
+                    error.contains(COMPANY_STABILITY_RANGE_MESSAGE),
+                    "{payload}: {error}"
+                );
+                let after =
+                    serde_json::to_value(get_job_by_id(&conn, &job.id).unwrap().unwrap()).unwrap();
+                assert_eq!(after, before, "{payload}");
+            }
+        }
+    }
+
+    /// Req 2.10, 1.6, 3.7: unknown ids fail; new jobs from a URL or a watch save
+    /// start unscored.
+    #[test]
+    fn company_stability_unknown_id_and_new_jobs_are_unscored() {
+        let conn = test_connection();
+        let error = update_job(
+            &conn,
+            "missing-job-id",
+            UpdateJobInput {
+                company_stability: Some(Some(3)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("Job not found"));
+
+        let created = stability_job(&conn, "stability-new");
+        assert_eq!(created.company_stability, None);
+        assert_eq!(stability_of(&conn, &created.id), None);
+
+        let company = find_or_create_company(&conn, "Watched Co", None).unwrap();
+        let watch_id = insert_watch_pending_job(
+            &conn,
+            &company.id,
+            "Watched Role",
+            "https://example.com/jobs/watched-role",
+        );
+        conn.execute(
+            "UPDATE jobs SET source = 'greenhouse', posting_state = 'active' WHERE id = ?1",
+            params![watch_id],
+        )
+        .unwrap();
+        let saved = save_open_watch_job(&conn, &watch_id).unwrap();
+        assert_eq!(saved.company_stability, None);
+        assert_eq!(stability_of(&conn, &watch_id), None);
+    }
+
     // ---- Query-time filtering integration tests (task 8.3) ----
     //
     // These cover the query-time behavior of `list_jobs` on the watch path:
@@ -4958,6 +5263,355 @@ mod tests {
             let ipc_ids = prop_result_ids(&conn, ipc_filters);
             let cli_ids = prop_result_ids(&conn, cli_filters);
             prop_assert_eq!(ipc_ids, cli_ids, "CLI and IPC paths returned different rows");
+        }
+    }
+
+    // --- company-stability-score Properties 10 + 11: sort order and keyset paging ---
+
+    /// Scramble an index into an id prefix so `j.id` order differs from
+    /// insertion order; the `-{index}` suffix keeps ids unique.
+    fn stability_prop_id(seed: u64, index: usize) -> String {
+        let mut x = seed ^ (index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        x ^= x >> 31;
+        format!("j{x:016x}-{index:03}")
+    }
+
+    /// Insert all jobs with direct SQL in one transaction (fast for 500 rows).
+    fn stability_prop_insert(conn: &Connection, jobs: &[(String, Option<i64>)]) {
+        let tx = conn.unchecked_transaction().unwrap();
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, \
+                                       posting_state, source, is_new_from_watch, \
+                                       missing_from_sync_count, company_stability, \
+                                       created_at, updated_at) \
+                     VALUES (?1, 'prop-co', ?1, ?2, ?2, 'wishlist', 'active', 'manual', 0, 0, ?3, \
+                             '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                )
+                .unwrap();
+            for (id, stability) in jobs {
+                let url = format!("https://example.test/stability/{id}");
+                stmt.execute(params![id, url, stability]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+
+    /// Job counts skewed small, with occasional large values up to 500.
+    fn stability_job_count() -> impl Strategy<Value = usize> {
+        prop_oneof![8 => 0usize..=40, 1 => 0usize..=500]
+    }
+
+    /// Stability values with many collisions: null or 1–5.
+    fn stability_value() -> impl Strategy<Value = Option<i64>> {
+        prop_oneof![1 => Just(None), 3 => (1i64..=5).prop_map(Some)]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: company-stability-score, Property 10: Stability sort matches the reference order
+        // Feature: company-stability-score, Property 11: Keyset paging is lossless and counts are stable
+        // Validates: Requirements 6.3, 6.4, 6.5, 6.6, 6.10, 6.11, 6.12, 7.13
+        #[test]
+        fn prop_stability_sort_and_lossless_keyset_paging(
+            count in stability_job_count(),
+            values in prop::collection::vec(stability_value(), 500),
+            id_seed in any::<u64>(),
+            descending in any::<bool>(),
+            page_size in prop_oneof![1usize..=10, 1usize..=100],
+            minimum in prop::option::of(1i64..=5),
+        ) {
+            let conn = prop_conn();
+            let jobs: Vec<(String, Option<i64>)> = (0..count)
+                .map(|index| (stability_prop_id(id_seed, index), values[index]))
+                .collect();
+            stability_prop_insert(&conn, &jobs);
+
+            // Reference: filter by the minimum (unscored excluded when set),
+            // then sort on (isUnscored, desc ? -cs : cs, id) ascending.
+            let mut expected: Vec<(String, Option<i64>)> = jobs
+                .iter()
+                .filter(|(_, cs)| minimum.map_or(true, |n| cs.is_some_and(|v| v >= n)))
+                .cloned()
+                .collect();
+            expected.sort_by(|(a_id, a_cs), (b_id, b_cs)| {
+                let key = |cs: &Option<i64>| {
+                    let score = cs.unwrap_or(0);
+                    (cs.is_none(), if descending { -score } else { score })
+                };
+                key(a_cs).cmp(&key(b_cs)).then_with(|| a_id.cmp(b_id))
+            });
+
+            let sort_spec = JobListSort {
+                field: JobListSortField::CompanyStability,
+                direction: if descending {
+                    JobListSortDirection::Descending
+                } else {
+                    JobListSortDirection::Ascending
+                },
+            };
+            let filters = JobFilters {
+                min_company_stability: minimum,
+                ..JobFilters::default()
+            };
+
+            let mut got: Vec<(String, Option<i64>)> = Vec::new();
+            let mut cursor = None;
+            let mut pages = 0usize;
+            loop {
+                let page = list_jobs_page_sized(
+                    &conn,
+                    filters.clone(),
+                    JobSort::NewestPosting,
+                    Some(sort_spec),
+                    cursor,
+                    page_size,
+                )
+                .unwrap();
+                pages += 1;
+                prop_assert_eq!(
+                    page.total_count,
+                    expected.len() as i64,
+                    "total_count on page {} differs from the unpaged filtered length",
+                    pages
+                );
+                prop_assert!(page.jobs.len() <= page_size, "page exceeded page size");
+                got.extend(
+                    page.jobs
+                        .into_iter()
+                        .map(|item| (item.job.id, item.job.company_stability)),
+                );
+                cursor = page.next_cursor;
+                if cursor.is_none() {
+                    break;
+                }
+                prop_assert!(pages <= expected.len() + 1, "paging did not terminate");
+            }
+
+            let mut seen = std::collections::HashSet::new();
+            for (id, _) in &got {
+                prop_assert!(seen.insert(id.clone()), "job {} repeated across pages", id);
+            }
+            prop_assert_eq!(got, expected, "paged order differs from the reference order");
+        }
+    }
+
+    // --- company-stability-score Property 12: minimum filter is a pure restriction ---
+
+    /// One generated job for Property 12: status, title word, appeal,
+    /// favorite flag, and Company_Stability.
+    #[derive(Clone, Debug)]
+    struct MinFilterJob {
+        status: &'static str,
+        title_word: &'static str,
+        appeal: Option<i64>,
+        is_favorite: bool,
+        stability: Option<i64>,
+    }
+
+    const MIN_FILTER_STATUSES: [&str; 6] =
+        ["wishlist", "applied", "interviewing", "rejected", "archived", "closed"];
+    const MIN_FILTER_TITLE_WORDS: [&str; 3] = ["Engineer", "Designer", "Manager"];
+
+    fn min_filter_job() -> impl Strategy<Value = MinFilterJob> {
+        (
+            prop::sample::select(&MIN_FILTER_STATUSES[..]),
+            prop::sample::select(&MIN_FILTER_TITLE_WORDS[..]),
+            stability_value(),
+            any::<bool>(),
+            stability_value(),
+        )
+            .prop_map(|(status, title_word, appeal, is_favorite, stability)| MinFilterJob {
+                status,
+                title_word,
+                appeal,
+                is_favorite,
+                stability,
+            })
+    }
+
+    /// Sibling of `stability_prop_insert` with a richer column mix. Each row gets
+    /// a distinct `created_at`/`updated_at` (scrambled relative to id order) so
+    /// `list_jobs` (ORDER BY updated_at DESC) and the posting-date sort are total.
+    fn min_filter_insert(conn: &Connection, jobs: &[(String, MinFilterJob)]) {
+        let tx = conn.unchecked_transaction().unwrap();
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, \
+                                       posting_state, source, is_new_from_watch, \
+                                       missing_from_sync_count, is_favorite, appeal, \
+                                       company_stability, created_at, updated_at) \
+                     VALUES (?1, 'prop-co', ?2, ?3, ?3, ?4, 'active', 'manual', 0, 0, ?5, ?6, \
+                             ?7, ?8, ?8)",
+                )
+                .unwrap();
+            let count = jobs.len().max(1);
+            for (index, (id, job)) in jobs.iter().enumerate() {
+                let url = format!("https://example.test/min-filter/{id}");
+                let title = format!("{} {index}", job.title_word);
+                // Scrambled minute breaks the link to insertion order; the
+                // seconds field (index < 60) keeps every timestamp unique.
+                let minute = (index * 37) % count % 60;
+                let stamp = format!("2026-01-01T00:{minute:02}:{:02}Z", index % 60);
+                stmt.execute(params![
+                    id,
+                    title,
+                    url,
+                    job.status,
+                    job.is_favorite as i64,
+                    job.appeal,
+                    job.stability,
+                    stamp
+                ])
+                .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
+
+    /// Collect every page of `list_jobs_page_sized` as `(id, company_stability)`.
+    fn min_filter_all_pages(
+        conn: &Connection,
+        filters: &JobFilters,
+        sort_spec: JobListSort,
+        page_size: usize,
+    ) -> Vec<(String, Option<i64>)> {
+        let mut got = Vec::new();
+        let mut cursor = None;
+        for _ in 0..=200 {
+            let page = list_jobs_page_sized(
+                conn,
+                filters.clone(),
+                JobSort::NewestPosting,
+                Some(sort_spec),
+                cursor,
+                page_size,
+            )
+            .unwrap();
+            got.extend(
+                page.jobs
+                    .into_iter()
+                    .map(|item| (item.job.id, item.job.company_stability)),
+            );
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                return got;
+            }
+        }
+        panic!("paging did not terminate");
+    }
+
+    fn min_filter_list(conn: &Connection, filters: &JobFilters) -> Vec<(String, Option<i64>)> {
+        list_jobs(conn, filters.clone())
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.job.id, item.job.company_stability))
+            .collect()
+    }
+
+    fn min_filter_restrict(rows: &[(String, Option<i64>)], n: i64) -> Vec<(String, Option<i64>)> {
+        rows.iter()
+            .filter(|(_, cs)| cs.is_some_and(|v| v >= n))
+            .cloned()
+            .collect()
+    }
+
+    fn is_subset(small: &[(String, Option<i64>)], large: &[(String, Option<i64>)]) -> bool {
+        let large: std::collections::HashSet<&String> = large.iter().map(|(id, _)| id).collect();
+        small.iter().all(|(id, _)| large.contains(id))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: company-stability-score, Property 12: Minimum filter is a pure restriction
+        // Validates: Requirements 6.14, 7.2, 7.3, 7.4, 7.10, 7.11, 7.12, 8.1, 8.5
+        #[test]
+        fn prop_min_stability_filter_is_pure_restriction(
+            jobs in prop::collection::vec(min_filter_job(), 0..=60),
+            id_seed in any::<u64>(),
+            status in prop::option::of(prop::sample::select(&MIN_FILTER_STATUSES[..])),
+            statuses in prop::option::of(
+                prop::sample::subsequence(MIN_FILTER_STATUSES.to_vec(), 0..=4)
+            ),
+            search in prop::option::of(prop::sample::select(&MIN_FILTER_TITLE_WORDS[..])),
+            favorites_only in any::<bool>(),
+            archived in prop::option::of(any::<bool>()),
+            field in prop::sample::select(vec![
+                JobListSortField::PostingDate,
+                JobListSortField::CompanyStability,
+                JobListSortField::Appeal,
+                JobListSortField::CompanyName,
+            ]),
+            descending in any::<bool>(),
+            page_size in 1usize..=7,
+            n in 1i64..=5,
+        ) {
+            let conn = prop_conn();
+            let rows: Vec<(String, MinFilterJob)> = jobs
+                .into_iter()
+                .enumerate()
+                .map(|(index, job)| (stability_prop_id(id_seed, index), job))
+                .collect();
+            min_filter_insert(&conn, &rows);
+
+            let base = JobFilters {
+                status: status.map(str::to_string),
+                statuses: statuses.map(|set| set.into_iter().map(str::to_string).collect()),
+                search: search.map(str::to_string),
+                is_favorite: favorites_only.then_some(true),
+                is_archived: archived,
+                ..JobFilters::default()
+            };
+            let with_min = |m: i64| JobFilters {
+                min_company_stability: Some(m),
+                ..base.clone()
+            };
+            let sort_spec = JobListSort {
+                field,
+                direction: if descending {
+                    JobListSortDirection::Descending
+                } else {
+                    JobListSortDirection::Ascending
+                },
+            };
+
+            // list_jobs_page (all pages).
+            let unfiltered_pages = min_filter_all_pages(&conn, &base, sort_spec, page_size);
+            let filtered_pages = min_filter_all_pages(&conn, &with_min(n), sort_spec, page_size);
+            prop_assert_eq!(
+                &filtered_pages,
+                &min_filter_restrict(&unfiltered_pages, n),
+                "list_jobs_page with min {} is not the restricted unfiltered result", n
+            );
+
+            // list_jobs (the `jt list` path).
+            let unfiltered_list = min_filter_list(&conn, &base);
+            let filtered_list = min_filter_list(&conn, &with_min(n));
+            prop_assert_eq!(
+                &filtered_list,
+                &min_filter_restrict(&unfiltered_list, n),
+                "list_jobs with min {} is not the restricted unfiltered result", n
+            );
+
+            // Monotone in the threshold: result(n) ⊆ result(m) for every m ≤ n.
+            for m in 1..=n {
+                let pages_m = min_filter_all_pages(&conn, &with_min(m), sort_spec, page_size);
+                prop_assert!(
+                    is_subset(&filtered_pages, &pages_m),
+                    "list_jobs_page result for {} is not a subset of the result for {}", n, m
+                );
+                let list_m = min_filter_list(&conn, &with_min(m));
+                prop_assert!(
+                    is_subset(&filtered_list, &list_m),
+                    "list_jobs result for {} is not a subset of the result for {}", n, m
+                );
+            }
         }
     }
 }

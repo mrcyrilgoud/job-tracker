@@ -6,6 +6,10 @@ import {
   APPLICATION_EASE_SCALE_LABEL,
   ApplicationEaseSelect,
 } from "@/components/ApplicationEaseSelect";
+import {
+  COMPANY_STABILITY_SCALE_LABEL,
+  CompanyStabilitySelect,
+} from "@/components/CompanyStabilitySelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { AlertIcon, ArchiveIcon, ArrowUpRightIcon, CheckIcon, TrashIcon } from "@/components/icons";
 import { api } from "@/lib/api";
@@ -33,6 +37,7 @@ type Initial = {
   isFavorite: boolean;
   appeal: number | null;
   applicationEase: number | null;
+  companyStability: number | null;
   salaryMin: number | null;
   salaryMax: number | null;
 };
@@ -49,6 +54,7 @@ type Draft = {
   isFavorite: boolean;
   appeal: number | null;
   applicationEase: number | null;
+  companyStability: number | null;
   salaryMin: string;
   salaryMax: string;
 };
@@ -68,6 +74,7 @@ function toDraft(initial: Initial): Draft {
     isFavorite: initial.isFavorite,
     appeal: initial.appeal,
     applicationEase: initial.applicationEase,
+    companyStability: initial.companyStability,
     salaryMin: initial.salaryMin === null ? "" : String(initial.salaryMin),
     salaryMax: initial.salaryMax === null ? "" : String(initial.salaryMax),
   };
@@ -84,6 +91,7 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.isFavorite === b.isFavorite &&
     a.appeal === b.appeal &&
     a.applicationEase === b.applicationEase &&
+    a.companyStability === b.companyStability &&
     a.salaryMin === b.salaryMin &&
     a.salaryMax === b.salaryMax
   );
@@ -199,6 +207,7 @@ export function JobDetailClient({
         isFavorite: attempted.isFavorite,
         appeal: attempted.appeal,
         applicationEase: attempted.applicationEase,
+        companyStability: attempted.companyStability,
         salaryMin: attempted.salaryMin.trim() === "" ? null : Number(attempted.salaryMin),
         salaryMax: attempted.salaryMax.trim() === "" ? null : Number(attempted.salaryMax),
       });
@@ -213,6 +222,7 @@ export function JobDetailClient({
         isFavorite: detail.job.isFavorite,
         appeal: detail.job.appeal,
         applicationEase: detail.job.applicationEase,
+        companyStability: detail.job.companyStability,
         salaryMin: detail.job.salaryMin === null ? "" : String(detail.job.salaryMin),
         salaryMax: detail.job.salaryMax === null ? "" : String(detail.job.salaryMax),
       };
@@ -287,6 +297,7 @@ export function JobDetailClient({
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
           applicationEase: detail.job.applicationEase,
+          companyStability: detail.job.companyStability,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         });
@@ -307,6 +318,7 @@ export function JobDetailClient({
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
           applicationEase: detail.job.applicationEase,
+          companyStability: detail.job.companyStability,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         });
@@ -491,6 +503,16 @@ export function JobDetailClient({
               <p className="mt-1.5 text-xs text-[var(--faint)]">
                 How easy this posting is to apply to. 5 is easiest. Leave unscored until you decide.
               </p>
+            </div>
+            <div>
+              <label htmlFor="job-company-stability" className="field-label" title={COMPANY_STABILITY_SCALE_LABEL}>
+                {COMPANY_STABILITY_SCALE_LABEL}
+              </label>
+              <CompanyStabilitySelect
+                id="job-company-stability"
+                value={draft.companyStability}
+                onChange={(companyStability) => update("companyStability", companyStability)}
+              />
             </div>
             <div className="sm:col-span-2">
               <span className="field-label">Salary range (USD per year)</span>

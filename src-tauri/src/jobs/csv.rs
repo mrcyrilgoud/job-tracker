@@ -31,6 +31,7 @@ pub const CSV_HEADERS: &[&str] = &[
     "updated_at",
     "appeal",
     "application_ease",
+    "company_stability",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +59,13 @@ pub struct EditableFields {
     /// must not clear a score that was set in the app. Not stored in the sync sidecar.
     #[serde(skip)]
     pub application_ease_in_file: bool,
+    /// Company stability, 1–5 (5 = most stable). `None` is unscored.
+    #[serde(default)]
+    pub company_stability: Option<i64>,
+    /// True when the CSV file has a `company_stability` column. Absent columns
+    /// must not clear a score that was set in the app. Not stored in the sync sidecar.
+    #[serde(skip)]
+    pub company_stability_in_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,6 +314,8 @@ fn editable_from_db(job: &Job, company_name: &str, latest_note: Option<String>) 
         appeal_in_file: false,
         application_ease: job.application_ease,
         application_ease_in_file: false,
+        company_stability: job.company_stability,
+        company_stability_in_file: false,
     }
 }
 
@@ -372,6 +382,10 @@ fn export_jobs_csv_with_last_import_at(
                 .unwrap_or_default(),
             fields
                 .application_ease
+                .map(|score| score.to_string())
+                .unwrap_or_default(),
+            fields
+                .company_stability
                 .map(|score| score.to_string())
                 .unwrap_or_default(),
         ]);
@@ -497,6 +511,7 @@ const EDITABLE_KEYS: &[&str] = &[
     "latestNote",
     "appeal",
     "applicationEase",
+    "companyStability",
 ];
 
 fn parse_score_cell(raw: &str, label: &str, hint: &str) -> Result<Option<i64>, String> {
@@ -520,6 +535,10 @@ fn parse_application_ease_cell(raw: &str) -> Result<Option<i64>, String> {
     parse_score_cell(raw, "application ease", "5 = easiest to apply")
 }
 
+fn parse_company_stability_cell(raw: &str) -> Result<Option<i64>, String> {
+    parse_score_cell(raw, "company stability", "5 = most stable")
+}
+
 fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
     let raw = match key {
         "url" => Some(fields.url.as_str()),
@@ -532,6 +551,7 @@ fn field_norm(fields: &EditableFields, key: &str) -> Option<String> {
         "latestNote" => fields.latest_note.as_deref(),
         "appeal" => return fields.appeal.map(|score| score.to_string()),
         "applicationEase" => return fields.application_ease.map(|score| score.to_string()),
+        "companyStability" => return fields.company_stability.map(|score| score.to_string()),
         _ => None,
     };
     normalize_nullable(raw)
@@ -652,6 +672,22 @@ pub fn import_jobs_csv(
         } else {
             None
         };
+        let company_stability_in_file = header_map.contains_key("company_stability");
+        let company_stability = if company_stability_in_file {
+            match parse_company_stability_cell(&get("company_stability")) {
+                Ok(value) => value,
+                Err(message) => {
+                    result.summary.skipped += 1;
+                    result.errors.push(serde_json::json!({
+                        "row": row_number,
+                        "message": message
+                    }));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
         let csv_fields = EditableFields {
             url: get("url").trim().to_string(),
             title: get("title").trim().to_string(),
@@ -665,6 +701,8 @@ pub fn import_jobs_csv(
             appeal_in_file,
             application_ease,
             application_ease_in_file,
+            company_stability,
+            company_stability_in_file,
         };
         let id = normalize_nullable(Some(&get("id")));
         let key = id.clone().unwrap_or_else(|| {
@@ -776,13 +814,19 @@ fn process_row(
                     "fields": ["latestNote"]
                 }));
             }
-            if csv_fields.appeal.is_some() || csv_fields.application_ease.is_some() {
+            if csv_fields.appeal.is_some()
+                || csv_fields.application_ease.is_some()
+                || csv_fields.company_stability.is_some()
+            {
                 let mut updates = UpdateJobInput::default();
                 if csv_fields.appeal.is_some() {
                     updates.appeal = Some(csv_fields.appeal);
                 }
                 if csv_fields.application_ease.is_some() {
                     updates.application_ease = Some(csv_fields.application_ease);
+                }
+                if csv_fields.company_stability.is_some() {
+                    updates.company_stability = Some(csv_fields.company_stability);
                 }
                 update_job(conn, &created.0.id, updates)?;
             }
@@ -829,6 +873,9 @@ fn process_row(
             continue;
         }
         if *field == "applicationEase" && !csv_fields.application_ease_in_file {
+            continue;
+        }
+        if *field == "companyStability" && !csv_fields.company_stability_in_file {
             continue;
         }
         let csv_changed = field_norm(csv_fields, field) != field_norm(&baseline, field);
@@ -936,6 +983,9 @@ fn process_row(
             }
             if apply_fields.iter().any(|f| f == "applicationEase") {
                 updates.application_ease = Some(csv_fields.application_ease);
+            }
+            if apply_fields.iter().any(|f| f == "companyStability") {
+                updates.company_stability = Some(csv_fields.company_stability);
             }
             update_job(conn, &existing.id, updates)?;
         }
@@ -1361,7 +1411,7 @@ mod tests {
         let parsed = parse_csv(&fs::read_to_string(&csv_path).unwrap());
         assert_eq!(
             parsed[0].last().map(String::as_str),
-            Some("application_ease")
+            Some("company_stability")
         );
         assert_eq!(parsed[0].len(), parsed[1].len());
         let appeal_idx = parsed[0]
@@ -1594,5 +1644,358 @@ https://example.com/job/new-ease,New role,Globex,wishlist,2
         assert_eq!(new_job.0.application_ease, Some(2));
         assert_eq!(new_job.0.appeal, None);
         assert!(!new_job.0.is_favorite);
+    }
+
+    const SCORES: [Option<i64>; 6] = [None, Some(1), Some(2), Some(3), Some(4), Some(5)];
+
+    fn set_stability(conn: &Connection, id: &str, value: Option<i64>) {
+        update_job(
+            conn,
+            id,
+            UpdateJobInput {
+                company_stability: Some(value),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+    }
+
+    fn header_idx(rows: &[Vec<String>], name: &str) -> usize {
+        rows[0].iter().position(|h| h == name).unwrap()
+    }
+
+    fn cell(value: Option<i64>) -> String {
+        value.map(|v| v.to_string()).unwrap_or_default()
+    }
+
+    // Property 9: CSV merge follows the three-way rule.
+    // **Validates: Requirements 4.7**
+    #[test]
+    fn company_stability_merge_follows_three_way_rule_for_all_values() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("job-tracker.db");
+        let csv_path = dir.path().join("jobs.csv");
+        // One job per (baseline, csv, db) combination, all in one DB and one import.
+        let mut cases = Vec::new();
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            migrate(&conn).unwrap();
+            for (bi, b) in SCORES.iter().enumerate() {
+                for (ci, c) in SCORES.iter().enumerate() {
+                    for (di, d) in SCORES.iter().enumerate() {
+                        let (job, _) = create_job_from_url(
+                            &conn,
+                            &format!("https://example.com/job/merge-{bi}-{ci}-{di}"),
+                            "Merge role",
+                            Some("Acme"),
+                            Some("wishlist"),
+                            None,
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                        set_stability(&conn, &job.id, *b);
+                        cases.push((job.id, *b, *c, *d));
+                    }
+                }
+            }
+            export_jobs_csv(&conn, &csv_path, None).unwrap();
+            for (id, _, _, d) in &cases {
+                set_stability(&conn, id, *d);
+            }
+        }
+
+        let mut rows = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let stability_idx = header_idx(&rows, "company_stability");
+        let by_id: HashMap<&str, Option<i64>> =
+            cases.iter().map(|(id, _, c, _)| (id.as_str(), *c)).collect();
+        for row in rows.iter_mut().skip(1) {
+            row[stability_idx] = cell(by_id[row[0].as_str()]);
+        }
+        fs::write(&csv_path, serialize_csv(&rows)).unwrap();
+
+        let result =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+
+        let conn = Connection::open(&db_path).unwrap();
+        for (id, b, c, d) in &cases {
+            let expected = if d != b { *d } else { *c };
+            let stored = get_job_by_id(&conn, id).unwrap().unwrap().company_stability;
+            assert_eq!(stored, expected, "b={b:?} c={c:?} d={d:?}");
+            let conflict = result
+                .conflicts
+                .iter()
+                .find(|conflict| &conflict.key == id);
+            let expect_conflict = c != b && d != b;
+            assert_eq!(
+                conflict.is_some(),
+                expect_conflict,
+                "conflict for b={b:?} c={c:?} d={d:?}"
+            );
+            if let Some(conflict) = conflict {
+                assert_eq!(conflict.fields, vec!["companyStability".to_string()]);
+            }
+        }
+        assert_eq!(
+            result.summary.conflicts,
+            cases.iter().filter(|(_, b, c, d)| c != b && d != b).count()
+        );
+    }
+
+    #[test]
+    fn company_stability_csv_header_blank_missing_invalid_and_legacy() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("job-tracker.db");
+        let csv_path = dir.path().join("jobs.csv");
+        let (scored_id, other_id) = {
+            let conn = Connection::open(&db_path).unwrap();
+            migrate(&conn).unwrap();
+            let mut ids = Vec::new();
+            for slug in ["stable-a", "stable-b"] {
+                let (job, _) = create_job_from_url(
+                    &conn,
+                    &format!("https://example.com/job/{slug}"),
+                    "Stable role",
+                    Some("Acme"),
+                    Some("wishlist"),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert_eq!(job.company_stability, None);
+                ids.push(job.id);
+            }
+            set_stability(&conn, &ids[0], Some(4));
+            update_job(
+                &conn,
+                &ids[0],
+                UpdateJobInput {
+                    appeal: Some(Some(3)),
+                    application_ease: Some(Some(2)),
+                    ..UpdateJobInput::default()
+                },
+            )
+            .unwrap();
+            crate::jobs::service::set_job_favorite(&conn, &ids[0], true).unwrap();
+            export_jobs_csv(&conn, &csv_path, None).unwrap();
+            (ids[0].clone(), ids[1].clone())
+        };
+        let stability = |id: &str| {
+            let conn = Connection::open(&db_path).unwrap();
+            get_job_by_id(&conn, id).unwrap().unwrap()
+        };
+
+        // Req 4.1: header order and equal cell counts.
+        let rows = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        assert_eq!(rows[0], CSV_HEADERS);
+        assert_eq!(
+            header_idx(&rows, "company_stability"),
+            header_idx(&rows, "application_ease") + 1
+        );
+        assert_eq!(rows.len(), 3);
+        for row in &rows {
+            assert_eq!(row.len(), CSV_HEADERS.len());
+        }
+        let idx = header_idx(&rows, "company_stability");
+        let scored_row = rows.iter().position(|r| r[0] == scored_id).unwrap();
+        assert_eq!(rows[scored_row][idx], "4");
+
+        // Req 4.6: invalid row skipped with message; later rows still import.
+        let mut invalid = rows.clone();
+        invalid[scored_row][idx] = " 3.5 ".to_string();
+        let other_row = invalid.iter().position(|r| r[0] == other_id).unwrap();
+        invalid[other_row][idx] = "2".to_string();
+        if other_row < scored_row {
+            invalid.swap(other_row, scored_row);
+        }
+        fs::write(&csv_path, serialize_csv(&invalid)).unwrap();
+        let rejected =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert_eq!(rejected.summary.skipped, 1);
+        assert_eq!(rejected.errors.len(), 1);
+        assert!(rejected.errors[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid company stability '3.5'"));
+        assert_eq!(stability(&scored_id).company_stability, Some(4));
+        assert_eq!(stability(&other_id).company_stability, Some(2));
+
+        // Req 4.4: blank cell clears and leaves other scores and favorite alone.
+        let mut cleared = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let row = cleared.iter().position(|r| r[0] == scored_id).unwrap();
+        cleared[row][idx] = "  ".to_string();
+        fs::write(&csv_path, serialize_csv(&cleared)).unwrap();
+        let result =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert!(result.errors.is_empty());
+        let job = stability(&scored_id);
+        assert_eq!(job.company_stability, None);
+        assert_eq!(job.appeal, Some(3));
+        assert_eq!(job.application_ease, Some(2));
+        assert!(job.is_favorite);
+
+        // Req 4.5: a file without the column keeps stored scores.
+        let mut stripped = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        for row in &mut stripped {
+            row.remove(idx);
+        }
+        let row = stripped.iter().position(|r| r[0] == other_id).unwrap();
+        let notes_idx = header_idx(&stripped, "notes");
+        stripped[row][notes_idx] = "edited".to_string();
+        fs::write(&csv_path, serialize_csv(&stripped)).unwrap();
+        let kept = import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert!(kept.errors.is_empty());
+        assert_eq!(kept.summary.updated, 1);
+        assert_eq!(stability(&other_id).company_stability, Some(2));
+
+        // Req 1.6, 4.4, 4.5: new rows with a blank cell or no column are unscored.
+        let blank_csv = "\
+url,title,company,status,company_stability
+https://example.com/job/new-blank,New role,Globex,wishlist,
+https://example.com/job/new-set,New role,Globex,wishlist,5
+";
+        let created = import_jobs_csv(
+            &db_path,
+            &csv_path,
+            Some(blank_csv),
+            false,
+            ImportMode::Merge,
+        )
+        .unwrap();
+        assert_eq!(created.summary.created, 2);
+        let no_column_csv = "\
+url,title,company,status
+https://example.com/job/new-no-column,New role,Globex,wishlist
+";
+        let created = import_jobs_csv(
+            &db_path,
+            &csv_path,
+            Some(no_column_csv),
+            false,
+            ImportMode::Merge,
+        )
+        .unwrap();
+        assert_eq!(created.summary.created, 1);
+        let conn = Connection::open(&db_path).unwrap();
+        let jobs = load_job_rows(&conn).unwrap();
+        let find = |slug: &str| {
+            jobs.iter()
+                .find(|(job, _)| job.url.ends_with(slug))
+                .unwrap()
+                .0
+                .company_stability
+        };
+        assert_eq!(find("new-blank"), None);
+        assert_eq!(find("new-set"), Some(5));
+        assert_eq!(find("new-no-column"), None);
+        drop(conn);
+
+        // Req 4.8: legacy sidecar JSON without companyStability loads.
+        let legacy_fields = r#"{"url":"https://example.com/job/x","title":"X","company":"Acme","status":"wishlist","appliedAt":null,"notes":null,"location":null,"latestNote":null,"appeal":3,"applicationEase":2}"#;
+        let legacy: EditableFields = serde_json::from_str(legacy_fields).unwrap();
+        assert_eq!(legacy.company_stability, None);
+        assert!(!legacy.company_stability_in_file);
+
+        let sync_path = sync_path_for(&csv_path);
+        let mut sidecar: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&sync_path).unwrap()).unwrap();
+        for row in sidecar["rows"].as_object_mut().unwrap().values_mut() {
+            row["fields"]
+                .as_object_mut()
+                .unwrap()
+                .remove("companyStability");
+        }
+        fs::write(&sync_path, sidecar.to_string()).unwrap();
+        let loaded = read_sync_state(&csv_path);
+        assert_eq!(loaded.rows.len(), 5);
+        assert!(loaded
+            .rows
+            .values()
+            .all(|row| row.fields.company_stability.is_none()));
+
+        let mut legacy_csv = parse_csv(&fs::read_to_string(&csv_path).unwrap());
+        let idx = header_idx(&legacy_csv, "company_stability");
+        for row in &mut legacy_csv {
+            row.remove(idx);
+        }
+        fs::write(&csv_path, serialize_csv(&legacy_csv)).unwrap();
+        let legacy_import =
+            import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+        assert!(legacy_import.errors.is_empty());
+        assert_eq!(legacy_import.summary.conflicts, 0);
+        assert_eq!(stability(&other_id).company_stability, Some(2));
+        assert_eq!(stability(&scored_id).company_stability, None);
+    }
+
+    mod round_trip_props {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn score() -> impl Strategy<Value = Option<i64>> {
+            prop::option::of(1i64..=5)
+        }
+
+        // Feature: company-stability-score, Property 8: CSV export/import round trip
+        // **Validates: Requirements 4.1, 4.2, 4.3, 4.9, 4.10**
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(100))]
+            #[test]
+            fn csv_export_import_round_trip_preserves_scores_and_favorite(
+                jobs in prop::collection::vec((score(), score(), score(), any::<bool>()), 1..=3)
+            ) {
+                let dir = tempdir().unwrap();
+                let db_path = dir.path().join("job-tracker.db");
+                let csv_path = dir.path().join("jobs.csv");
+                let mut expected = Vec::new();
+                {
+                    let conn = Connection::open(&db_path).unwrap();
+                    migrate(&conn).unwrap();
+                    for (i, (stability, appeal, ease, favorite)) in jobs.iter().enumerate() {
+                        let (job, _) = create_job_from_url(
+                            &conn,
+                            &format!("https://example.com/job/rt-{i}"),
+                            &format!("Role {i}"),
+                            Some("Acme"),
+                            Some("wishlist"),
+                            None,
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                        update_job(
+                            &conn,
+                            &job.id,
+                            UpdateJobInput {
+                                company_stability: Some(*stability),
+                                appeal: Some(*appeal),
+                                application_ease: Some(*ease),
+                                ..UpdateJobInput::default()
+                            },
+                        )
+                        .unwrap();
+                        crate::jobs::service::set_job_favorite(&conn, &job.id, *favorite).unwrap();
+                        expected.push((job.id, *stability, *appeal, *ease, *favorite));
+                    }
+                    export_jobs_csv(&conn, &csv_path, None).unwrap();
+                }
+
+                let result =
+                    import_jobs_csv(&db_path, &csv_path, None, false, ImportMode::Merge).unwrap();
+                prop_assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+                prop_assert!(result.conflicts.is_empty());
+                prop_assert_eq!(result.summary.conflicts, 0);
+
+                let conn = Connection::open(&db_path).unwrap();
+                for (id, stability, appeal, ease, favorite) in expected {
+                    let job = get_job_by_id(&conn, &id).unwrap().unwrap();
+                    prop_assert_eq!(job.company_stability, stability);
+                    prop_assert_eq!(job.appeal, appeal);
+                    prop_assert_eq!(job.application_ease, ease);
+                    prop_assert_eq!(job.is_favorite, favorite);
+                }
+            }
+        }
     }
 }

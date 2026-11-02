@@ -181,6 +181,7 @@ export function JobDetailPage() {
           isFavorite: detail.job.isFavorite,
           appeal: detail.job.appeal,
           applicationEase: detail.job.applicationEase,
+          companyStability: detail.job.companyStability,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         }}

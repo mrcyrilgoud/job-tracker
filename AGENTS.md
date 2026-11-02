@@ -54,6 +54,7 @@ Always pass **`--json`** for automation. Use **`-q` / `--quiet`** when you only 
 | Add from URL | `jt add "<url>" --status wishlist --notes "…" --json` |
 | Status / applied date | `jt update <id> --status applied --applied-at today --json` |
 | Application ease (1–5, 5 = easiest; null if unset) | `jt update <id> --application-ease 4 --json` |
+| Company stability (1–5, 5 = most stable; null if unset) | `jt update <id> --company-stability 4 --json` |
 | Permanently delete | `jt delete <id> [<id>...] --yes --json` |
 | Append note | `jt note <id> "Recruiter screen Friday" --json` |
 | Watch triage | `jt watches list --new-only --json` |
@@ -64,6 +65,8 @@ Always pass **`--json`** for automation. Use **`-q` / `--quiet`** when you only 
 Do **not** pass `-f` / `--favorite` unless the human explicitly asked to favorite. Prefer leaving favorites for manual UI use.
 
 Application ease is a per-job score for how easy that posting is to apply to: `jt update <id> --application-ease 1..5 --json`. `5` is easiest. Omit the flag to leave the stored score unchanged. `--clear-application-ease` sets it back to null. `jt get` and `jt list --json` return it as `applicationEase` (`null` when unscored). It does not favorite the job.
+
+Company stability is a per-job score for how stable the hiring company looks: `jt update <id> --company-stability 1..5 --json`. `1` is least stable and `5` is most stable; any other value is rejected. Omit the flag to leave the stored score unchanged. `--clear-company-stability` sets it back to null. `jt list --min-company-stability <1..5> --json` returns only jobs scored at or above that value; unscored jobs are excluded while the filter is set. `jt get` and `jt list --json` return it as `companyStability` (`null` when unscored). Setting or clearing it does not favorite the job.
 
 ### What not to build against
 

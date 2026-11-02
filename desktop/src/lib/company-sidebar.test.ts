@@ -51,6 +51,8 @@ function row(
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
+    stabilityAverage: null,
+    stabilityScoredJobCount: 0,
     ...rest,
   };
 }
@@ -155,7 +157,7 @@ function oracle(r: CompanyRow, f: CompanyFilter): boolean {
 const SIX_FILTERS: CompanyFilter[] = COMPANY_FILTERS.map((f) => f.value);
 const arbFilter6 = fc.constantFrom(...SIX_FILTERS);
 const arbFilterSet6 = fc.subarray(SIX_FILTERS).map((fs) => new Set<CompanyFilter>(fs));
-/** Any valid Company_View_State over all 13 Sort_Options and six Company_Filters. */
+/** Any valid Company_View_State over all 14 Sort_Options and six Company_Filters. */
 const arbViewState6 = fc.record({ sort: arbSortOption, filters: arbFilterSet6 });
 
 /**
@@ -180,7 +182,7 @@ const arbSearch = fc.oneof(
 );
 
 describe("company sidebar primitives", () => {
-  it("exposes 13 sort options and six filters in spec order (Req 2.1, 7.1)", () => {
+  it("exposes 14 sort options and six filters in spec order (Req 2.1, 7.1)", () => {
     expect(COMPANY_SORT_OPTIONS.map((o) => [o.value, o.label])).toEqual([
       ["nameAsc", "Name A–Z"],
       ["nameDesc", "Name Z–A"],
@@ -195,6 +197,7 @@ describe("company sidebar primitives", () => {
       ["recentActivity", "Recently updated job"],
       ["recentlyApplied", "Recently applied"],
       ["easiestWishlist", "Easiest wishlist to apply"],
+      ["mostStable", "Most stable company"],
     ]);
     // Group changes between adjacent entries mark the two separator positions (Req 2.2).
     const breaks = COMPANY_SORT_OPTIONS.flatMap((o, i, all) =>
@@ -536,6 +539,20 @@ describe("company sidebar module examples", () => {
     expect(first.sort).toBe("nameAsc");
     expect(first.filters.size).toBe(0);
     expect(parseCompanyViewState(null).filters).not.toBe(first.filters);
+  });
+
+  it("pre-stability saved view states restore unchanged and never select mostStable (Req 9.10)", () => {
+    const legacy: Array<[string, string, string[]]> = [
+      [JSON.stringify({ version: 1, sort: "easiestWishlist", filters: ["hasWishlistJobs"] }), "easiestWishlist", ["hasWishlistJobs"]],
+      [JSON.stringify({ version: 1, sort: "openPositionsDesc", filters: ["watched", "needsAttention"] }), "openPositionsDesc", ["watched", "needsAttention"]],
+      [JSON.stringify({ version: 1, sort: "nameAsc", filters: [] }), "nameAsc", []],
+    ];
+    for (const [raw, sort, filters] of legacy) {
+      const view = parseCompanyViewState(raw);
+      expect(view.sort).toBe(sort);
+      expect(view.sort).not.toBe("mostStable");
+      expect([...view.filters].sort()).toEqual([...filters].sort());
+    }
   });
 
   it("loadCompanyViewState falls back to defaults for missing or throwing storage", () => {

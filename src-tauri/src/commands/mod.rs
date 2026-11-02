@@ -44,7 +44,10 @@ use crate::jobs::service::{
     unarchive_jobs as unarchive_jobs_service, update_job, validate_date_range, JobFilters,
     LocationSettings, UpdateJobInput, WatchRoleFilters,
 };
-use crate::models::{Job, JobListPageCursor, JobListSort, JobPageCursor, JobSort};
+use crate::models::{
+    checked_company_stability, Job, JobListPageCursor, JobListSort, JobPageCursor, JobSort,
+    COMPANY_STABILITY_RANGE_MESSAGE,
+};
 use crate::runner::try_lock_runner;
 use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
 use crate::runs::legacy::execute_legacy;
@@ -88,6 +91,9 @@ pub struct ListJobsArgs {
     pub new_from_watch: Option<bool>,
     pub is_favorite: Option<bool>,
     pub is_archived: Option<bool>,
+    /// Minimum Company_Stability (1–5). Kept as raw JSON so non-integer input
+    /// is rejected with the Stability_Range_Message instead of a serde error.
+    pub min_company_stability: Option<serde_json::Value>,
     /// Optional row cap forwarded to SQLite LIMIT — used to cap watch-preview fetches.
     pub limit: Option<usize>,
 }
@@ -106,6 +112,19 @@ impl ListJobsArgs {
     ///   are precomputed and stored only when `date_field` is a supported
     ///   domain member and at least one bound is present.
     pub fn into_filters(self) -> AppResult<JobFilters> {
+        // Req 7.7: `null` is absent; anything other than an integer 1–5 is
+        // rejected before any query runs.
+        let min_company_stability = match self.min_company_stability {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_i64()
+                    .ok_or(COMPANY_STABILITY_RANGE_MESSAGE)
+                    .and_then(checked_company_stability)
+                    .map_err(AppError::from)?,
+            ),
+        };
+
         let statuses = match self.statuses {
             Some(requested) if !requested.is_empty() => {
                 let (valid, _invalid) = partition_statuses(&requested);
@@ -151,6 +170,7 @@ impl ListJobsArgs {
             new_from_watch: self.new_from_watch,
             is_favorite: self.is_favorite,
             is_archived: self.is_archived,
+            min_company_stability,
             limit: self.limit,
         })
     }
@@ -734,6 +754,50 @@ mod tests {
         .unwrap();
         assert_eq!(filters.date_from_boundary.as_deref(), Some("2026-05-01"));
         assert_eq!(filters.date_to_boundary.as_deref(), Some("2026-05-10~"));
+    }
+
+    #[test]
+    fn into_filters_validates_min_company_stability() {
+        use serde_json::json;
+        // Req 7.7: absent or null means no filter; integers 1–5 pass through.
+        let with_min = |value: Option<serde_json::Value>| {
+            ListJobsArgs {
+                min_company_stability: value,
+                ..Default::default()
+            }
+            .into_filters()
+        };
+        assert_eq!(with_min(None).unwrap().min_company_stability, None);
+        assert_eq!(
+            with_min(Some(serde_json::Value::Null))
+                .unwrap()
+                .min_company_stability,
+            None
+        );
+        for n in 1..=5 {
+            assert_eq!(
+                with_min(Some(json!(n))).unwrap().min_company_stability,
+                Some(n)
+            );
+        }
+        for bad in [
+            json!(0),
+            json!(6),
+            json!(-1),
+            json!(3.5),
+            json!(3.0),
+            json!("3"),
+            json!(true),
+            json!([3]),
+            json!({ "n": 3 }),
+        ] {
+            let error = expect_filters_err(with_min(Some(bad.clone())));
+            assert_eq!(
+                error.to_string(),
+                COMPANY_STABILITY_RANGE_MESSAGE,
+                "value {bad}"
+            );
+        }
     }
 
     #[test]

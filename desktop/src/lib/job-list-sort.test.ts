@@ -58,3 +58,20 @@ describe("Applied sort URL state", () => {
       .toEqual({ field: "appliedAt", direction: "ascending" });
   });
 });
+
+describe("Company stability sort URL state", () => {
+  // Validates: Requirements 6.2, 6.7, 6.8
+  it.each([
+    [true, "sortBy=companyStability&sortOrder=ascending", "ascending"],
+    [true, "sortBy=companyStability&sortOrder=descending", "descending"],
+    [true, "sortBy=companyStability", "descending"],
+    [true, "sortBy=companyStability&sortOrder=sideways", "descending"],
+    [false, "sortBy=companyStability&sortOrder=ascending", "ascending"],
+    [false, "sortBy=companyStability&sortOrder=descending", "descending"],
+    [false, "sortBy=companyStability", "descending"],
+    [false, "sortBy=companyStability&sortOrder=sideways", "descending"],
+  ] as const)("applied tab %s: %s sorts %s", (appliedTab, query, direction) => {
+    expect(jobListSortFromUrl(new URLSearchParams(query), appliedTab, null))
+      .toEqual({ field: "companyStability", direction });
+  });
+});

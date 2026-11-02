@@ -71,6 +71,8 @@ export type JobFilters = {
   newFromWatch?: boolean;
   isFavorite?: boolean;
   isArchived?: boolean;
+  /** 1–5. Keeps jobs whose companyStability is >= this value; unscored jobs are excluded. */
+  minCompanyStability?: number;
   limit?: number;
 };
 
@@ -130,6 +132,8 @@ export type UpdateJobInput = {
   appeal?: number | null;
   /** 1–5, where 5 is easiest to apply. Null clears the score. */
   applicationEase?: number | null;
+  /** 1–5, where 5 is most stable. Null clears the score. */
+  companyStability?: number | null;
   salaryMin?: number | null;
   salaryMax?: number | null;
 };

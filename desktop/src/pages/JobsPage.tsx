@@ -7,6 +7,10 @@ import {
   APPLICATION_EASE_SCALE_LABEL,
   ApplicationEaseSelect,
 } from "@/components/ApplicationEaseSelect";
+import {
+  COMPANY_STABILITY_SCALE_LABEL,
+  CompanyStabilitySelect,
+} from "@/components/CompanyStabilitySelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
   ArchiveIcon,
@@ -31,16 +35,19 @@ import {
   jobListSortFromUrl,
 } from "@/lib/job-list-sort";
 import {
-  countActiveFilterDimensions,
+  countActiveJobFilters,
+  encodeMinStabilityToUrl,
   encodeStatusesToUrl,
   filterDraftFromUrl,
   parseDateFilterFromUrl,
+  parseMinStabilityFromUrl,
   parseRemoteModeFromUrl,
   parseSalaryBound,
   parseStatusesFromUrl,
   validateDateRange,
   validateSalaryRange,
   type DateField,
+  type MinStabilityDraft,
 } from "@/lib/job-filters";
 import {
   jobStatuses,
@@ -105,6 +112,7 @@ export function JobsPage() {
   const activeDateFilter = useMemo(() => parseDateFilterFromUrl(searchParams), [searchParams]);
   const activeRemoteMode = useMemo(() => parseRemoteModeFromUrl(searchParams), [searchParams]);
   const activeLocation = (locationParam ?? "").trim();
+  const activeMinStability = parseMinStabilityFromUrl(searchParams);
   // A URL param was present but the parser dropped it as malformed / out-of-domain.
   const droppedFilterNotice = useMemo(() => {
     const statusesDropped = Boolean(statusesParam) && activeStatuses.length === 0;
@@ -138,6 +146,7 @@ export function JobsPage() {
 
   const [jobs, setJobs] = useState<JobListSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<JobListPageCursor | null>(null);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [counts, setCounts] = useState<Record<string, number>>({ all: 0, favorites: 0 });
   const [activity, setActivity] = useState<WeeklyActivity | null>(null);
@@ -207,6 +216,7 @@ export function JobsPage() {
         remoteMode?: RemoteMode;
         isFavorite?: boolean;
         isArchived?: boolean;
+        minCompanyStability?: number;
       };
     } | null;
   }>({ running: false, activeKey: null, activeSequence: null, pending: null });
@@ -271,6 +281,7 @@ export function JobsPage() {
       remoteMode: activeRemoteMode,
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
+      minCompanyStability: activeMinStability,
       sort,
       sortSpec,
   });
@@ -282,6 +293,7 @@ export function JobsPage() {
   });
   const requestKeyFor = (searchText: string) => JSON.stringify({
     filtersKey,
+    minCompanyStability: activeMinStability,
     search: searchText,
     sort,
     sortSpec,
@@ -340,6 +352,7 @@ export function JobsPage() {
           : !status && activeStatuses.length === 0 && !isFavoriteFilter
             ? false
             : undefined,
+        minCompanyStability: activeMinStability,
       },
     };
     if (!quiet && !queue.running) setLoading(true);
@@ -377,6 +390,7 @@ export function JobsPage() {
                 return [...previous, ...mergedJobs.filter((item) => !seen.has(item.job.id))];
               });
               setNextCursor(result.nextCursor);
+              if (!request.cursor) setTotalCount(result.totalCount);
               setLoadedRequestKey(request.key);
             }
           } catch (err) {
@@ -397,7 +411,7 @@ export function JobsPage() {
       }
     };
     void drain();
-  }, [status, activeStatuses, companyId, postingState, salaryMin, salaryMax, activeDateFilter, activeLocation, activeRemoteMode, isFavoriteFilter, isArchivedFilter, sort, sortSpec, filtersKey, reportRefreshFailed]);
+  }, [status, activeStatuses, companyId, postingState, salaryMin, salaryMax, activeDateFilter, activeLocation, activeRemoteMode, isFavoriteFilter, isArchivedFilter, activeMinStability, sort, sortSpec, filtersKey, reportRefreshFailed]);
 
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore || loading) return;
@@ -562,6 +576,51 @@ export function JobsPage() {
     }
   }
 
+  async function handleSetCompanyStability(jobId: string, companyStability: number | null) {
+    const previous = jobs.find((item) => item.job.id === jobId)?.job.companyStability ?? null;
+    setJobs((prev) =>
+      prev.map((item) =>
+        item.job.id === jobId ? { ...item, job: { ...item.job, companyStability } } : item,
+      ),
+    );
+    try {
+      const res = await api.updateJob(jobId, { companyStability });
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId
+            ? {
+                ...item,
+                job: {
+                  ...item.job,
+                  companyStability: res.detail.job.companyStability,
+                  updatedAt: res.detail.job.updatedAt,
+                },
+              }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update company stability");
+      setJobs((prev) =>
+        prev.map((item) =>
+          item.job.id === jobId
+            ? { ...item, job: { ...item.job, companyStability: previous } }
+            : item,
+        ),
+      );
+      return;
+    }
+    // Refresh only the sidebar's company rows (server computes the averages).
+    // Do not reload the jobs list, so the row keeps its position. A refetch
+    // failure keeps the existing rows; the score itself was saved.
+    try {
+      const companies = await api.listCompanies();
+      setCompanyRows(companies.companies);
+    } catch {
+      // ignored
+    }
+  }
+
   async function handleUpdateStatus(jobId: string, nextStatus: JobStatus) {
     const currentItem = jobs.find((item) => item.job.id === jobId);
     const currentMutation = statusMutations[jobId];
@@ -670,6 +729,7 @@ export function JobsPage() {
       search: appliedSearch || undefined,
       isFavorite: isFavoriteFilter ? true : undefined,
       isArchived: true,
+      minCompanyStability: activeMinStability,
     };
     void api.listJobIds(filters).then(({ ids }) => {
       if (requestSequence !== selectAllSequenceRef.current) return;
@@ -831,7 +891,8 @@ export function JobsPage() {
     activeStatuses.length > 0
     || (activeDateFilter.field && (activeDateFilter.from || activeDateFilter.to))
     || activeLocation
-    || activeRemoteMode !== "any",
+    || activeRemoteMode !== "any"
+    || activeMinStability !== undefined,
   );
   const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter || hasNewDimensionFilters);
   const hasDraftFilters = Boolean(
@@ -843,22 +904,24 @@ export function JobsPage() {
     || (filterDraft.dateField && (filterDraft.dateFrom.trim() || filterDraft.dateTo.trim()))
     || filterDraft.location.trim()
     || filterDraft.remoteMode !== "any"
+    || filterDraft.minStability !== ""
     || status
     || companyId
     || isFavoriteFilter
     || isArchivedFilter,
   );
-  const activeFilterCount =
-    Number(salaryMin !== undefined || salaryMax !== undefined)
-    + Number(Boolean(postingState))
-    + countActiveFilterDimensions({
-        statuses: activeStatuses,
-        dateField: activeDateFilter.field ?? "",
-        dateFrom: activeDateFilter.from,
-        dateTo: activeDateFilter.to,
-        location: activeLocation,
-        remoteMode: activeRemoteMode,
-      });
+  const activeFilterCount = countActiveJobFilters({
+    salaryMin,
+    salaryMax,
+    postingState,
+    statuses: activeStatuses,
+    dateField: activeDateFilter.field ?? "",
+    dateFrom: activeDateFilter.from,
+    dateTo: activeDateFilter.to,
+    location: activeLocation,
+    remoteMode: activeRemoteMode,
+    minStability: activeMinStability,
+  });
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -899,6 +962,7 @@ export function JobsPage() {
     const nextLocation = filterDraft.location.trim();
     if (nextLocation) next.set("location", nextLocation);
     if (filterDraft.remoteMode !== "any") next.set("remote", filterDraft.remoteMode);
+    encodeMinStabilityToUrl(next, filterDraft.minStability === "" ? undefined : Number(filterDraft.minStability));
     if (viewMode) next.set("view", viewMode);
     writeSortToParams(next, sortSpec, isAppliedTab);
     setSearchParams(next);
@@ -1004,6 +1068,7 @@ export function JobsPage() {
                   {isAppliedTab ? <option value="appliedAt">Date applied</option> : null}
                   <option value="postingDate">Date added</option>
                   <option value="appeal">Appeal</option>
+                  <option value="companyStability">Company stability</option>
                   <option value="companyName">Company name</option>
                 </select>
               </label>
@@ -1361,6 +1426,26 @@ export function JobsPage() {
                       <option value="remoteOnly">Remote only</option>
                       <option value="onsiteOnly">On-site only</option>
                     </select>
+                    <label htmlFor="jobs-min-stability" className="field-label mt-4">Minimum company stability</label>
+                    <select
+                      id="jobs-min-stability"
+                      name="minStability"
+                      value={filterDraft.minStability}
+                      onChange={(event) =>
+                        setFilterDraft((current) => ({
+                          ...current,
+                          minStability: event.target.value as MinStabilityDraft,
+                        }))
+                      }
+                      className="field text-sm"
+                    >
+                      <option value="">Any</option>
+                      <option value="1">1+</option>
+                      <option value="2">2+</option>
+                      <option value="3">3+</option>
+                      <option value="4">4+</option>
+                      <option value="5">5</option>
+                    </select>
                     <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-3">
                       {isFiltered || hasDraftFilters ? (
                         <Link
@@ -1419,6 +1504,11 @@ export function JobsPage() {
           )}
 
           {!isFiltered && activity ? <ActivityLine activity={activity} /> : null}
+          {isFiltered && totalCount !== null ? (
+            <p className="text-sm text-[var(--muted)]" aria-live="polite">
+              {totalCount} matching {totalCount === 1 ? "job" : "jobs"}
+            </p>
+          ) : null}
 
           {isArchivedFilter && jobs.length > 0 ? (
             <div className={`card archived-selection-toolbar flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 ${
@@ -1676,6 +1766,30 @@ export function JobsPage() {
                               compact
                               onChange={(applicationEase) =>
                                 void handleSetApplicationEase(job.id, applicationEase)
+                              }
+                            />
+                          </div>
+                          <div
+                            className="flex items-center gap-1.5"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                          >
+                            <label
+                              htmlFor={`stability-${job.id}`}
+                              className="text-xs text-[var(--faint)]"
+                              title={COMPANY_STABILITY_SCALE_LABEL}
+                            >
+                              Stability
+                            </label>
+                            <CompanyStabilitySelect
+                              id={`stability-${job.id}`}
+                              value={job.companyStability}
+                              compact
+                              onChange={(companyStability) =>
+                                void handleSetCompanyStability(job.id, companyStability)
                               }
                             />
                           </div>

@@ -27,6 +27,7 @@ function mockJob(id: string, isFavorite: boolean, status: JobListItem["job"]["st
       isFavorite,
       appeal: null,
       applicationEase: null,
+      companyStability: null,
       salaryMin: null,
       salaryMax: null,
       createdAt: "2026-08-01T00:00:00.000Z",

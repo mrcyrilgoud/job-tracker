@@ -38,6 +38,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       updated_at TEXT NOT NULL,
       appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5)),
       application_ease INTEGER CHECK (application_ease IS NULL OR (application_ease >= 1 AND application_ease <= 5)),
+      company_stability INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5)),
       salary_min INTEGER,
       salary_max INTEGER,
       CHECK (salary_min IS NULL OR salary_min >= 0),
@@ -202,6 +203,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     if !has_application_ease {
         conn.execute(
             "ALTER TABLE jobs ADD COLUMN application_ease INTEGER CHECK (application_ease IS NULL OR (application_ease >= 1 AND application_ease <= 5))",
+            [],
+        )?;
+    }
+    // Company stability is one nullable 1–5 score (5 = most stable). Existing
+    // rows stay unscored (NULL); there is no default and no backfill. Unlike
+    // the appeal/ease CHECKs, this one also requires an INTEGER storage type,
+    // so REAL values such as 2.5 (or text like '2.5') are rejected. The single
+    // ALTER is atomic: on failure the column stays absent and the next run
+    // retries. Idempotent for older DBs.
+    let has_company_stability = table_columns.iter().any(|name| name == "company_stability");
+    if !has_company_stability {
+        conn.execute(
+            "ALTER TABLE jobs ADD COLUMN company_stability INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5))",
             [],
         )?;
     }
@@ -595,6 +609,161 @@ mod tests {
         );
         assert_eq!(cols.iter().filter(|name| *name == "salary_min").count(), 1);
         assert_eq!(cols.iter().filter(|name| *name == "salary_max").count(), 1);
+    }
+
+    const LEGACY_STABILITY_SCHEMA: &str = r#"
+        CREATE TABLE companies (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          careers_url TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE jobs (
+          id TEXT PRIMARY KEY NOT NULL,
+          company_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL,
+          canonical_url TEXT NOT NULL,
+          source_external_id TEXT,
+          status TEXT NOT NULL DEFAULT 'wishlist',
+          posting_state TEXT NOT NULL DEFAULT 'unknown',
+          source TEXT NOT NULL DEFAULT 'manual',
+          notes TEXT,
+          is_new_from_watch INTEGER NOT NULL DEFAULT 0,
+          missing_from_sync_count INTEGER NOT NULL DEFAULT 0,
+          is_favorite BOOLEAN NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          appeal INTEGER CHECK (appeal IS NULL OR (appeal >= 1 AND appeal <= 5)),
+          application_ease INTEGER CHECK (application_ease IS NULL OR (application_ease >= 1 AND application_ease <= 5))
+        );
+        INSERT INTO companies (id, name, created_at, updated_at)
+          VALUES ('c1', 'Acme', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+        INSERT INTO jobs (id, company_id, title, url, canonical_url, status, notes,
+                          is_favorite, created_at, updated_at, appeal, application_ease)
+        VALUES
+          ('j1', 'c1', 'Engineer', 'https://e.com/1', 'https://e.com/1', 'wishlist', NULL, 0, 't1', 't1', NULL, NULL),
+          ('j2', 'c1', 'Designer', 'https://e.com/2', 'https://e.com/2', 'applied', 'hi', 1, 't2', 't3', 4, 2),
+          ('j3', 'c1', 'PM', 'https://e.com/3', 'https://e.com/3', 'closed', 'n', 0, 't4', 't5', 5, NULL);
+    "#;
+
+    /// Legacy `jobs` columns, read in a stable order for before/after snapshots.
+    const LEGACY_JOB_COLUMNS: &str = "id, company_id, title, url, canonical_url, \
+        source_external_id, status, posting_state, source, notes, is_new_from_watch, \
+        missing_from_sync_count, is_favorite, created_at, updated_at, appeal, application_ease";
+
+    fn legacy_jobs_snapshot(conn: &Connection) -> Vec<Vec<rusqlite::types::Value>> {
+        let width = LEGACY_JOB_COLUMNS.split(',').count();
+        conn.prepare(&format!("SELECT {LEGACY_JOB_COLUMNS} FROM jobs ORDER BY id"))
+            .unwrap()
+            .query_map([], |r| (0..width).map(|i| r.get(i)).collect())
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn stability_values(conn: &Connection) -> Vec<(String, Option<i64>)> {
+        conn.prepare("SELECT id, company_stability FROM jobs ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn stability_column_count(conn: &Connection) -> usize {
+        conn.prepare("PRAGMA table_info(jobs)")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .filter(|name| name.as_deref() == Ok("company_stability"))
+            .count()
+    }
+
+    #[test]
+    fn fresh_database_has_company_stability_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(stability_column_count(&conn), 1);
+    }
+
+    #[test]
+    fn legacy_database_gains_null_company_stability_and_rerun_is_noop() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(LEGACY_STABILITY_SCHEMA).unwrap();
+        let before = legacy_jobs_snapshot(&conn);
+
+        migrate(&conn).unwrap();
+        assert_eq!(stability_column_count(&conn), 1);
+        assert_eq!(legacy_jobs_snapshot(&conn), before);
+        assert!(stability_values(&conn).iter().all(|(_, v)| v.is_none()));
+
+        // Values written between runs survive a second migrate unchanged.
+        conn.execute("UPDATE jobs SET company_stability = 1 WHERE id = 'j1'", [])
+            .unwrap();
+        conn.execute("UPDATE jobs SET company_stability = 5 WHERE id = 'j2'", [])
+            .unwrap();
+        let stored = stability_values(&conn);
+        migrate(&conn).unwrap();
+        assert_eq!(stability_column_count(&conn), 1);
+        assert_eq!(stability_values(&conn), stored);
+        assert_eq!(legacy_jobs_snapshot(&conn), before);
+    }
+
+    #[test]
+    fn invalid_company_stability_writes_are_rejected_and_row_unchanged() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(LEGACY_STABILITY_SCHEMA).unwrap();
+        migrate(&conn).unwrap();
+        conn.execute("UPDATE jobs SET company_stability = 3 WHERE id = 'j2'", [])
+            .unwrap();
+        let before = (legacy_jobs_snapshot(&conn), stability_values(&conn));
+
+        for bad in ["0", "6", "-1", "2.5", "'2.5'", "'high'"] {
+            let result = conn.execute(
+                &format!("UPDATE jobs SET company_stability = {bad}, notes = 'changed' WHERE id = 'j2'"),
+                [],
+            );
+            assert!(result.is_err(), "{bad} should be rejected");
+            assert_eq!(
+                (legacy_jobs_snapshot(&conn), stability_values(&conn)),
+                before,
+                "{bad} changed the row"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_company_stability_alter_leaves_column_absent() {
+        let path = std::env::temp_dir().join(format!(
+            "jt-migrate-readonly-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let before = {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(LEGACY_STABILITY_SCHEMA).unwrap();
+            legacy_jobs_snapshot(&conn)
+        };
+
+        // A read-only connection makes the schema change fail.
+        let ro = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+        assert!(migrate(&ro).is_err());
+        drop(ro);
+
+        let conn = Connection::open(&path).unwrap();
+        assert_eq!(stability_column_count(&conn), 0);
+        assert_eq!(legacy_jobs_snapshot(&conn), before);
+        // The next writable run retries and adds the column.
+        migrate(&conn).unwrap();
+        assert_eq!(stability_column_count(&conn), 1);
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
     }
 
     fn schema_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {
