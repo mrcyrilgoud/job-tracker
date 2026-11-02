@@ -29,6 +29,8 @@ function row(id: string, name: string, overrides: Partial<Omit<CompanyRow, "comp
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
+    stabilityAverage: null,
+    stabilityScoredJobCount: 0,
     ...overrides,
   };
 }
@@ -633,6 +635,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       "Recently updated job",
       "Recently applied",
       "Easiest wishlist to apply",
+      "Most stable company",
     ];
 
     /** Visible text and sr-only label of each link's trailing annotation, or null when absent. */
@@ -672,7 +675,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       delete (Element.prototype as Partial<Element>).scrollIntoView;
     });
 
-    it("renders 13 sort options in order with two non-focusable separators at the group boundaries (Req 2.1, 2.2)", () => {
+    it("renders 14 sort options in order with two non-focusable separators at the group boundaries (Req 2.1, 2.2)", () => {
       render();
       click(sortButton());
       expect(sortItems().map((el) => el.textContent)).toEqual(LABELS);
@@ -694,7 +697,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       click(sortButton());
       expect(document.activeElement).toBe(sortItem("Name A–Z"));
       arrow("ArrowUp");
-      expect(document.activeElement).toBe(sortItem("Easiest wishlist to apply"));
+      expect(document.activeElement).toBe(sortItem("Most stable company"));
       arrow("ArrowDown");
       expect(document.activeElement).toBe(sortItem("Name A–Z"));
       // A full cycle visits every option once and never lands on a separator.

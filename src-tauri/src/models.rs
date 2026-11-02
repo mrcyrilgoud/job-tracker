@@ -40,6 +40,9 @@ pub struct Job {
     /// How easy this posting is to apply to, from 1 (hardest) to 5 (easiest).
     /// `None` means the job has not been scored.
     pub application_ease: Option<i64>,
+    /// How stable the company looks, from 1 (least stable) to 5 (most stable).
+    /// `None` means the job has not been scored.
+    pub company_stability: Option<i64>,
     /// Optional annual USD salary bounds. A missing bound is open-ended.
     pub salary_min: Option<i64>,
     pub salary_max: Option<i64>,
@@ -130,6 +133,9 @@ pub struct JobSummary {
     /// How easy this posting is to apply to, from 1 (hardest) to 5 (easiest).
     /// `None` means the job has not been scored.
     pub application_ease: Option<i64>,
+    /// How stable the company looks, from 1 (least stable) to 5 (most stable).
+    /// `None` means the job has not been scored.
+    pub company_stability: Option<i64>,
     pub location: Option<String>,
 }
 
@@ -164,6 +170,7 @@ pub enum JobListSortField {
     PostingDate,
     Appeal,
     CompanyName,
+    CompanyStability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +219,8 @@ pub struct JobListPageCursor {
 pub struct JobListPage {
     pub jobs: Vec<JobListSummary>,
     pub next_cursor: Option<JobListPageCursor>,
+    /// Number of jobs matching the filters, ignoring the page cursor.
+    pub total_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,9 +300,23 @@ pub fn checked_application_ease(score: i64) -> Result<i64, &'static str> {
     }
 }
 
+pub const COMPANY_STABILITY_RANGE_MESSAGE: &str =
+    "Company stability must be an integer from 1 to 5 (5 = most stable)";
+
+pub fn checked_company_stability(score: i64) -> Result<i64, &'static str> {
+    if (1..=5).contains(&score) {
+        Ok(score)
+    } else {
+        Err(COMPANY_STABILITY_RANGE_MESSAGE)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{JobListSort, JobListSortDirection, JobListSortField, JobSort};
+    use super::{
+        checked_company_stability, JobListSort, JobListSortDirection, JobListSortField, JobSort,
+        COMPANY_STABILITY_RANGE_MESSAGE,
+    };
 
     #[test]
     fn job_sort_uses_the_frontend_camel_case_values() {
@@ -323,5 +346,28 @@ mod tests {
             serde_json::from_value::<JobListSort>(encoded).unwrap(),
             sort
         );
+    }
+
+    #[test]
+    fn company_stability_sort_field_uses_camel_case_wire_value() {
+        let encoded = serde_json::to_value(JobListSortField::CompanyStability).unwrap();
+        assert_eq!(encoded, "companyStability");
+        assert_eq!(
+            serde_json::from_value::<JobListSortField>(encoded).unwrap(),
+            JobListSortField::CompanyStability
+        );
+    }
+
+    #[test]
+    fn checked_company_stability_accepts_only_one_to_five() {
+        for score in 1..=5 {
+            assert_eq!(checked_company_stability(score), Ok(score));
+        }
+        for score in [i64::MIN, -1, 0, 6, 10, i64::MAX] {
+            assert_eq!(
+                checked_company_stability(score),
+                Err(COMPANY_STABILITY_RANGE_MESSAGE)
+            );
+        }
     }
 }

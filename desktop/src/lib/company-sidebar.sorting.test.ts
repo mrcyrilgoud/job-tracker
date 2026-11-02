@@ -17,7 +17,9 @@ import {
   EASE_POOL,
   MALFORMED_COUNT_POOL,
   MALFORMED_EASE_POOL,
+  MALFORMED_STABILITY_POOL,
   NAME_POOL,
+  STABILITY_POOL,
   TIMESTAMP_POOL,
   arbMaybeMalformedRows,
   arbPipelineRows,
@@ -84,6 +86,14 @@ function easiestWishlist(a: CompanyRow, b: CompanyRow): number {
   if (ea === null || eb === null) return refNameOrder(a, b);
   return higherFirst(ea, eb) || higherFirst(a.wishlistJobCount, b.wishlistJobCount) || refNameOrder(a, b);
 }
+/** "Non-null averages highest first, then higher stability-scored count, then Name_Order; null averages last in Name_Order." */
+function mostStable(a: CompanyRow, b: CompanyRow): number {
+  const sa = a.stabilityAverage;
+  const sb = b.stabilityAverage;
+  if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1;
+  if (sa === null || sb === null) return refNameOrder(a, b);
+  return higherFirst(sa, sb) || higherFirst(a.stabilityScoredJobCount, b.stabilityScoredJobCount) || refNameOrder(a, b);
+}
 
 const REFERENCE: Record<CompanySortOption, (a: CompanyRow, b: CompanyRow) => number> = {
   nameAsc: refNameOrder,
@@ -101,6 +111,7 @@ const REFERENCE: Record<CompanySortOption, (a: CompanyRow, b: CompanyRow) => num
   recentActivity: newestFirst((r) => r.lastActivityAt),
   recentlyApplied: newestFirst((r) => r.lastAppliedAt),
   easiestWishlist,
+  mostStable,
 };
 
 const arbSortOption = fc.constantFrom(...COMPANY_SORT_OPTIONS.map((o) => o.value));
@@ -156,9 +167,9 @@ describe("companies-tab-sorting sort ordering", () => {
 // malformed pool), not from the sanitizers under test.
 // ---------------------------------------------------------------------------
 
-const COUNT_FIELDS = ["wishlistJobCount", "appliedJobCount", "interviewingJobCount"] as const;
+const COUNT_FIELDS = ["wishlistJobCount", "appliedJobCount", "interviewingJobCount", "stabilityScoredJobCount"] as const;
 
-/** Same row with each missing/malformed count → 0 and missing/malformed ease → null. */
+/** Same row with each missing/malformed count → 0 and missing/malformed ease or stability average → null. */
 function sanitizedEquivalent(row: CompanyRow): CompanyRow {
   const raw = row as unknown as Record<string, unknown>;
   const out: Record<string, unknown> = { ...raw };
@@ -167,6 +178,9 @@ function sanitizedEquivalent(row: CompanyRow): CompanyRow {
   }
   if (!("wishlistEaseAverage" in raw) || MALFORMED_EASE_POOL.includes(raw.wishlistEaseAverage)) {
     out.wishlistEaseAverage = null;
+  }
+  if (!("stabilityAverage" in raw) || MALFORMED_STABILITY_POOL.includes(raw.stabilityAverage)) {
+    out.stabilityAverage = null;
   }
   return out as unknown as CompanyRow;
 }
@@ -270,6 +284,8 @@ function largeRows(count: number, seed: number): CompanyRow[] {
         lastActivityAt: next() % 5 === 0 ? null : pick(next, TIMESTAMP_POOL)[0],
         lastAppliedAt: next() % 5 === 0 ? null : pick(next, TIMESTAMP_POOL)[0],
         wishlistEaseAverage: pick(next, EASE_POOL),
+        stabilityAverage: pick(next, STABILITY_POOL),
+        stabilityScoredJobCount: next() % 4,
       }),
     );
   }
@@ -313,11 +329,11 @@ describe("companies-tab-sorting sort invariants", () => {
   // Feature: companies-tab-sorting, Property 8: Sorting is a deterministic, idempotent, non-mutating permutation
   /** **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.7** */
   it(
-    "Property 8: a seeded 10,000-row list satisfies the invariants under all 13 Sort_Options",
+    "Property 8: a seeded 10,000-row list satisfies the invariants under all 14 Sort_Options",
     () => {
       const rows = largeRows(10_000, 0x5eed);
       const permuted = seededShuffle(rows, 0xc0ffee);
-      expect(COMPANY_SORT_OPTIONS).toHaveLength(13);
+      expect(COMPANY_SORT_OPTIONS).toHaveLength(14);
       for (const { value } of COMPANY_SORT_OPTIONS) {
         checkSortInvariants(rows, permuted, value);
       }
@@ -468,5 +484,50 @@ describe("companies-tab-sorting filtered relative order", () => {
       }),
       PBT,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// company-stability-score Property 17: rows may carry malformed stability fields
+// and any subset of company filters may be active. Expected list: sanitize from
+// the fixture pools, filter with the requirement-text predicates, sort with the
+// `mostStable` reference comparator.
+// ---------------------------------------------------------------------------
+describe("company-stability-score most-stable ordering", () => {
+  // Feature: company-stability-score, Property 17: Most-stable company ordering
+  /** **Validates: Requirements 9.4, 9.5, 9.6, 9.12** */
+  it("Property 17: most-stable company ordering", () => {
+    fc.assert(
+      fc.property(arbMaybeMalformedRows(), arbFilterSubset, (rows, active) => {
+        const clean = rows.map(sanitizedEquivalent);
+        const expected = clean.filter((r) => active.every((f) => REF_FILTER[f](r))).sort(REFERENCE.mostStable);
+        const view = { sort: "mostStable" as const, filters: new Set<CompanyFilter>(active) };
+        let derived: ReturnType<typeof deriveCompanyList> | undefined;
+        expect(() => {
+          derived = deriveCompanyList(rows, "", view);
+        }).not.toThrow();
+        expect(ids(derived!.visible)).toEqual(ids(expected));
+        expect(ids(sortCompanies(rows, "mostStable"))).toEqual(ids([...clean].sort(REFERENCE.mostStable)));
+        // Null-average rows come after every scored row.
+        const cleanById = new Map(clean.map((r) => [r.company.id, r]));
+        const isNull = derived!.visible.map((r) => cleanById.get(r.company.id)!.stabilityAverage === null);
+        const firstNull = isNull.indexOf(true);
+        if (firstNull >= 0) expect(isNull.slice(firstNull).every(Boolean)).toBe(true);
+      }),
+      PBT,
+    );
+  });
+
+  // Feature: company-stability-score, Property 18: Stability annotation formatting (examples)
+  /** **Validates: Requirements 9.7, 9.8** */
+  it("stability annotation examples", () => {
+    const row = (stabilityAverage: number | null) =>
+      pipelineRow("c1", "Acme", { stabilityAverage, stabilityScoredJobCount: stabilityAverage === null ? 0 : 2 });
+    expect(sortAnnotationFor(row(null), "mostStable", ANNOTATION_CTX)).toBeNull();
+    expect(sortAnnotationFor(row(4.25), "mostStable", ANNOTATION_CTX)).toEqual({
+      text: "4.3",
+      label: "Average stability 4.3",
+    });
+    expect(sortAnnotationFor(row(3), "mostStable", ANNOTATION_CTX)?.text).toBe("3.0");
   });
 });

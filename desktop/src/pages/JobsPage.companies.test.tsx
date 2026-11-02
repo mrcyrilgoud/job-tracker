@@ -40,6 +40,7 @@ function makeJob(id: string, title: string, companyName: string): JobListItem {
       source: "manual",
       appeal: null,
       applicationEase: null,
+      companyStability: null,
       appliedAt: null,
       lastCheckedAt: null,
       salaryMin: null,
@@ -68,6 +69,8 @@ function makeRow(
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
+    stabilityAverage: null,
+    stabilityScoredJobCount: 0,
   } as unknown as CompanyRow;
 }
 

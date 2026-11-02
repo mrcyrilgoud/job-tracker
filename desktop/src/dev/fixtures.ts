@@ -97,6 +97,7 @@ function job(
     updatedAt: ago(1 * hours),
     appeal: opts.appeal ?? null,
     applicationEase: opts.applicationEase ?? null,
+    companyStability: null,
     salaryMin: null,
     salaryMax: null,
   };
@@ -226,6 +227,9 @@ export function createFixtureBackend() {
       lastActivityAt: latest(pipeline.map((j) => j.updatedAt)),
       lastAppliedAt: latest(pipeline.map((j) => j.appliedAt)),
       wishlistEaseAverage: eases.length ? eases.reduce((a, b) => a + b, 0) / eases.length : null,
+      // Fixture jobs are unscored for company stability.
+      stabilityAverage: null,
+      stabilityScoredJobCount: 0,
     };
   }
 

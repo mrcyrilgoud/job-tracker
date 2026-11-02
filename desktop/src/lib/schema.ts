@@ -77,6 +77,8 @@ export type Job = {
   appeal: number | null;
   /** How easy this posting is to apply to, from 1 (hardest) to 5 (easiest). Null when unscored. */
   applicationEase: number | null;
+  /** How stable the hiring company seems, from 1 (least) to 5 (most). Null when unscored. */
+  companyStability: number | null;
   /** Optional annual USD salary bounds; a missing bound is open-ended. */
   salaryMin: number | null;
   salaryMax: number | null;
@@ -179,6 +181,7 @@ export type JobSummary = Pick<
   | "updatedAt"
   | "appeal"
   | "applicationEase"
+  | "companyStability"
   | "location"
 >;
 
@@ -199,7 +202,12 @@ export type JobSort =
   | "appealLowToHigh"
   | "companyAz";
 
-export type JobListSortField = "appliedAt" | "postingDate" | "appeal" | "companyName";
+export type JobListSortField =
+  | "appliedAt"
+  | "postingDate"
+  | "appeal"
+  | "companyName"
+  | "companyStability";
 
 export type JobListSortDirection = "ascending" | "descending";
 
@@ -226,6 +234,8 @@ export type JobListPageCursor = {
 export type JobListPage = {
   jobs: JobListSummary[];
   nextCursor: JobListPageCursor | null;
+  /** Rows matching the filters, ignoring the cursor; stable across pages. */
+  totalCount: number;
 };
 
 /** Compact fields rendered by watch-role lists; detail-only job fields are omitted. */
@@ -285,6 +295,10 @@ export type CompanyRow = {
   lastAppliedAt: string | null;
   /** Mean application_ease of wishlist jobs (1–5), unrounded. */
   wishlistEaseAverage: number | null;
+  /** Mean company_stability (1–5) over all Pipeline_Jobs with a valid score, unrounded. Null when none. */
+  stabilityAverage: number | null;
+  /** Pipeline_Jobs with a valid company_stability score. */
+  stabilityScoredJobCount: number;
 };
 
 export type DocumentListItem = Document & {

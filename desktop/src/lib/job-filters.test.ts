@@ -15,6 +15,7 @@ describe("job filter draft", () => {
       dateTo: "",
       location: "",
       remoteMode: "any",
+      minStability: "",
     });
   });
 
@@ -30,6 +31,7 @@ describe("job filter draft", () => {
       dateTo: "",
       location: "",
       remoteMode: "any",
+      minStability: "",
     });
   });
 
@@ -45,6 +47,7 @@ describe("job filter draft", () => {
       dateTo: "",
       location: "",
       remoteMode: "any",
+      minStability: "",
     });
   });
 });
@@ -279,5 +282,57 @@ describe("job-filters property tests", () => {
       ),
       { numRuns: 100 },
     );
+  });
+});
+import {
+  countActiveJobFilters,
+  encodeMinStabilityToUrl,
+  parseMinStabilityFromUrl,
+  type MinStability,
+} from "./job-filters";
+
+describe("Minimum_Stability_Filter URL helpers", () => {
+  // Validates: Requirements 7.5, 7.6
+  it.each<[string | null, MinStability | undefined]>([
+    ["1", 1], ["2", 2], ["3", 3], ["4", 4], ["5", 5],
+    [null, undefined], ["", undefined], ["0", undefined], ["6", undefined],
+    ["3.5", undefined], ["03", undefined], ["x", undefined],
+  ])("parses minStability=%j as %j", (raw, expected) => {
+    const params = new URLSearchParams();
+    if (raw !== null) params.set("minStability", raw);
+    expect(parseMinStabilityFromUrl(params)).toBe(expected);
+  });
+
+  // Validates: Requirements 7.5, 7.6
+  it.each<MinStability | undefined>([undefined, 1, 2, 3, 4, 5])(
+    "round-trips %j through encode and parse",
+    (value) => {
+      const params = new URLSearchParams("minStability=2&search=Stripe");
+      encodeMinStabilityToUrl(params, value);
+      expect(parseMinStabilityFromUrl(params)).toBe(value);
+      expect(params.has("minStability")).toBe(value !== undefined);
+      expect(params.get("search")).toBe("Stripe");
+    },
+  );
+
+  // Validates: Requirement 7.8
+  it.each<MinStability>([1, 2, 3, 4, 5])("adds exactly 1 to the active filter count for minimum %j", (min) => {
+    const base = {
+      salaryMin: 100000,
+      salaryMax: undefined,
+      postingState: "active",
+      statuses: ["applied"] as JobStatus[],
+      dateField: "" as const,
+      dateFrom: "",
+      dateTo: "",
+      location: "",
+      remoteMode: "any" as RemoteMode,
+      minStability: undefined,
+    };
+    expect(countActiveJobFilters({ ...base, minStability: min }))
+      .toBe(countActiveJobFilters(base) + 1);
+    const empty = { ...base, salaryMin: undefined, postingState: "", statuses: [] };
+    expect(countActiveJobFilters(empty)).toBe(0);
+    expect(countActiveJobFilters({ ...empty, minStability: min })).toBe(1);
   });
 });

@@ -117,7 +117,8 @@ const PIPELINE_JOB_PREDICATE: &str = "j.status <> 'archived' \
     AND (j.watch_disposition IS NULL OR j.watch_disposition <> 'dismissed')";
 
 /// Query A output for one company: wishlist, applied, interviewing counts,
-/// then the guarded application_ease sum and count over wishlist jobs.
+/// then the guarded application_ease sum and count over wishlist jobs, then
+/// the guarded company_stability sum and count over all Pipeline_Jobs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PipelineCountRow {
     wishlist: i64,
@@ -125,6 +126,8 @@ struct PipelineCountRow {
     interviewing: i64,
     ease_sum: i64,
     ease_count: i64,
+    stability_sum: i64,
+    stability_count: i64,
 }
 
 /// Per-company pipeline aggregates attached to each `CompanyRow`.
@@ -135,6 +138,8 @@ struct CompanyPipelineAggregates {
     interviewing: i64,
     ease_sum: i64,
     ease_count: i64,
+    stability_sum: i64,
+    stability_count: i64,
     last_activity: LatestTimestamp,
     last_applied: LatestTimestamp,
 }
@@ -143,6 +148,13 @@ impl CompanyPipelineAggregates {
     /// Wishlist_Ease_Average, unrounded; None when no wishlist job has ease 1–5.
     fn wishlist_ease_average(&self) -> Option<f64> {
         (self.ease_count > 0).then(|| self.ease_sum as f64 / self.ease_count as f64)
+    }
+
+    /// Company_Stability_Average over all Pipeline_Jobs, unrounded; None when
+    /// no Pipeline_Job has a company_stability of 1–5.
+    fn stability_average(&self) -> Option<f64> {
+        (self.stability_count > 0)
+            .then(|| self.stability_sum as f64 / self.stability_count as f64)
     }
 }
 
@@ -162,6 +174,8 @@ fn fold_pipeline_aggregates(
         entry.interviewing += row.interviewing;
         entry.ease_sum += row.ease_sum;
         entry.ease_count += row.ease_count;
+        entry.stability_sum += row.stability_sum;
+        entry.stability_count += row.stability_count;
     }
     for (company_id, applied_at) in applied_pairs {
         aggregates
@@ -180,7 +194,7 @@ fn fold_pipeline_aggregates(
     aggregates
 }
 
-/// Runs Query A (counts + ease), Query B (applied_at), and Query C (user
+/// Runs Query A (counts + ease + stability), Query B (applied_at), and Query C (user
 /// activity occurred_at) and folds them. Reads only.
 fn load_pipeline_aggregates(
     conn: &Connection,
@@ -194,7 +208,11 @@ fn load_pipeline_aggregates(
             SUM(CASE WHEN j.status = 'wishlist' AND typeof(j.application_ease) = 'integer'
                       AND j.application_ease BETWEEN 1 AND 5 THEN j.application_ease ELSE 0 END),
             SUM(CASE WHEN j.status = 'wishlist' AND typeof(j.application_ease) = 'integer'
-                      AND j.application_ease BETWEEN 1 AND 5 THEN 1 ELSE 0 END)
+                      AND j.application_ease BETWEEN 1 AND 5 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN typeof(j.company_stability) = 'integer'
+                      AND j.company_stability BETWEEN 1 AND 5 THEN j.company_stability ELSE 0 END),
+            SUM(CASE WHEN typeof(j.company_stability) = 'integer'
+                      AND j.company_stability BETWEEN 1 AND 5 THEN 1 ELSE 0 END)
          FROM jobs j
          WHERE {PIPELINE_JOB_PREDICATE}
          GROUP BY j.company_id"
@@ -210,6 +228,8 @@ fn load_pipeline_aggregates(
                     interviewing: row.get(3)?,
                     ease_sum: row.get(4)?,
                     ease_count: row.get(5)?,
+                    stability_sum: row.get(6)?,
+                    stability_count: row.get(7)?,
                 },
             ))
         })
@@ -334,6 +354,7 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
             let tracked_job_count = tracked_job_counts.get(&company.id).copied().unwrap_or(0);
             let agg = pipeline.remove(&company.id).unwrap_or_default();
             let ease_average = agg.wishlist_ease_average();
+            let stability_average = agg.stability_average();
             serde_json::json!({
                 "company": company,
                 "watches": company_watches,
@@ -345,7 +366,9 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
                 "interviewingJobCount": agg.interviewing,
                 "lastActivityAt": agg.last_activity.into_value(),
                 "lastAppliedAt": agg.last_applied.into_value(),
-                "wishlistEaseAverage": ease_average
+                "wishlistEaseAverage": ease_average,
+                "stabilityAverage": stability_average,
+                "stabilityScoredJobCount": agg.stability_count
             })
         })
         .collect())
@@ -460,6 +483,40 @@ mod tests {
             .unwrap();
 
         assert!(list_companies_with_watches(&connection).is_err());
+    }
+
+    /// Stability aggregate covers every Pipeline_Job status and ignores
+    /// unscored and non-pipeline jobs (company-stability-score 8.1).
+    #[test]
+    fn list_companies_with_watches_reports_stability_average() {
+        let connection = test_connection();
+        connection
+            .execute_batch(
+                "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES
+                   ('c1', 'Acme', NULL, '2026-01-01', '2026-01-01'),
+                   ('c2', 'Beta', NULL, '2026-01-01', '2026-01-01');
+                 INSERT INTO jobs (id, company_id, title, url, canonical_url, status,
+                   company_stability, is_new_from_watch, watch_disposition, created_at, updated_at) VALUES
+                   ('s1', 'c1', 'S1', 'u1', 'u1', 'wishlist', 5, 0, NULL, 't', 't'),
+                   ('s2', 'c1', 'S2', 'u2', 'u2', 'applied', 4, 0, NULL, 't', 't'),
+                   ('s3', 'c1', 'S3', 'u3', 'u3', 'closed', 5, 0, NULL, 't', 't'),
+                   ('s4', 'c1', 'S4', 'u4', 'u4', 'interviewing', NULL, 0, NULL, 't', 't'),
+                   ('x1', 'c1', 'X1', 'u7', 'u7', 'archived', 1, 0, NULL, 't', 't'),
+                   ('x2', 'c1', 'X2', 'u8', 'u8', 'wishlist', 1, 1, 'new', 't', 't'),
+                   ('x3', 'c1', 'X3', 'u9', 'u9', 'applied', 1, 0, 'dismissed', 't', 't'),
+                   ('b1', 'c2', 'B1', 'u10', 'u10', 'wishlist', NULL, 0, NULL, 't', 't');",
+            )
+            .unwrap();
+
+        let rows = list_companies_with_watches(&connection).unwrap();
+        let acme = &rows[0];
+        assert_eq!(acme["stabilityScoredJobCount"], 3);
+        let average = acme["stabilityAverage"].as_f64().unwrap();
+        assert!((average - 14.0 / 3.0).abs() < 1e-9, "{average}");
+
+        let beta = &rows[1];
+        assert_eq!(beta["stabilityScoredJobCount"], 0);
+        assert!(beta["stabilityAverage"].is_null());
     }
 
     /// Sanity example for the six pipeline fields (companies-tab-sorting 2.1).
@@ -665,6 +722,8 @@ mod tests {
         is_favorite: bool,
         applied_at: Option<&'static str>,
         application_ease: Option<i64>,
+        /// Company_Stability; the column CHECK limits stored values to NULL or 1–5.
+        company_stability: Option<i64>,
         is_new_from_watch: bool,
         watch_disposition: Option<&'static str>,
         /// `job_events` rows for this job as (type, occurred_at).
@@ -771,6 +830,7 @@ mod tests {
             any::<bool>(),
             prop::option::of(timestamp_strategy()),
             prop::option::of(1i64..=5),
+            prop::option::of(1i64..=5),
             any::<bool>(),
             prop::option::of(prop::sample::select(WATCH_DISPOSITIONS)),
             prop::collection::vec(
@@ -790,6 +850,7 @@ mod tests {
                     is_favorite,
                     applied_at,
                     application_ease,
+                    company_stability,
                     is_new_from_watch,
                     watch_disposition,
                     events,
@@ -801,6 +862,7 @@ mod tests {
                     is_favorite,
                     applied_at,
                     application_ease,
+                    company_stability,
                     is_new_from_watch,
                     watch_disposition,
                     events,
@@ -846,8 +908,8 @@ mod tests {
                 let url = format!("https://jobs.example/{index}");
                 conn.execute(
                     "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, posting_state, source, is_favorite, created_at, updated_at,
-                       applied_at, application_ease, is_new_from_watch, watch_disposition)
-                     VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12, ?13)",
+                       applied_at, application_ease, is_new_from_watch, watch_disposition, company_stability)
+                     VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         format!("job-{index}"),
                         company_id,
@@ -861,7 +923,8 @@ mod tests {
                         spec.applied_at,
                         spec.application_ease,
                         spec.is_new_from_watch,
-                        spec.watch_disposition
+                        spec.watch_disposition,
+                        spec.company_stability
                     ],
                 )
                 .unwrap();
@@ -964,6 +1027,8 @@ mod tests {
         "lastActivityAt",
         "lastAppliedAt",
         "wishlistEaseAverage",
+        "stabilityAverage",
+        "stabilityScoredJobCount",
     ];
 
     proptest! {
@@ -1273,6 +1338,47 @@ mod tests {
                     .count() as i64;
                 prop_assert_eq!(row["openPositionCount"].as_i64(), Some(expected_open));
                 prop_assert_eq!(row["trackedJobCount"].as_i64(), Some(expected_tracked));
+            }
+        }
+
+        // Feature: company-stability-score, Property 16: Company stability average matches its definition
+        /// **Validates: Requirements 9.1, 9.2, 9.11**
+        #[test]
+        fn prop_company_stability_average_matches_definition(
+            fixture in companies_fixture_strategy()
+        ) {
+            let conn = test_connection();
+            let seeded = seed_fixture(&conn, &fixture);
+            let rows = list_companies_with_watches(&conn).unwrap();
+            prop_assert_eq!(rows.len(), seeded.company_ids.len());
+
+            for row in &rows {
+                let company_id = row_company_id(row);
+                let scores: Vec<i64> = seeded
+                    .jobs
+                    .iter()
+                    .filter(|(id, spec)| *id == company_id && spec.is_pipeline())
+                    .filter_map(|(_, spec)| spec.company_stability)
+                    .filter(|score| (1..=5).contains(score))
+                    .collect();
+
+                prop_assert_eq!(
+                    row["stabilityScoredJobCount"].as_i64(),
+                    Some(scores.len() as i64),
+                    "count {}",
+                    company_id
+                );
+                let average = &row["stabilityAverage"];
+                if scores.is_empty() {
+                    prop_assert!(average.is_null(), "expected null average for {}", company_id);
+                } else {
+                    let exact = scores.iter().sum::<i64>() as f64 / scores.len() as f64;
+                    let actual = average.as_f64();
+                    prop_assert!(actual.is_some(), "missing average for {}", company_id);
+                    let actual = actual.unwrap();
+                    prop_assert!((actual - exact).abs() < 0.001, "{} vs {}", actual, exact);
+                    prop_assert!((1.0..=5.0).contains(&actual));
+                }
             }
         }
     }

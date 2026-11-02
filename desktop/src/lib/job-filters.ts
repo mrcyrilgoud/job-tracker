@@ -14,7 +14,34 @@ export type JobFilterDraft = {
   dateTo: string;
   location: string;
   remoteMode: RemoteMode;
+  /** Minimum_Stability_Filter draft: "" means Any. */
+  minStability: MinStabilityDraft;
 };
+
+/** A Minimum_Stability_Filter threshold. */
+export type MinStability = 1 | 2 | 3 | 4 | 5;
+export type MinStabilityDraft = "" | "1" | "2" | "3" | "4" | "5";
+
+const MIN_STABILITY_VALUES: readonly string[] = ["1", "2", "3", "4", "5"];
+
+/**
+ * Parse the `minStability` param. Returns 1–5 only when the raw value is
+ * exactly `"1"`–`"5"`; anything else (absent, `"3.0"`, `" 3"`, `"6"`) is Any
+ * (`undefined`). Total.
+ */
+export function parseMinStabilityFromUrl(params: URLSearchParams): MinStability | undefined {
+  const raw = params.get("minStability");
+  return raw !== null && MIN_STABILITY_VALUES.includes(raw) ? (Number(raw) as MinStability) : undefined;
+}
+
+/** Sets `minStability=<n>` for 1–5, deletes the param for `undefined` (or any other value). */
+export function encodeMinStabilityToUrl(params: URLSearchParams, value: number | undefined): void {
+  if (value !== undefined && Number.isInteger(value) && value >= 1 && value <= 5) {
+    params.set("minStability", String(value));
+  } else {
+    params.delete("minStability");
+  }
+}
 
 const DATE_FIELDS: readonly DateField[] = ["appliedAt", "postingDate", "lastCheckedAt"];
 const REMOTE_MODES: readonly RemoteMode[] = ["any", "remoteOnly", "onsiteOnly"];
@@ -148,6 +175,7 @@ export function filterDraftFromUrl(
   const dateFilter = params ? parseDateFilterFromUrl(params) : { from: "", to: "" };
   const remoteMode = params ? parseRemoteModeFromUrl(params) : "any";
   const location = params?.get("location")?.trim() ?? "";
+  const minStability = params ? parseMinStabilityFromUrl(params) : undefined;
   return {
     search: search ?? "",
     postingState: postingState ?? "",
@@ -159,6 +187,7 @@ export function filterDraftFromUrl(
     dateTo: dateFilter.to,
     location,
     remoteMode,
+    minStability: minStability === undefined ? "" : (String(minStability) as MinStabilityDraft),
   };
 }
 
@@ -181,6 +210,32 @@ export function countActiveFilterDimensions(input: {
   if (input.dateField && (input.dateFrom.trim() !== "" || input.dateTo.trim() !== "")) count += 1;
   if (input.location.trim() !== "" || input.remoteMode !== "any") count += 1;
   return count;
+}
+
+/**
+ * Count the active Jobs-page filters shown on the Filters button badge:
+ * +1 for a salary bound, +1 for a posting state, the new filter dimensions
+ * (see `countActiveFilterDimensions`), and +1 when a Minimum_Stability_Filter
+ * value is set. Pure so it can be tested without rendering the page.
+ */
+export function countActiveJobFilters(input: {
+  salaryMin: number | undefined;
+  salaryMax: number | undefined;
+  postingState: string | null | undefined;
+  statuses: JobStatus[];
+  dateField: "" | DateField;
+  dateFrom: string;
+  dateTo: string;
+  location: string;
+  remoteMode: RemoteMode;
+  minStability: MinStability | undefined;
+}): number {
+  return (
+    Number(input.salaryMin !== undefined || input.salaryMax !== undefined)
+    + Number(Boolean(input.postingState))
+    + countActiveFilterDimensions(input)
+    + Number(input.minStability !== undefined)
+  );
 }
 
 export function filterCompaniesBySearch<T extends { name: string }>(companies: T[], search: string): T[] {

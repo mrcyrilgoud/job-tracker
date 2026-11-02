@@ -81,9 +81,10 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 
 ### Jobs CSV
 
-- Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`, `appeal`, `application_ease`
+- Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`, `appeal`, `application_ease`, `company_stability`
 - `appeal` is one overall score from 1 to 5 (**5 = most appealing**, 1 = least), covering salary, career growth, industry, role fit, and anything else that matters. Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
 - `application_ease` is how easy that posting is to apply to, from 1 to 5 (**5 = easiest**, 1 = hardest). Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
+- `company_stability` is how stable the hiring company looks for that posting, an integer from 1 to 5 (**5 = most stable**, 1 = least stable). Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
 - Conflicts (merge mode): DB wins when both sides changed since last export
 - Blank `id` + url/title/company creates a job; missing CSV rows do not delete jobs
 - By default, the mirror is `<data directory>/jobs.csv`. In **Settings**, choose another local

@@ -26,6 +26,7 @@ export const COMPANY_SORT_OPTIONS = [
   { value: "recentActivity", label: "Recently updated job", group: "activity" },
   { value: "recentlyApplied", label: "Recently applied", group: "activity" },
   { value: "easiestWishlist", label: "Easiest wishlist to apply", group: "activity" },
+  { value: "mostStable", label: "Most stable company", group: "activity" },
 ] as const;
 
 export type CompanySortOption = (typeof COMPANY_SORT_OPTIONS)[number]["value"];
@@ -115,6 +116,16 @@ export function easeOf(row: CompanyRow): number | null {
   return sanitizeEase((row as Partial<CompanyRow>).wishlistEaseAverage);
 }
 
+/** Sanitized Company_Stability_Average (unrounded), or null (missing, null, non-number, non-finite, <1, >5). */
+export function stabilityOf(row: CompanyRow): number | null {
+  return sanitizeEase((row as Partial<CompanyRow>).stabilityAverage);
+}
+
+/** Sanitized count of Pipeline_Jobs with a valid Company_Stability. */
+export function stabilityCountOf(row: CompanyRow): number {
+  return sanitizeCount((row as Partial<CompanyRow>).stabilityScoredJobCount);
+}
+
 /** Last_Activity_At as an Instant, or null when missing or not a Valid_Timestamp. */
 export function lastActivityOf(row: CompanyRow): Instant | null {
   return parseInstant((row as Partial<CompanyRow>).lastActivityAt);
@@ -168,6 +179,10 @@ function sortKeyVector(row: CompanyRow, sort: KeyedSortOption): readonly number[
     case "easiestWishlist": {
       const e = easeOf(row);
       return e === null ? [1, 0, 0] : [0, -e, -wishlistCountOf(row)];
+    }
+    case "mostStable": {
+      const s = stabilityOf(row);
+      return s === null ? [1, 0, 0] : [0, -s, -stabilityCountOf(row)];
     }
     default: {
       const unreachable: never = sort;
@@ -290,6 +305,12 @@ export function sortAnnotationFor(
       if (e === null) return null;
       const text = formatEase(e);
       return { text, label: `Average ease ${text}` };
+    }
+    case "mostStable": {
+      const s = stabilityOf(row);
+      if (s === null) return null;
+      const text = formatEase(s);
+      return { text, label: `Average stability ${text}` };
     }
     default: {
       const unreachable: never = sort;

@@ -196,6 +196,7 @@ pub fn handle_list(
         } else {
             Some(false)
         },
+        min_company_stability: args.min_company_stability,
         limit: args.limit,
     };
 
@@ -410,6 +411,11 @@ pub fn handle_update(
         } else {
             args.application_ease.map(Some)
         },
+        company_stability: if args.clear_company_stability {
+            Some(None)
+        } else {
+            args.company_stability.map(Some)
+        },
         salary_min: None,
         salary_max: None,
     };
@@ -442,6 +448,13 @@ pub fn handle_update(
             match updated.job.application_ease {
                 Some(score) => format!("{score} (1-5, 5 = easiest to apply)"),
                 None => "— (1-5, 5 = easiest to apply)".to_string(),
+            }
+        );
+        println!(
+            "  Stability: {}",
+            match updated.job.company_stability {
+                Some(score) => format!("{score} (1-5, 5 = most stable)"),
+                None => "— (1-5, 5 = most stable)".to_string(),
             }
         );
     }
@@ -632,6 +645,7 @@ pub fn handle_note(
             is_favorite: None,
             appeal: None,
             application_ease: None,
+            company_stability: None,
             salary_min: None,
             salary_max: None,
         },
@@ -998,6 +1012,7 @@ mod tests {
             favorites: false,
             archived: false,
             limit: None,
+            min_company_stability: None,
         }
     }
 

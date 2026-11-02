@@ -2,6 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { COMPANY_STABILITY_SCALE_LABEL } from "@/components/CompanyStabilitySelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ArchiveIcon, statusIcons, TrashIcon } from "@/components/icons";
 import { StatusQuickChange } from "@/components/StatusQuickChange";
@@ -190,6 +191,14 @@ export function JobsBoardView({
                                 Ease {job.applicationEase}
                               </span>
                             ) : null}
+                            {job.companyStability != null ? (
+                              <span
+                                className="text-xs text-[var(--muted)]"
+                                title={COMPANY_STABILITY_SCALE_LABEL}
+                              >
+                                Stability {job.companyStability}
+                              </span>
+                            ) : null}
                           </div>
                         </div>
 
@@ -271,6 +280,11 @@ export function JobsBoardView({
                     {companyName} · {jobStatusPresentation(job.status).label}
                     {job.appeal != null ? ` · Appeal ${job.appeal}` : ""}
                     {job.applicationEase != null ? ` · Ease ${job.applicationEase}` : ""}
+                    {job.companyStability != null ? (
+                      <span title={COMPANY_STABILITY_SCALE_LABEL}>
+                        {` · Stability ${job.companyStability}`}
+                      </span>
+                    ) : null}
                   </p>
                 </div>
                 <div className="flex items-center gap-1">

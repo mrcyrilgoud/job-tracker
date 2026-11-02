@@ -1,6 +1,6 @@
 /**
  * Shared fast-check arbitraries for companies-tab-sorting property tests
- * (Properties 6–15). Test-only: imported by `*.test.ts` files, never by app code.
+ * (Properties 6–15) and company-stability-score (Property 17). Test-only: imported by `*.test.ts` files, never by app code.
  *
  * Pools deliberately collide: a small name pool with case/accent variants, counts
  * 0..3, near-equal ease averages, the same instant written several ways, and
@@ -78,6 +78,10 @@ export const MALFORMED_COUNT_POOL: ReadonlyArray<unknown> = [undefined, null, -1
 /** Malformed ease averages (Req 5.5): each sanitizes to null. */
 export const MALFORMED_EASE_POOL: ReadonlyArray<unknown> = [undefined, Number.NaN, Infinity, -Infinity, 0, 0.5, 5.01, 6, "4"];
 
+/** Well-formed Company_Stability_Average values (company-stability-score): the ease pool's colliding values. */
+export const STABILITY_POOL: ReadonlyArray<number | null> = EASE_POOL;
+/** Malformed stability averages (Req 9.6): each sanitizes to null. Adds non-number types to the ease pool. */
+export const MALFORMED_STABILITY_POOL: ReadonlyArray<unknown> = [...MALFORMED_EASE_POOL, -3, true, "high"];
 export const arbCount = fc.integer({ min: 0, max: 3 });
 export const arbName = fc.constantFrom(...NAME_POOL);
 export const arbTimestamp: fc.Arbitrary<string | null> = fc.oneof(
@@ -85,6 +89,7 @@ export const arbTimestamp: fc.Arbitrary<string | null> = fc.oneof(
   fc.constantFrom(...TIMESTAMP_POOL.map(([value]) => value)),
 );
 export const arbEase: fc.Arbitrary<number | null> = fc.constantFrom(...EASE_POOL);
+export const arbStability: fc.Arbitrary<number | null> = fc.constantFrom(...STABILITY_POOL);
 export const arbCreatedAt = fc.constantFrom(...CREATED_AT_POOL.map(([value]) => value));
 
 /** Build a CompanyRow with pipeline defaults (zeros / nulls). */
@@ -106,6 +111,8 @@ export function pipelineRow(
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
+    stabilityAverage: null,
+    stabilityScoredJobCount: 0,
     ...rest,
   };
 }
@@ -130,6 +137,8 @@ const arbPipelineFields = fc.record({
   lastActivityAt: arbTimestamp,
   lastAppliedAt: arbTimestamp,
   wishlistEaseAverage: arbEase,
+  stabilityAverage: arbStability,
+  stabilityScoredJobCount: arbCount,
 });
 
 /** Rows with unique ids and well-formed pipeline aggregates drawn from the colliding pools. */
@@ -152,7 +161,7 @@ const arbMutation = (pool: ReadonlyArray<unknown>) =>
   );
 
 /**
- * Rows whose new count/ease fields may each be deleted or replaced by a malformed
+ * Rows whose new count/ease/stability fields may each be deleted or replaced by a malformed
  * value (Property 7). Typed as CompanyRow but may violate the backend contract.
  */
 export const arbMaybeMalformedRows = (maxLength = 30): fc.Arbitrary<CompanyRow[]> =>
@@ -166,6 +175,8 @@ export const arbMaybeMalformedRows = (maxLength = 30): fc.Arbitrary<CompanyRow[]
               appliedJobCount: arbMutation(MALFORMED_COUNT_POOL),
               interviewingJobCount: arbMutation(MALFORMED_COUNT_POOL),
               wishlistEaseAverage: arbMutation(MALFORMED_EASE_POOL),
+              stabilityAverage: arbMutation(MALFORMED_STABILITY_POOL),
+              stabilityScoredJobCount: arbMutation(MALFORMED_COUNT_POOL),
             })
             .map((mutations) => {
               const copy: Record<string, unknown> = { ...r };

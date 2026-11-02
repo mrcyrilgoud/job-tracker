@@ -1,0 +1,776 @@
+{
+  "pbtResults": {
+    "8.2 Write property test for the company stability average": {
+      "status": "passed",
+      "lastRunTimestamp": 1793524264019
+    },
+    "7.2 Write property test for the CSV export/import round trip": {
+      "status": "passed",
+      "lastRunTimestamp": 1793524432929
+    },
+    "10.6 Write property test for most-stable company ordering": {
+      "status": "passed",
+      "lastRunTimestamp": 1793524592206
+    },
+    "3.4 Write property test for stability sort order and lossless keyset paging": {
+      "status": "passed",
+      "lastRunTimestamp": 1793524920053
+    },
+    "3.5 Write property test for the minimum filter as a pure restriction": {
+      "status": "passed",
+      "lastRunTimestamp": 1793525076354
+    }
+  },
+  "executionHistory": {
+    "1.1 Add the `company_stability` column in `src-tauri/src/db/migrate.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178229
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522186335
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522302068
+      }
+    ],
+    "1.2 Add Company_Stability model types in `src-tauri/src/models.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178290
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522186751
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522302134
+      }
+    ],
+    "2.1 Implement the update path in `src-tauri/src/jobs/service.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178331
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522310315
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522420947
+      }
+    ],
+    "3.1 Add the Minimum_Stability_Filter in `src-tauri/src/jobs/service.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178365
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524176271
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524355955
+      }
+    ],
+    "3.2 Add the Stability_Sort_Field ordering and cursor in `src-tauri/src/jobs/service.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178390
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524365068
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524489334
+      }
+    ],
+    "3.3 Add sized paging and `total_count` in `src-tauri/src/jobs/service.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178413
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524499820
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524617665
+      }
+    ],
+    "4.1 Add `min_company_stability` to `ListJobsArgs` in `src-tauri/src/commands/mod.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178436
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524365509
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524490448
+      }
+    ],
+    "5. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178463
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793525207465
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793525315690
+      }
+    ],
+    "6.1 Add the flags and value parser in `src-tauri/src/cli/args.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178495
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524177502
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524356823
+      }
+    ],
+    "6.2 Wire the flags in `src-tauri/src/cli/handlers.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178536
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524366730
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524491651
+      }
+    ],
+    "6.3 Show Company_Stability in `src-tauri/src/cli/output.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178574
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524500465
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524618519
+      }
+    ],
+    "7.1 Add the `company_stability` column in `src-tauri/src/jobs/csv.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178599
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524178689
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524357995
+      }
+    ],
+    "8.1 Add the stability aggregate in `src-tauri/src/companies.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178628
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522311013
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522422116
+      }
+    ],
+    "9. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178675
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793529420608
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793529501248
+      }
+    ],
+    "10.1 Extend desktop types and existing fixtures": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178701
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522187961
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522303346
+      }
+    ],
+    "10.2 Add the Stability_Sort_Field to `desktop/src/lib/job-list-sort.ts`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178725
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522189160
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522304613
+      }
+    ],
+    "10.3 Add Minimum_Stability_Filter helpers to `desktop/src/lib/job-filters.ts`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178755
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522312220
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522423291
+      }
+    ],
+    "10.5 Add the Stability_Company_Sort to `desktop/src/lib/company-sidebar.ts`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178794
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522313425
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522424889
+      }
+    ],
+    "11. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178815
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793525208176
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793525316789
+      }
+    ],
+    "12.1 Extract `ScoreSelect` and add `CompanyStabilitySelect`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178850
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522190013
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522305362
+      }
+    ],
+    "12.2 Add the field to `desktop/src/components/JobDetailClient.tsx`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178875
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524368720
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524493678
+      }
+    ],
+    "12.3 Show \"Stability n\" in `desktop/src/components/JobsBoardView.tsx`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178902
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522314204
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522425716
+      }
+    ],
+    "12.4 Add the row control and update handler to `desktop/src/pages/JobsPage.tsx`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178930
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524627394
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524820980
+      }
+    ],
+    "12.5 Add the sort option, minimum filter, and count to `desktop/src/pages/JobsPage.tsx`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178952
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524830880
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524974274
+      }
+    ],
+    "13. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522178976
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793529420650
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793529501915
+      }
+    ],
+    "14.1 Update `AGENTS.md`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522179002
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524632176
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524824547
+      }
+    ],
+    "14.2 Update `README.md`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522179026
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524831724
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524975325
+      }
+    ],
+    "15. Final checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522179049
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793529507666
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793529562812
+      }
+    ],
+    "1. Add the Company_Stability column and model types": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522302181
+      }
+    ],
+    "2. Set and clear Company_Stability in the Job_Service": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522420989
+      }
+    ],
+    "8. Compute Company_Stability_Average for the Companies_Sidebar": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522422145
+      }
+    ],
+    "10. Add Company_Stability to the desktop libraries": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793522424938
+      }
+    ],
+    "1.3 Write migration unit tests in `src-tauri/src/db/migrate.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524147037
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524175900
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524355913
+      }
+    ],
+    "2.2 Write Job_Service unit tests in `src-tauri/src/jobs/service.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524148148
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524628566
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524822872
+      }
+    ],
+    "3.4 Write property test for stability sort order and lossless keyset paging": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524149354
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524830003
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524973156
+      }
+    ],
+    "3.5 Write property test for the minimum filter as a pure restriction": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524150595
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524980534
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793525205958
+      }
+    ],
+    "6.4 Write CLI unit tests": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524151366
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524629778
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524823674
+      }
+    ],
+    "7.2 Write property test for the CSV export/import round trip": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524152556
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524368013
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524492853
+      }
+    ],
+    "7.3 Write CSV unit tests in `src-tauri/src/jobs/csv.rs`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524153756
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524501660
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524619707
+      }
+    ],
+    "8.2 Write property test for the company stability average": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524154983
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524179510
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524358830
+      }
+    ],
+    "10.4 Write example tests for sort and filter URL helpers": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524156160
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524502466
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524621314
+      }
+    ],
+    "10.6 Write property test for most-stable company ordering": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524156958
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524503416
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524622134
+      }
+    ],
+    "12.6 Write unit tests for `CompanyStabilitySelect`, `JobDetailClient`, and `JobsBoardView`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524158584
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524631352
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524821675
+      }
+    ],
+    "12.7 Write unit tests for `JobsPage` and `CompaniesSidebar`": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524159351
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524980753
+      },
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793525206260
+      }
+    ],
+    "7. Round-trip Company_Stability through the CSV_Mirror": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524358021
+      }
+    ],
+    "4. Validate the minimum stability filter in the IPC_Layer": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524490484
+      }
+    ],
+    "3. Sort, filter, and page by Company_Stability in the Job_Service": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524617696
+      }
+    ],
+    "6. Add Company_Stability to the CLI": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524618562
+      }
+    ],
+    "12. Add Company_Stability to the desktop components": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524974320
+      }
+    ],
+    "14. Update agent and user documentation": [
+      {
+        "executionId": "f37f8b9b-27e2-41ec-bd62-93b714f1161b",
+        "chatSessionId": "sess_e0d04c11-abd2-489c-9c66-5fa3bba2a8d1",
+        "timestamp": 1793524975355
+      }
+    ]
+  }
+}

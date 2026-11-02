@@ -1,6 +1,21 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::models::COMPANY_STABILITY_RANGE_MESSAGE;
+
+/// Strict value parser for company stability flags: accepts only base-10
+/// integers 1-5 (ASCII digits, no sign or whitespace) and otherwise returns
+/// the Stability_Range_Message so clap's error says "5 = most stable".
+pub fn parse_company_stability(raw: &str) -> Result<i64, String> {
+    if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(COMPANY_STABILITY_RANGE_MESSAGE.to_string());
+    }
+    match raw.parse::<i64>() {
+        Ok(n) if (1..=5).contains(&n) => Ok(n),
+        _ => Err(COMPANY_STABILITY_RANGE_MESSAGE.to_string()),
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "job-tracker",
@@ -58,7 +73,7 @@ pub enum Commands {
 
     #[command(
         name = "update",
-        about = "Update a job's status, notes, description, applied date, appeal, application ease, or favorite"
+        about = "Update a job's status, notes, description, applied date, appeal, application ease, company stability, or favorite"
     )]
     Update(UpdateArgs),
 
@@ -139,6 +154,14 @@ pub struct ListArgs {
 
     #[arg(short = 'n', long, help = "Maximum number of jobs to return")]
     pub limit: Option<usize>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = parse_company_stability,
+        help = "Only jobs with company stability >= N (integer 1-5, 5 = most stable); unscored jobs are excluded"
+    )]
+    pub min_company_stability: Option<i64>,
 }
 
 #[derive(Debug, Args)]
@@ -272,6 +295,22 @@ pub struct UpdateArgs {
         help = "Clear the application ease score (leave the job unscored)"
     )]
     pub clear_application_ease: bool,
+
+    #[arg(
+        long,
+        value_name = "N",
+        conflicts_with = "clear_company_stability",
+        value_parser = parse_company_stability,
+        help = "Company stability from 1 (least stable) to 5 (most stable)"
+    )]
+    pub company_stability: Option<i64>,
+
+    #[arg(
+        long,
+        conflicts_with = "company_stability",
+        help = "Clear the company stability score (leave the job unscored)"
+    )]
+    pub clear_company_stability: bool,
 }
 
 #[derive(Debug, Args)]
@@ -411,3 +450,24 @@ pub struct WatchTargetArgs {
 
 #[derive(Debug, Args)]
 pub struct SyncArgs {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_company_stability_table() {
+        for (raw, expected) in [("1", 1), ("2", 2), ("3", 3), ("4", 4), ("5", 5)] {
+            assert_eq!(parse_company_stability(raw), Ok(expected), "input {raw:?}");
+        }
+        // "03" is a base-10 representation of 3 (Req 3.4), so it is accepted.
+        assert_eq!(parse_company_stability("03"), Ok(3));
+        for raw in ["0", "6", "-1", "+3", "3.5", " 3", "3 ", "x", ""] {
+            assert_eq!(
+                parse_company_stability(raw),
+                Err(COMPANY_STABILITY_RANGE_MESSAGE.to_string()),
+                "input {raw:?}"
+            );
+        }
+    }
+}
