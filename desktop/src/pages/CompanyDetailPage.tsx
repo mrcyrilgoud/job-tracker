@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { CompanyScoresEditor } from "@/components/CompanyScoresEditor";
 import { CompanyCard } from "@/components/companies/CompanyCard";
 import { OpenPositionsPanel } from "@/components/companies/OpenPositionsPanel";
 import { api } from "@/lib/api";
@@ -103,6 +104,13 @@ export function CompanyDetailPage() {
         onTriage={actions.triageRole}
         isPending={actions.isPending}
         feedback={actions.feedback}
+      />
+
+      <CompanyScoresEditor
+        company={row.company}
+        onSaved={(company) => {
+          setRow((current) => (current ? { ...current, company } : current));
+        }}
       />
 
       <OpenPositionsPanel

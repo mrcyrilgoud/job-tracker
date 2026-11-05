@@ -21,11 +21,15 @@ fn main() {
         Ok(cli) => {
             let json = cli.json;
             let quiet = cli.quiet;
+            let score_import = matches!(
+                &cli.command,
+                Some(job_tracker_lib::cli::args::Commands::Scores(_))
+            );
             // If explicit CLI command or --run-jobs flag was provided, run the CLI
             if cli.command.is_some() || cli.run_jobs {
                 let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
                 if let Err(e) = rt.block_on(job_tracker_lib::run_cli(cli)) {
-                    if json {
+                    if json && (!score_import || e.code_parts().code != "score_import_failed") {
                         job_tracker_lib::cli::output::print_json_error(&e);
                     }
                     if !quiet {

@@ -29,7 +29,12 @@ import { JobsPage } from "./JobsPage";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-function makeJob(id: string, companyName: string, companyStability: number | null): JobListItem {
+function makeJob(
+  id: string,
+  companyName: string,
+  companyStability: number | null,
+  employmentStability: number | null = null,
+): JobListItem {
   return {
     job: {
       id,
@@ -42,7 +47,7 @@ function makeJob(id: string, companyName: string, companyStability: number | nul
       appeal: null,
       applicationEase: null,
       companyStability,
-      appliedAt: null,
+      employmentStability,
       lastCheckedAt: null,
       salaryMin: null,
       salaryMax: null,
@@ -53,10 +58,38 @@ function makeJob(id: string, companyName: string, companyStability: number | nul
   } as JobListItem;
 }
 
-function makeRow(id: string, name: string, stabilityAverage: number | null, watched: boolean): CompanyRow {
+function makeRow(id: string, name: string, companyStability: number | null, watched: boolean): CompanyRow {
   return {
-    company: { id, name, createdAt: "2026-01-01T00:00:00.000Z" },
-    watches: watched ? [{ id: `${id}-watch`, consecutiveSyncFailures: 0 }] : [],
+    company: {
+      id,
+      name,
+      careersUrl: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      companyStability,
+      companyStabilityRationale: null,
+      companyStabilityCitations: null,
+      companyStabilityScoredAt: companyStability === null ? null : "2026-01-01T00:00:00.000Z",
+      companyStabilityScoredBy: companyStability === null ? null : "manual",
+      employmentStability: null,
+      employmentStabilityRationale: null,
+      employmentStabilityCitations: null,
+      employmentStabilityScoredAt: null,
+      employmentStabilityScoredBy: null,
+    },
+    watches: watched
+      ? [{
+          id: `${id}-watch`,
+          companyId: id,
+          provider: "greenhouse" as const,
+          boardSlug: `${id}-board`,
+          lastSyncedAt: null,
+          consecutiveSyncFailures: 0,
+          lastSyncError: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        }]
+      : [],
     reviews: [],
     openPositionCount: 0,
     trackedJobCount: 1,
@@ -66,9 +99,7 @@ function makeRow(id: string, name: string, stabilityAverage: number | null, watc
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
-    stabilityAverage,
-    stabilityScoredJobCount: stabilityAverage === null ? 0 : 1,
-  } as unknown as CompanyRow;
+  } as CompanyRow;
 }
 
 const JOBS = [makeJob("j1", "AKASA", 5), makeJob("j2", "Abby Care", 3), makeJob("j3", "beta", null)];
@@ -166,6 +197,10 @@ function stabilitySelect(jobId: string): HTMLSelectElement {
   return host.querySelector<HTMLSelectElement>(`#stability-${jobId}`)!;
 }
 
+function employmentSelect(jobId: string): HTMLSelectElement {
+  return host.querySelector<HTMLSelectElement>(`#employment-stability-${jobId}`)!;
+}
+
 function pageAlert(): string | null {
   return [...host.querySelectorAll('[role="alert"]')].map((el) => el.textContent).join("|") || null;
 }
@@ -201,7 +236,7 @@ describe("JobsPage row stability control and sidebar refresh", () => {
     await click(sidebarButton("Filter companies"));
     await click(menuItem("Watched"));
     await click(sidebarButton("Filter companies"));
-    expect(companyLinkText()).toEqual(["AKASA4.0", "beta2.0"]);
+    expect(companyLinkText()).toEqual(["AKASACompany 4", "betaCompany 2"]);
   }
 
   it("sends only companyStability, shows the value optimistically, applies the response, and refetches companies once (Req 5.8, 5.9)", async () => {
@@ -273,13 +308,13 @@ describe("JobsPage row stability control and sidebar refresh", () => {
     await useMostStableWatchedView();
     apiMocks.updateJob.mockResolvedValue({ detail: { job: { ...JOBS[2].job, companyStability: 5 } } });
     apiMocks.listCompanies.mockResolvedValue({
-      companies: [makeRow("c-akasa", "AKASA", 4, true), makeRow("c-abby", "Abby Care", 3, false), makeRow("c-beta", "beta", 4.5, true)],
+      companies: [makeRow("c-akasa", "AKASA", 4, true), makeRow("c-abby", "Abby Care", 3, false), makeRow("c-beta", "beta", 5, true)],
     });
 
     await changeSelect(stabilitySelect("j3"), "5");
     await flush();
 
-    expect(companyLinkText()).toEqual(["beta4.5", "AKASA4.0"]);
+    expect(companyLinkText()).toEqual(["betaCompany 5", "AKASACompany 4"]);
     expect(sidebarButton("Filter companies").textContent).toContain("1");
     expect(JSON.parse(window.localStorage.getItem(COMPANY_VIEW_STORAGE_KEY)!)).toEqual({
       version: 1,
@@ -298,7 +333,7 @@ describe("JobsPage row stability control and sidebar refresh", () => {
     await flush();
 
     expect(stabilitySelect("j3").value).toBe("5");
-    expect(companyLinkText()).toEqual(["AKASA4.0", "beta2.0"]);
+    expect(companyLinkText()).toEqual(["AKASACompany 4", "betaCompany 2"]);
     expect(pageAlert()).toBeNull();
     expect(companiesSection().textContent).not.toContain("Couldn");
   });
@@ -387,5 +422,69 @@ describe("JobsPage stability sort, minimum filter, and count", () => {
     root = createRoot(host);
     await mount("/");
     expect(host.textContent).not.toContain("matching jobs");
+  });
+});
+
+describe("JobsPage employment stability controls", () => {
+  it("updates every loaded row for a company and restores all rows on failure", async () => {
+    const duplicateJobs = [
+      makeJob("j1", "AKASA", 5, 2),
+      makeJob("j2", "AKASA", 5, 2),
+      makeJob("j3", "beta", null, null),
+    ];
+    apiMocks.listJobsPage.mockResolvedValue({
+      jobs: duplicateJobs,
+      nextCursor: null,
+      totalCount: duplicateJobs.length,
+    });
+    await mount("/?status=applied");
+    expect([...employmentSelect("j1").options].map((option) => [option.value, option.textContent])).toEqual([
+      ["", "—"], ["1", "1"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"],
+    ]);
+
+    apiMocks.updateJob.mockResolvedValueOnce({
+      detail: { job: { ...duplicateJobs[0].job, employmentStability: 4 } },
+    });
+    await changeSelect(employmentSelect("j1"), "4");
+    await flush();
+    expect(apiMocks.updateJob).toHaveBeenCalledWith("j1", { employmentStability: 4 });
+    expect(employmentSelect("j1").value).toBe("4");
+    expect(employmentSelect("j2").value).toBe("4");
+
+    apiMocks.updateJob.mockRejectedValueOnce(new Error("save failed"));
+    await changeSelect(employmentSelect("j1"), "1");
+    await flush();
+    expect(employmentSelect("j1").value).toBe("4");
+    expect(employmentSelect("j2").value).toBe("4");
+    expect(pageAlert()).toContain("save failed");
+  });
+
+  it.each(["/", "/?status=applied", "/?favorites=true&view=list"]) (
+    "offers Employment stability sorting on %s with descending first selection",
+    async (entry) => {
+      await mount(entry);
+      const sort = host.querySelector<HTMLSelectElement>("#jobs-sort-field")!;
+      expect([...sort.options].some((option) => option.value === "employmentStability" && option.textContent === "Employment stability")).toBe(true);
+      await changeSelect(sort, "employmentStability");
+      await flush();
+      expect(locationParams().get("sortBy")).toBe("employmentStability");
+      expect(locationParams().get("sortOrder")).toBe("descending");
+    },
+  );
+
+  it("writes and requests the employment minimum without showing a malformed-value notice", async () => {
+    await mount("/?minEmploymentStability=3.0");
+    expect(host.textContent).not.toContain("invalid filter value");
+    const trigger = [...host.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.getAttribute("aria-controls") === "jobs-filter-popover")!;
+    await click(trigger);
+    const popover = host.querySelector<HTMLElement>("[role=dialog]")!;
+    const select = popover.querySelector<HTMLSelectElement>("#jobs-min-employment-stability")!;
+    expect(select.value).toBe("");
+    await changeSelect(select, "4");
+    await click(popover.querySelector<HTMLButtonElement>('button[type="submit"]')!);
+    await flush();
+    expect(locationParams().get("minEmploymentStability")).toBe("4");
+    expect(apiMocks.listJobsPage.mock.calls.at(-1)?.[0]).toMatchObject({ minEmploymentStability: 4 });
   });
 });

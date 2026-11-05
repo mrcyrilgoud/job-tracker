@@ -43,13 +43,33 @@ export type DetectedBoard = {
   postingId: string | null;
 };
 
+export type CompanyScoreSource = "manual" | "import";
+/** Alias matching the backend score source name. */
+export type ScoreSource = CompanyScoreSource;
+
+/** Company-owned stability scores and their supporting metadata. */
+export type CompanyScores = {
+  /** Company operating stability, from 1 (least stable) to 5 (most stable). */
+  companyStability: number | null;
+  companyStabilityRationale: string | null;
+  companyStabilityCitations: string[] | null;
+  companyStabilityScoredAt: string | null;
+  companyStabilityScoredBy: CompanyScoreSource | null;
+  /** Employment security, from 1 (least secure) to 5 (most secure). */
+  employmentStability: number | null;
+  employmentStabilityRationale: string | null;
+  employmentStabilityCitations: string[] | null;
+  employmentStabilityScoredAt: string | null;
+  employmentStabilityScoredBy: CompanyScoreSource | null;
+};
+
 export type Company = {
   id: string;
   name: string;
   careersUrl: string | null;
   createdAt: string;
   updatedAt: string;
-};
+} & CompanyScores;
 
 export type Job = {
   id: string;
@@ -79,6 +99,8 @@ export type Job = {
   applicationEase: number | null;
   /** How stable the hiring company seems, from 1 (least) to 5 (most). Null when unscored. */
   companyStability: number | null;
+  /** How secure employment at the company seems, from 1 (least secure) to 5 (most secure). Null when unscored. */
+  employmentStability: number | null;
   /** Optional annual USD salary bounds; a missing bound is open-ended. */
   salaryMin: number | null;
   salaryMax: number | null;
@@ -182,6 +204,7 @@ export type JobSummary = Pick<
   | "appeal"
   | "applicationEase"
   | "companyStability"
+  | "employmentStability"
   | "location"
 >;
 
@@ -207,7 +230,8 @@ export type JobListSortField =
   | "postingDate"
   | "appeal"
   | "companyName"
-  | "companyStability";
+  | "companyStability"
+  | "employmentStability";
 
 export type JobListSortDirection = "ascending" | "descending";
 
@@ -254,6 +278,8 @@ export type WatchRoleSummaryJob = Pick<
   | "updatedAt"
   | "salaryMin"
   | "salaryMax"
+  | "companyStability"
+  | "employmentStability"
 >;
 
 export type WatchRoleSummary = {
@@ -295,10 +321,6 @@ export type CompanyRow = {
   lastAppliedAt: string | null;
   /** Mean application_ease of wishlist jobs (1–5), unrounded. */
   wishlistEaseAverage: number | null;
-  /** Mean company_stability (1–5) over all Pipeline_Jobs with a valid score, unrounded. Null when none. */
-  stabilityAverage: number | null;
-  /** Pipeline_Jobs with a valid company_stability score. */
-  stabilityScoredJobCount: number;
 };
 
 export type DocumentListItem = Document & {

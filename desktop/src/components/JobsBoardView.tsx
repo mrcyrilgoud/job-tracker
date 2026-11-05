@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { COMPANY_STABILITY_SCALE_LABEL } from "@/components/CompanyStabilitySelect";
+import { EMPLOYMENT_STABILITY_SCALE_LABEL } from "@/components/EmploymentStabilitySelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { ArchiveIcon, statusIcons, TrashIcon } from "@/components/icons";
 import { StatusQuickChange } from "@/components/StatusQuickChange";
@@ -196,7 +197,15 @@ export function JobsBoardView({
                                 className="text-xs text-[var(--muted)]"
                                 title={COMPANY_STABILITY_SCALE_LABEL}
                               >
-                                Stability {job.companyStability}
+                                Company {job.companyStability}
+                              </span>
+                            ) : null}
+                            {job.employmentStability != null ? (
+                              <span
+                                className="text-xs text-[var(--muted)]"
+                                title={EMPLOYMENT_STABILITY_SCALE_LABEL}
+                              >
+                                Employment {job.employmentStability}
                               </span>
                             ) : null}
                           </div>
@@ -282,7 +291,12 @@ export function JobsBoardView({
                     {job.applicationEase != null ? ` · Ease ${job.applicationEase}` : ""}
                     {job.companyStability != null ? (
                       <span title={COMPANY_STABILITY_SCALE_LABEL}>
-                        {` · Stability ${job.companyStability}`}
+                        {` · Company ${job.companyStability}`}
+                      </span>
+                    ) : null}
+                    {job.employmentStability != null ? (
+                      <span title={EMPLOYMENT_STABILITY_SCALE_LABEL}>
+                        {` · Employment ${job.employmentStability}`}
                       </span>
                     ) : null}
                   </p>

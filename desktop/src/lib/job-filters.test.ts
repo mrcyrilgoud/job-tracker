@@ -16,6 +16,7 @@ describe("job filter draft", () => {
       location: "",
       remoteMode: "any",
       minStability: "",
+      minEmploymentStability: "",
     });
   });
 
@@ -32,6 +33,7 @@ describe("job filter draft", () => {
       location: "",
       remoteMode: "any",
       minStability: "",
+      minEmploymentStability: "",
     });
   });
 
@@ -48,6 +50,7 @@ describe("job filter draft", () => {
       location: "",
       remoteMode: "any",
       minStability: "",
+      minEmploymentStability: "",
     });
   });
 });
@@ -286,7 +289,9 @@ describe("job-filters property tests", () => {
 });
 import {
   countActiveJobFilters,
+  encodeMinEmploymentStabilityToUrl,
   encodeMinStabilityToUrl,
+  parseMinEmploymentStabilityFromUrl,
   parseMinStabilityFromUrl,
   type MinStability,
 } from "./job-filters";
@@ -334,5 +339,54 @@ describe("Minimum_Stability_Filter URL helpers", () => {
     const empty = { ...base, salaryMin: undefined, postingState: "", statuses: [] };
     expect(countActiveJobFilters(empty)).toBe(0);
     expect(countActiveJobFilters({ ...empty, minStability: min })).toBe(1);
+  });
+});
+
+describe("Minimum_Employment_Stability_Filter URL helpers", () => {
+  it.each<[string | null, MinStability | undefined]>([
+    ["1", 1], ["2", 2], ["3", 3], ["4", 4], ["5", 5],
+    [null, undefined], ["", undefined], ["0", undefined], ["6", undefined], ["3.0", undefined], [" 3", undefined],
+  ])("parses minEmploymentStability=%j as %j", (raw, expected) => {
+    const params = new URLSearchParams();
+    if (raw !== null) params.set("minEmploymentStability", raw);
+    expect(parseMinEmploymentStabilityFromUrl(params)).toBe(expected);
+  });
+});
+
+describe("company and employment minimum URL state", () => {
+  it("treats invalid employment URL values as Any and removes them when encoded", () => {
+    for (const raw of ["", "0", "6", "3.0", "03", " 3", "three"]) {
+      const params = new URLSearchParams(`minEmploymentStability=${encodeURIComponent(raw)}`);
+      expect(parseMinEmploymentStabilityFromUrl(params)).toBeUndefined();
+    }
+
+    const params = new URLSearchParams("minStability=4&minEmploymentStability=2");
+    encodeMinEmploymentStabilityToUrl(params, undefined);
+    expect(params.get("minStability")).toBe("4");
+    expect(params.has("minEmploymentStability")).toBe(false);
+    encodeMinEmploymentStabilityToUrl(params, 5);
+    expect(params.get("minEmploymentStability")).toBe("5");
+    encodeMinEmploymentStabilityToUrl(params, 0);
+    expect(params.has("minEmploymentStability")).toBe(false);
+  });
+
+  it("counts each active score minimum independently and together", () => {
+    const base = {
+      salaryMin: undefined,
+      salaryMax: undefined,
+      postingState: "",
+      statuses: [] as JobStatus[],
+      dateField: "" as const,
+      dateFrom: "",
+      dateTo: "",
+      location: "",
+      remoteMode: "any" as RemoteMode,
+      minStability: undefined,
+      minEmploymentStability: undefined,
+    };
+    expect(countActiveJobFilters(base)).toBe(0);
+    expect(countActiveJobFilters({ ...base, minStability: 3 })).toBe(1);
+    expect(countActiveJobFilters({ ...base, minEmploymentStability: 3 })).toBe(1);
+    expect(countActiveJobFilters({ ...base, minStability: 3, minEmploymentStability: 4 })).toBe(2);
   });
 });

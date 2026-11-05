@@ -3,15 +3,32 @@ use std::collections::{HashMap, HashSet};
 use chrono::{Datelike, Local, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::company_scores::{
+    company_scores_with_citations, write_company_scores, OptionalField, ScoreSource,
+};
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::models::{
-    checked_appeal, checked_application_ease, checked_company_stability, is_job_status, AttachedDocument, Company, Document,
-    Job, JobDetail, JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor,
-    JobListSort, JobListSortDirection, JobListSortField, JobListSummary, JobPageCursor, JobSort,
-    JobSummary, WeeklyActivity, WeeklyDay, COMPANY_STABILITY_RANGE_MESSAGE,
+    checked_appeal, checked_application_ease, checked_company_stability,
+    checked_employment_stability, is_job_status, AttachedDocument, Company, Document, Job,
+    JobDetail, JobDocument, JobEvent, JobListItem, JobListPage, JobListPageCursor, JobListSort,
+    JobListSortDirection, JobListSortField, JobListSummary, JobPageCursor, JobSort, JobSummary,
+    WeeklyActivity, WeeklyDay, COMPANY_STABILITY_RANGE_MESSAGE, EMPLOYMENT_STABILITY_RANGE_MESSAGE,
 };
 use crate::util::{create_id, guess_title_from_url, normalize_canonical_url, now_iso};
+
+fn decode_company_citations(raw: Option<String>) -> rusqlite::Result<Option<Vec<String>>> {
+    raw.map(|value| {
+        serde_json::from_str(&value).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    })
+    .transpose()
+}
 
 fn map_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
     Ok(Company {
@@ -20,11 +37,23 @@ fn map_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
         careers_url: row.get(2)?,
         created_at: row.get(3)?,
         updated_at: row.get(4)?,
+        scores: company_scores_with_citations(
+            row.get(5)?,
+            row.get(6)?,
+            decode_company_citations(row.get(7)?)?,
+            row.get(8)?,
+            row.get(9)?,
+            row.get(10)?,
+            row.get(11)?,
+            decode_company_citations(row.get(12)?)?,
+            row.get(13)?,
+            row.get(14)?,
+        ),
     })
 }
 
-/// Column order read by [`map_job`]. A company column joined after this list
-/// starts at [`JOB_COL_COUNT`].
+/// Column order read by [`map_job`]. Company-owned scores replace the legacy
+/// cache in every joined read; the cache remains writable for compatibility.
 pub const JOB_COLUMNS: &[&str] = &[
     "id",
     "company_id",
@@ -52,16 +81,45 @@ pub const JOB_COLUMNS: &[&str] = &[
     "salary_max",
     "application_ease",
     "company_stability",
+    "employment_stability",
 ];
 
 pub const JOB_COL_COUNT: usize = JOB_COLUMNS.len();
 
+/// Compact Jobs-page projection. Keep this count synchronized with the
+/// `JobSummary` mapper below so both company-owned score keys remain present.
+const JOB_PAGE_PROJECTION: &str = "j.id, j.title, j.status, j.applied_at, j.posting_state,
+    j.last_checked_at, j.source, j.is_new_from_watch, j.is_favorite,
+    j.updated_at, j.appeal, j.location, c.name, j.created_at, j.application_ease,
+    c.company_stability, c.employment_stability";
+#[cfg(test)]
+const JOB_PAGE_PROJECTION_COUNT: usize = 17;
+
+/// Compact watch-role projection. Watch responses also carry both company
+/// scores even though they omit the rest of the full Job shape.
+const WATCH_ROLE_PROJECTION: &str = "j.id, j.company_id, j.title, j.url, j.status, j.posting_state,
+    j.source, j.location, j.is_new_from_watch, j.watch_disposition,
+    j.updated_at, j.salary_min, j.salary_max,
+    c.company_stability, c.employment_stability, c.name";
+#[cfg(test)]
+const WATCH_ROLE_PROJECTION_COUNT: usize = 16;
+
 pub fn job_cols(alias: Option<&str>) -> String {
     JOB_COLUMNS
         .iter()
-        .map(|column| match alias {
-            Some(prefix) => format!("{prefix}.{column}"),
-            None => (*column).to_string(),
+        .map(|column| match *column {
+            "company_stability" => match alias {
+                Some(_) => "c.company_stability".to_string(),
+                None => "company_stability".to_string(),
+            },
+            "employment_stability" => match alias {
+                Some(_) => "c.employment_stability".to_string(),
+                None => "NULL".to_string(),
+            },
+            _ => match alias {
+                Some(prefix) => format!("{prefix}.{column}"),
+                None => (*column).to_string(),
+            },
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -95,6 +153,7 @@ pub(crate) fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         salary_max: row.get(23)?,
         application_ease: row.get(24)?,
         company_stability: row.get(25)?,
+        employment_stability: row.get(26)?,
     })
 }
 
@@ -150,6 +209,45 @@ pub fn create_job_from_url_with_careers(
     location: Option<&str>,
     careers_url: Option<&str>,
 ) -> AppResult<(Job, Company)> {
+    conn.execute_batch("SAVEPOINT job_create")
+        .map_err(map_sqlite)?;
+    let result = create_job_from_url_with_careers_inner(
+        conn,
+        url,
+        resolved_title,
+        company_name,
+        status,
+        applied_at,
+        notes,
+        description,
+        location,
+        careers_url,
+    );
+    match result {
+        Ok(value) => {
+            conn.execute_batch("RELEASE job_create")
+                .map_err(map_sqlite)?;
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK TO job_create; RELEASE job_create");
+            Err(error)
+        }
+    }
+}
+
+fn create_job_from_url_with_careers_inner(
+    conn: &Connection,
+    url: &str,
+    resolved_title: &str,
+    company_name: Option<&str>,
+    status: Option<&str>,
+    applied_at: Option<&str>,
+    notes: Option<&str>,
+    description: Option<&str>,
+    location: Option<&str>,
+    careers_url: Option<&str>,
+) -> AppResult<(Job, Company)> {
     let canonical_url = normalize_canonical_url(url).map_err(AppError::from)?;
     let existing: Option<String> = conn
         .query_row(
@@ -184,8 +282,10 @@ pub fn create_job_from_url_with_careers(
         r#"INSERT INTO jobs (
             id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
             posting_state, last_checked_at, last_check_result, source, notes, description, location,
-            is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at
-        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,?10,0,NULL,0,0,?11,?11)"#,
+            is_new_from_watch, watch_disposition, missing_from_sync_count, is_favorite, created_at, updated_at,
+            company_stability
+        ) VALUES (?1,?2,?3,?4,?5,NULL,?6,?7,'unknown',NULL,NULL,'manual',?8,?9,?10,0,NULL,0,0,?11,?11,
+                  (SELECT company_stability FROM companies WHERE id = ?2))"#,
         params![
             job_id,
             company.id,
@@ -229,7 +329,12 @@ pub fn find_or_create_company(
     let timestamp = now_iso();
     if let Some(mut existing) = conn
         .query_row(
-            "SELECT id, name, careers_url, created_at, updated_at FROM companies WHERE name = ?1 COLLATE NOCASE",
+            "SELECT id, name, careers_url, created_at, updated_at,
+                    company_stability, company_stability_rationale, company_stability_citations,
+                    company_stability_scored_at, company_stability_scored_by,
+                    employment_stability, employment_stability_rationale, employment_stability_citations,
+                    employment_stability_scored_at, employment_stability_scored_by
+             FROM companies WHERE name = ?1 COLLATE NOCASE",
             params![name],
             map_company,
         )
@@ -254,6 +359,7 @@ pub fn find_or_create_company(
         careers_url: careers_url.map(|s| s.to_string()),
         created_at: timestamp.clone(),
         updated_at: timestamp,
+        scores: Default::default(),
     };
     conn.execute(
         "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES (?1,?2,?3,?4,?5)",
@@ -275,6 +381,8 @@ fn delete_untracked_empty_company(conn: &Connection, company_id: &str) -> AppRes
     conn.execute(
         r#"DELETE FROM companies
            WHERE id = ?1
+             AND company_stability IS NULL
+             AND employment_stability IS NULL
              AND NOT EXISTS (SELECT 1 FROM jobs WHERE company_id = ?1)
              AND NOT EXISTS (SELECT 1 FROM company_watches WHERE company_id = ?1)
              AND NOT EXISTS (SELECT 1 FROM careers_page_snapshots WHERE company_id = ?1)
@@ -287,7 +395,10 @@ fn delete_untracked_empty_company(conn: &Connection, company_id: &str) -> AppRes
 
 pub fn get_job_by_id(conn: &Connection, job_id: &str) -> AppResult<Option<Job>> {
     conn.query_row(
-        &format!("SELECT {} FROM jobs WHERE id = ?1", job_cols(None)),
+        &format!(
+            "SELECT {} FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
+            job_cols(Some("j"))
+        ),
         params![job_id],
         map_job,
     )
@@ -325,6 +436,9 @@ pub struct JobFilters {
     /// Minimum_Stability_Filter: when `Some(n)`, keep only jobs whose
     /// `company_stability >= n`; unscored jobs are excluded. Callers validate 1–5.
     pub min_company_stability: Option<i64>,
+    /// Minimum employment stability for the job's company. Unscored companies are excluded.
+    /// Callers validate 1–5 before constructing filters.
+    pub min_employment_stability: Option<i64>,
     /// Optional row cap applied as `LIMIT ?` — used to cap watch-preview fetches.
     pub limit: Option<usize>,
 }
@@ -370,10 +484,16 @@ fn jobs_page_order_by(sort_spec: JobListSort, applied_tab: bool) -> &'static str
             " ORDER BY j.created_at DESC, j.id ASC"
         }
         (JobListSortField::CompanyStability, JobListSortDirection::Ascending) => {
-            " ORDER BY (j.company_stability IS NULL) ASC, j.company_stability ASC, j.id ASC"
+            " ORDER BY (c.company_stability IS NULL) ASC, c.company_stability ASC, j.id ASC"
         }
         (JobListSortField::CompanyStability, JobListSortDirection::Descending) => {
-            " ORDER BY (j.company_stability IS NULL) ASC, j.company_stability DESC, j.id ASC"
+            " ORDER BY (c.company_stability IS NULL) ASC, c.company_stability DESC, j.id ASC"
+        }
+        (JobListSortField::EmploymentStability, JobListSortDirection::Ascending) => {
+            " ORDER BY (c.employment_stability IS NULL) ASC, c.employment_stability ASC, j.id ASC"
+        }
+        (JobListSortField::EmploymentStability, JobListSortDirection::Descending) => {
+            " ORDER BY (c.employment_stability IS NULL) ASC, c.employment_stability DESC, j.id ASC"
         }
         (JobListSortField::Appeal, JobListSortDirection::Ascending) => {
             " ORDER BY (j.appeal IS NULL) ASC, j.appeal ASC, j.id ASC"
@@ -461,13 +581,28 @@ fn append_sort_spec_cursor(
             values.push(Box::new(cursor.id.clone()));
         }
         JobListSortField::Appeal => {
-            append_nullable_score_cursor(where_sql, values, "j.appeal", sort_spec.direction, cursor)?;
+            append_nullable_score_cursor(
+                where_sql,
+                values,
+                "j.appeal",
+                sort_spec.direction,
+                cursor,
+            )?;
         }
         JobListSortField::CompanyStability => {
             append_nullable_score_cursor(
                 where_sql,
                 values,
-                "j.company_stability",
+                "c.company_stability",
+                sort_spec.direction,
+                cursor,
+            )?;
+        }
+        JobListSortField::EmploymentStability => {
+            append_nullable_score_cursor(
+                where_sql,
+                values,
+                "c.employment_stability",
                 sort_spec.direction,
                 cursor,
             )?;
@@ -527,6 +662,10 @@ pub struct WatchJobSummary {
     pub updated_at: String,
     pub salary_min: Option<i64>,
     pub salary_max: Option<i64>,
+    /// Company-owned operating stability, repeated on compact watch responses.
+    pub company_stability: Option<i64>,
+    /// Company-owned employment stability, repeated on compact watch responses.
+    pub employment_stability: Option<i64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -734,7 +873,13 @@ fn append_job_filters(
     // Minimum_Stability_Filter (Req 7.2–7.4, 7.10, 8.1, 8.5): `n` is bound as a
     // param; the `IS NOT NULL` guard excludes unscored jobs. `None` adds nothing.
     if let Some(minimum) = filters.min_company_stability {
-        sql.push_str(" AND j.company_stability IS NOT NULL AND j.company_stability >= ?");
+        sql.push_str(" AND c.company_stability IS NOT NULL AND c.company_stability >= ?");
+        values.push(Box::new(minimum));
+    }
+    // Employment_Stability is company-owned, so filter against the joined
+    // company score. The null guard keeps unscored companies out of minimums.
+    if let Some(minimum) = filters.min_employment_stability {
+        sql.push_str(" AND c.employment_stability IS NOT NULL AND c.employment_stability >= ?");
         values.push(Box::new(minimum));
     }
     if filters.new_from_watch == Some(true) {
@@ -790,8 +935,7 @@ fn append_job_filters(
             .map(str::trim)
             .filter(|text| !text.is_empty());
         let remote_mode = filters.remote_mode.as_deref();
-        let has_remote_restriction =
-            matches!(remote_mode, Some("remoteOnly") | Some("onsiteOnly"));
+        let has_remote_restriction = matches!(remote_mode, Some("remoteOnly") | Some("onsiteOnly"));
 
         // Exclude location-less jobs whenever a text or remote restriction is
         // active (Req 3.9), so `remoteOnly`/`onsiteOnly` never surface jobs with
@@ -927,7 +1071,14 @@ pub fn list_jobs_page(
     requested_sort_spec: Option<JobListSort>,
     cursor: Option<JobListPageCursor>,
 ) -> AppResult<JobListPage> {
-    list_jobs_page_sized(conn, filters, sort, requested_sort_spec, cursor, JOB_PAGE_SIZE)
+    list_jobs_page_sized(
+        conn,
+        filters,
+        sort,
+        requested_sort_spec,
+        cursor,
+        JOB_PAGE_SIZE,
+    )
 }
 
 /// Same as [`list_jobs_page`] with an explicit page size, so tests can page
@@ -956,8 +1107,10 @@ pub(crate) fn list_jobs_page_sized(
         );
         let count_params: Vec<&dyn rusqlite::types::ToSql> =
             values.iter().map(|v| v.as_ref()).collect();
-        conn.query_row(&count_sql, count_params.as_slice(), |row| row.get::<_, i64>(0))
-            .map_err(map_sqlite)?
+        conn.query_row(&count_sql, count_params.as_slice(), |row| {
+            row.get::<_, i64>(0)
+        })
+        .map_err(map_sqlite)?
     };
     if let Some(cursor) = &cursor {
         append_jobs_page_cursor(
@@ -971,10 +1124,7 @@ pub(crate) fn list_jobs_page_sized(
     }
     values.push(Box::new((page_size + 1) as i64));
     let sql = format!(
-        "SELECT j.id, j.title, j.status, j.applied_at, j.posting_state,
-                j.last_checked_at, j.source, j.is_new_from_watch, j.is_favorite,
-                j.updated_at, j.appeal, j.location, c.name, j.created_at, j.application_ease,
-                j.company_stability
+        "SELECT {JOB_PAGE_PROJECTION}
          FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
          {} LIMIT ?",
         jobs_page_order_by(sort_spec, applied_tab)
@@ -998,6 +1148,7 @@ pub(crate) fn list_jobs_page_sized(
                     appeal: row.get(10)?,
                     application_ease: row.get(14)?,
                     company_stability: row.get(15)?,
+                    employment_stability: row.get(16)?,
                     location: row.get(11)?,
                 },
                 company_name: row.get(12)?,
@@ -1020,10 +1171,12 @@ pub(crate) fn list_jobs_page_sized(
                     JobListSortField::AppliedAt => item.job.applied_at.clone(),
                     JobListSortField::PostingDate => Some(created_at.clone()),
                     JobListSortField::Appeal => item.job.appeal.map(|score| score.to_string()),
-                    JobListSortField::CompanyStability => item
-                        .job
-                        .company_stability
-                        .map(|score| score.to_string()),
+                    JobListSortField::CompanyStability => {
+                        item.job.company_stability.map(|score| score.to_string())
+                    }
+                    JobListSortField::EmploymentStability => {
+                        item.job.employment_stability.map(|score| score.to_string())
+                    }
                     JobListSortField::CompanyName => Some(item.company_name.clone()),
                 },
                 applied_tab,
@@ -1128,9 +1281,7 @@ pub fn list_watch_roles_page(
         }
         values.push(Box::new((JOB_PAGE_SIZE + 1) as i64));
         let sql = format!(
-            "SELECT j.id, j.company_id, j.title, j.url, j.status, j.posting_state,
-                    j.source, j.location, j.is_new_from_watch, j.watch_disposition,
-                    j.updated_at, j.salary_min, j.salary_max, c.name
+            "SELECT {WATCH_ROLE_PROJECTION}
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id{where_sql}
              ORDER BY j.updated_at DESC, j.id DESC LIMIT ?"
         );
@@ -1154,8 +1305,10 @@ pub fn list_watch_roles_page(
                         updated_at: row.get(10)?,
                         salary_min: row.get(11)?,
                         salary_max: row.get(12)?,
+                        company_stability: row.get(13)?,
+                        employment_stability: row.get(14)?,
                     },
-                    company_name: row.get(13)?,
+                    company_name: row.get(15)?,
                 })
             })
             .map_err(map_sqlite)?
@@ -1284,7 +1437,11 @@ pub(crate) fn retain_watch_positions_matching_criteria(
 pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDetail>> {
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT {}, c.id, c.name, c.careers_url, c.created_at, c.updated_at
+            "SELECT {}, c.id, c.name, c.careers_url, c.created_at, c.updated_at,
+                    c.company_stability, c.company_stability_rationale, c.company_stability_citations,
+                    c.company_stability_scored_at, c.company_stability_scored_by,
+                    c.employment_stability, c.employment_stability_rationale, c.employment_stability_citations,
+                    c.employment_stability_scored_at, c.employment_stability_scored_by
              FROM jobs j INNER JOIN companies c ON j.company_id = c.id WHERE j.id = ?1",
             job_cols(Some("j"))
         ))
@@ -1301,6 +1458,18 @@ pub fn get_job_detail(conn: &Connection, job_id: &str) -> AppResult<Option<JobDe
                     careers_url: row.get(company_at + 2)?,
                     created_at: row.get(company_at + 3)?,
                     updated_at: row.get(company_at + 4)?,
+                    scores: company_scores_with_citations(
+                        row.get(company_at + 5)?,
+                        row.get(company_at + 6)?,
+                        decode_company_citations(row.get(company_at + 7)?)?,
+                        row.get(company_at + 8)?,
+                        row.get(company_at + 9)?,
+                        row.get(company_at + 10)?,
+                        row.get(company_at + 11)?,
+                        decode_company_citations(row.get(company_at + 12)?)?,
+                        row.get(company_at + 13)?,
+                        row.get(company_at + 14)?,
+                    ),
                 },
             ))
         })
@@ -1401,6 +1570,23 @@ where
     }
 }
 
+fn deserialize_employment_stability_update<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(number) => number
+            .as_i64()
+            .map(|score| Some(Some(score)))
+            .ok_or_else(|| D::Error::custom(EMPLOYMENT_STABILITY_RANGE_MESSAGE)),
+        _ => Err(D::Error::custom(EMPLOYMENT_STABILITY_RANGE_MESSAGE)),
+    }
+}
+
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateJobInput {
@@ -1430,6 +1616,23 @@ pub struct UpdateJobInput {
     /// None = keep; Some(None) = clear; Some(Some(n)) = set (range-checked in update_job).
     #[serde(default, deserialize_with = "deserialize_company_stability_update")]
     pub company_stability: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_employment_stability_update")]
+    pub employment_stability: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub company_stability_rationale: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub company_stability_citations: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub employment_stability_rationale: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_update")]
+    pub employment_stability_citations: Option<Option<Vec<String>>>,
+}
+
+fn update_score_field<T: Clone>(field: &Option<Option<T>>) -> OptionalField<Option<T>> {
+    match field {
+        Some(value) => OptionalField::Present(value.clone()),
+        None => OptionalField::Omitted,
+    }
 }
 
 use serde::Deserialize;
@@ -1439,7 +1642,36 @@ pub fn update_job(
     job_id: &str,
     updates: UpdateJobInput,
 ) -> AppResult<JobDetail> {
+    conn.execute_batch("SAVEPOINT job_update")
+        .map_err(map_sqlite)?;
+    let result = update_job_inner(conn, job_id, updates);
+    match result {
+        Ok(detail) => {
+            conn.execute_batch("RELEASE job_update")
+                .map_err(map_sqlite)?;
+            Ok(detail)
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK TO job_update; RELEASE job_update");
+            Err(error)
+        }
+    }
+}
+
+fn update_job_inner(
+    conn: &Connection,
+    job_id: &str,
+    updates: UpdateJobInput,
+) -> AppResult<JobDetail> {
     let existing = get_job_by_id(conn, job_id)?.ok_or_else(|| AppError::from("Job not found"))?;
+    // Validate score values before resolving a destination company. This keeps
+    // invalid score requests side-effect free, including for new company names.
+    if let Some(Some(score)) = updates.company_stability {
+        checked_company_stability(score).map_err(AppError::from)?;
+    }
+    if let Some(Some(score)) = updates.employment_stability {
+        checked_employment_stability(score).map_err(AppError::from)?;
+    }
     let timestamp = now_iso();
     let mut company_id = existing.company_id.clone();
     let mut company_change: Option<(String, String)> = None;
@@ -1483,10 +1715,54 @@ pub fn update_job(
         company_id = company.id;
     }
 
+    let score_requested = updates.company_stability.is_some()
+        || updates.employment_stability.is_some()
+        || updates.company_stability_rationale.is_some()
+        || updates.company_stability_citations.is_some()
+        || updates.employment_stability_rationale.is_some()
+        || updates.employment_stability_citations.is_some();
+    if score_requested {
+        write_company_scores(
+            conn,
+            &company_id,
+            &crate::company_scores::ScoreWriteInput {
+                company_stability: update_score_field(&updates.company_stability),
+                employment_stability: update_score_field(&updates.employment_stability),
+                company_stability_rationale: update_score_field(
+                    &updates.company_stability_rationale,
+                ),
+                company_stability_citations: update_score_field(
+                    &updates.company_stability_citations,
+                ),
+                employment_stability_rationale: update_score_field(
+                    &updates.employment_stability_rationale,
+                ),
+                employment_stability_citations: update_score_field(
+                    &updates.employment_stability_citations,
+                ),
+                source: ScoreSource::Manual,
+                scored_at_override: None,
+            },
+        )?;
+    }
+
     let next_status = updates
         .status
         .clone()
         .unwrap_or_else(|| existing.status.clone());
+    let moved = company_id != existing.company_id;
+    let destination_cache = if moved {
+        Some(
+            conn.query_row(
+                "SELECT company_stability FROM companies WHERE id = ?1",
+                params![company_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .map_err(map_sqlite)?,
+        )
+    } else {
+        None
+    };
 
     let next_applied = if let Some(applied) = &updates.applied_at {
         applied.clone()
@@ -1541,42 +1817,66 @@ pub fn update_job(
         }
         None => existing.application_ease,
     };
-    let company_stability = match updates.company_stability {
-        Some(next) => {
-            if let Some(score) = next {
-                checked_company_stability(score).map_err(AppError::from)?;
-            }
-            next
-        }
-        None => existing.company_stability,
-    };
+    let cache_update = destination_cache;
 
-    conn.execute(
-        r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
-           applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10, is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14, application_ease=?15, updated_at=?16, company_stability=?17
-           WHERE id=?18"#,
-        params![
-            title,
-            company_id,
-            next_url,
-            next_canonical,
-            next_status,
-            next_applied,
-            notes,
-            description,
-            location,
-            if is_new { 1 } else { 0 },
-            if is_fav { 1 } else { 0 },
-            appeal,
-            salary_min,
-            salary_max,
-            application_ease,
-            timestamp,
-            company_stability,
-            job_id
-        ],
-    )
-    .map_err(map_sqlite)?;
+    if let Some(cache_value) = cache_update {
+        conn.execute(
+            r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
+               applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10,
+               is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14,
+               application_ease=?15, updated_at=?16, company_stability=?17
+               WHERE id=?18"#,
+            params![
+                title,
+                company_id,
+                next_url,
+                next_canonical,
+                next_status,
+                next_applied,
+                notes,
+                description,
+                location,
+                if is_new { 1 } else { 0 },
+                if is_fav { 1 } else { 0 },
+                appeal,
+                salary_min,
+                salary_max,
+                application_ease,
+                timestamp,
+                cache_value,
+                job_id
+            ],
+        )
+        .map_err(map_sqlite)?;
+    } else {
+        conn.execute(
+            r#"UPDATE jobs SET title=?1, company_id=?2, url=?3, canonical_url=?4, status=?5,
+               applied_at=?6, notes=?7, description=?8, location=?9, is_new_from_watch=?10,
+               is_favorite=?11, appeal=?12, salary_min=?13, salary_max=?14,
+               application_ease=?15, updated_at=?16
+               WHERE id=?17"#,
+            params![
+                title,
+                company_id,
+                next_url,
+                next_canonical,
+                next_status,
+                next_applied,
+                notes,
+                description,
+                location,
+                if is_new { 1 } else { 0 },
+                if is_fav { 1 } else { 0 },
+                appeal,
+                salary_min,
+                salary_max,
+                application_ease,
+                timestamp,
+                job_id
+            ],
+        )
+        .map_err(map_sqlite)?;
+    }
 
     if let Some(status) = &updates.status {
         if *status != existing.status {
@@ -2139,7 +2439,10 @@ mod tests {
             "nope".to_string(),
         ];
         let (valid, invalid) = partition_statuses(&requested);
-        assert_eq!(valid, vec!["applied".to_string(), "interviewing".to_string()]);
+        assert_eq!(
+            valid,
+            vec!["applied".to_string(), "interviewing".to_string()]
+        );
         assert_eq!(invalid, vec!["bogus".to_string(), "nope".to_string()]);
     }
 
@@ -2169,7 +2472,10 @@ mod tests {
     fn date_column_maps_supported_fields_and_rejects_others() {
         assert_eq!(date_column(Some("appliedAt")), Some("j.applied_at"));
         assert_eq!(date_column(Some("postingDate")), Some("j.created_at"));
-        assert_eq!(date_column(Some("lastCheckedAt")), Some("j.last_checked_at"));
+        assert_eq!(
+            date_column(Some("lastCheckedAt")),
+            Some("j.last_checked_at")
+        );
         assert_eq!(date_column(Some("createdAt")), None);
         assert_eq!(date_column(Some("")), None);
         assert_eq!(date_column(None), None);
@@ -2203,6 +2509,123 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         migrate(&connection).unwrap();
         connection
+    }
+
+    #[test]
+    fn job_projections_keep_both_company_scores_and_stable_column_counts() {
+        let conn = test_connection();
+        let timestamp = "2026-01-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO companies (id, name, company_stability, employment_stability,
+                                    created_at, updated_at)
+             VALUES ('projection-company', 'Projection Co', 4, 2, ?1, ?1)",
+            [timestamp],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO jobs (id, company_id, title, url, canonical_url, status,
+                               posting_state, source, is_new_from_watch, watch_disposition,
+                               company_stability, created_at, updated_at)
+             VALUES ('projection-job', 'projection-company', 'Projection Role',
+                     'https://example.test/projection', 'https://example.test/projection',
+                     'wishlist', 'active', 'greenhouse', 1, 'new', 4, ?1, ?1)",
+            [timestamp],
+        )
+        .unwrap();
+
+        assert_eq!(JOB_COL_COUNT, 27);
+        let mut job_columns_stmt = conn.prepare("PRAGMA table_info(jobs)").unwrap();
+        let job_table_columns = job_columns_stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(!job_table_columns
+            .iter()
+            .any(|column| column == "employment_stability"));
+        assert_eq!(job_cols(Some("j")).split(", ").count(), JOB_COL_COUNT);
+        assert!(job_cols(Some("j")).contains("c.company_stability"));
+        assert!(job_cols(Some("j")).contains("c.employment_stability"));
+        assert_eq!(
+            conn.prepare(&format!(
+                "SELECT {JOB_PAGE_PROJECTION} FROM jobs j JOIN companies c ON c.id = j.company_id"
+            ))
+            .unwrap()
+            .column_count(),
+            JOB_PAGE_PROJECTION_COUNT
+        );
+        assert_eq!(
+            conn.prepare(&format!("SELECT {WATCH_ROLE_PROJECTION} FROM jobs j JOIN companies c ON c.id = j.company_id"))
+                .unwrap()
+                .column_count(),
+            WATCH_ROLE_PROJECTION_COUNT
+        );
+
+        let assert_scores = |value: serde_json::Value| {
+            assert_eq!(value["companyStability"], 4);
+            assert_eq!(value["employmentStability"], 2);
+        };
+        assert_scores(
+            serde_json::to_value(get_job_by_id(&conn, "projection-job").unwrap().unwrap()).unwrap(),
+        );
+        assert_scores(
+            serde_json::to_value(
+                &list_jobs(
+                    &conn,
+                    JobFilters {
+                        new_from_watch: Some(true),
+                        ..JobFilters::default()
+                    },
+                )
+                .unwrap()[0]
+                    .job,
+            )
+            .unwrap(),
+        );
+        assert_scores(
+            serde_json::to_value(
+                &list_jobs_page(
+                    &conn,
+                    JobFilters {
+                        new_from_watch: Some(true),
+                        ..JobFilters::default()
+                    },
+                    JobSort::default(),
+                    None,
+                    None,
+                )
+                .unwrap()
+                .jobs[0]
+                    .job,
+            )
+            .unwrap(),
+        );
+        assert_scores(
+            serde_json::to_value(
+                &list_open_watch_positions(&conn, "projection-company").unwrap()[0].job,
+            )
+            .unwrap(),
+        );
+        assert_scores(
+            serde_json::to_value(
+                &list_watch_roles_page(
+                    &conn,
+                    WatchRoleFilters {
+                        new_only: Some(true),
+                        ..WatchRoleFilters::default()
+                    },
+                    None,
+                )
+                .unwrap()
+                .jobs[0]
+                    .job,
+            )
+            .unwrap(),
+        );
+        let detail = get_job_detail(&conn, "projection-job").unwrap().unwrap();
+        assert_scores(serde_json::to_value(detail.job).unwrap());
+        assert_eq!(detail.company.scores.company_stability, Some(4));
+        assert_eq!(detail.company.scores.employment_stability, Some(2));
     }
 
     #[test]
@@ -2499,6 +2922,143 @@ mod tests {
         );
     }
 
+    // Feature: company-employment-stability, Property 8/9: nullable score order,
+    // matching keyset pages, totals, and conjunctive minimum filters.
+    #[test]
+    fn employment_sort_and_minimum_filters_page_with_matching_totals() {
+        let conn = test_connection();
+        for (id, name, company_stability, employment_stability) in [
+            ("stable-a", "Stable A", Some(4_i64), Some(2_i64)),
+            ("stable-b", "Stable B", Some(4_i64), Some(5_i64)),
+            (
+                "unscored-employment",
+                "Unscored Employment",
+                Some(5_i64),
+                None,
+            ),
+            ("unscored-company", "Unscored Company", None, Some(3_i64)),
+        ] {
+            conn.execute(
+                "INSERT INTO companies (id, name, company_stability, employment_stability,
+                                        created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, '2026-01-01', '2026-01-01')",
+                params![id, name, company_stability, employment_stability],
+            )
+            .unwrap();
+        }
+
+        for (id, company_id, cache, title) in [
+            ("employment-01", "stable-a", Some(4_i64), "Stable Role"),
+            ("employment-02", "stable-a", Some(4_i64), "Stable Role"),
+            ("employment-03", "stable-b", Some(4_i64), "Stable Role"),
+            ("employment-04", "stable-b", Some(4_i64), "Stable Role"),
+            (
+                "employment-05",
+                "unscored-employment",
+                Some(5_i64),
+                "Stable Role",
+            ),
+            ("employment-06", "unscored-company", None, "Stable Role"),
+        ] {
+            let url = format!("https://example.test/jobs/{id}");
+            conn.execute(
+                "INSERT INTO jobs (id, company_id, title, url, canonical_url, status,
+                                   posting_state, source, company_stability, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4, 'wishlist', 'active', 'manual', ?5,
+                         '2026-01-01', '2026-01-01')",
+                params![id, company_id, title, url, cache],
+            )
+            .unwrap();
+        }
+
+        let filters = JobFilters {
+            search: Some("Stable".into()),
+            min_company_stability: Some(4),
+            min_employment_stability: Some(2),
+            ..JobFilters::default()
+        };
+        let sort = JobListSort {
+            field: JobListSortField::EmploymentStability,
+            direction: JobListSortDirection::Descending,
+        };
+        let ascending = list_jobs_page_sized(
+            &conn,
+            JobFilters::default(),
+            JobSort::NewestPosting,
+            Some(JobListSort {
+                field: JobListSortField::EmploymentStability,
+                direction: JobListSortDirection::Ascending,
+            }),
+            None,
+            10,
+        )
+        .unwrap();
+        assert_eq!(
+            ascending
+                .jobs
+                .iter()
+                .map(|item| item.job.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "employment-01",
+                "employment-02",
+                "employment-06",
+                "employment-03",
+                "employment-04",
+                "employment-05",
+            ]
+        );
+
+        let first = list_jobs_page_sized(
+            &conn,
+            filters.clone(),
+            JobSort::NewestPosting,
+            Some(sort),
+            None,
+            2,
+        )
+        .unwrap();
+        assert_eq!(first.total_count, 4);
+        assert_eq!(
+            first
+                .jobs
+                .iter()
+                .map(|item| item.job.id.as_str())
+                .collect::<Vec<_>>(),
+            ["employment-03", "employment-04"]
+        );
+        assert_eq!(first.jobs[0].job.employment_stability, Some(5));
+
+        let second = list_jobs_page_sized(
+            &conn,
+            filters.clone(),
+            JobSort::NewestPosting,
+            Some(sort),
+            first.next_cursor,
+            2,
+        )
+        .unwrap();
+        assert_eq!(second.total_count, 4);
+        assert_eq!(
+            second
+                .jobs
+                .iter()
+                .map(|item| item.job.id.as_str())
+                .collect::<Vec<_>>(),
+            ["employment-01", "employment-02"]
+        );
+        assert!(second.next_cursor.is_none());
+
+        let ids = list_job_ids(&conn, filters).unwrap();
+        assert_eq!(ids.len(), 4);
+        assert!(ids.iter().all(|id| {
+            matches!(
+                id.as_str(),
+                "employment-01" | "employment-02" | "employment-03" | "employment-04"
+            )
+        }));
+    }
+
     #[test]
     fn jobs_page_sort_cursors_cover_duplicate_and_null_keys() {
         let conn = test_connection();
@@ -2555,6 +3115,8 @@ mod tests {
             JobListSortField::PostingDate,
             JobListSortField::Appeal,
             JobListSortField::CompanyName,
+            JobListSortField::CompanyStability,
+            JobListSortField::EmploymentStability,
         ] {
             for direction in [
                 JobListSortDirection::Ascending,
@@ -4080,7 +4642,7 @@ mod tests {
 
     // ---- Company stability (spec company-stability-score, task 2.2) ----
 
-    fn stability_job(conn: &Connection, slug: &str) -> Job {
+    fn company_score_job(conn: &Connection, slug: &str) -> Job {
         create_job_from_url(
             conn,
             &format!("https://example.com/jobs/{slug}"),
@@ -4095,105 +4657,165 @@ mod tests {
         .0
     }
 
-    fn stability_of(conn: &Connection, job_id: &str) -> Option<i64> {
-        get_job_by_id(conn, job_id).unwrap().unwrap().company_stability
+    fn company_score_of(conn: &Connection, job_id: &str) -> Option<i64> {
+        get_job_by_id(conn, job_id)
+            .unwrap()
+            .unwrap()
+            .company_stability
     }
 
-    /// Req 1.6, 2.1, 2.2, 2.3: every read path returns the stored value and the
-    /// serialized job always carries the `companyStability` key.
+    /// Req 1.6, 2.1, 2.2, 2.3, 3.14: both company-owned scores round-trip through
+    /// every read path, and every posting at the company exposes the same values.
     #[test]
-    fn company_stability_round_trips_through_every_read_path() {
+    fn company_scores_round_trip_through_every_read_path_and_posting() {
         let conn = test_connection();
-        let job = stability_job(&conn, "stability-round-trip");
-        for value in [None, Some(1), Some(2), Some(3), Some(4), Some(5), None] {
+        let first = company_score_job(&conn, "stability-round-trip-first");
+        let second = company_score_job(&conn, "stability-round-trip-second");
+
+        for (company_score, employment_score) in [
+            (None, None),
+            (Some(1), Some(1)),
+            (Some(2), Some(2)),
+            (Some(3), Some(3)),
+            (Some(4), Some(4)),
+            (Some(5), Some(5)),
+            (None, None),
+        ] {
             let updated = update_job(
                 &conn,
-                &job.id,
+                &first.id,
                 UpdateJobInput {
-                    company_stability: Some(value),
+                    company_stability: Some(company_score),
+                    employment_stability: Some(employment_score),
                     ..UpdateJobInput::default()
                 },
             )
             .unwrap();
-            let detail = get_job_detail(&conn, &job.id).unwrap().unwrap();
+            let detail = get_job_detail(&conn, &first.id).unwrap().unwrap();
             let listed = list_jobs(&conn, JobFilters::default()).unwrap();
-            let page =
-                list_jobs_page(&conn, JobFilters::default(), JobSort::NewestPosting, None, None)
-                    .unwrap();
-            let expected = serde_json::json!(value);
-            for job_json in [
+            let page = list_jobs_page(
+                &conn,
+                JobFilters::default(),
+                JobSort::NewestPosting,
+                None,
+                None,
+            )
+            .unwrap();
+            let expected_company = serde_json::json!(company_score);
+            let expected_employment = serde_json::json!(employment_score);
+
+            let read_jobs = vec![
                 serde_json::to_value(&updated.job).unwrap(),
                 serde_json::to_value(&detail.job).unwrap(),
-                serde_json::to_value(&listed[0].job).unwrap(),
-                serde_json::to_value(&page.jobs[0].job).unwrap(),
-            ] {
+            ]
+            .into_iter()
+            .chain(
+                listed
+                    .iter()
+                    .map(|item| serde_json::to_value(&item.job).unwrap()),
+            )
+            .chain(
+                page.jobs
+                    .iter()
+                    .map(|item| serde_json::to_value(&item.job).unwrap()),
+            )
+            .collect::<Vec<_>>();
+            assert!(read_jobs.iter().any(|job| job["id"] == second.id));
+            for job_json in read_jobs {
                 let object = job_json.as_object().unwrap();
-                assert!(object.contains_key("companyStability"), "{value:?}");
-                assert_eq!(object["companyStability"], expected, "{value:?}");
+                assert!(object.contains_key("companyStability"));
+                assert!(object.contains_key("employmentStability"));
+                assert_eq!(object["companyStability"], expected_company);
+                assert_eq!(object["employmentStability"], expected_employment);
             }
+
+            let caches: Vec<Option<i64>> = conn
+                .prepare("SELECT company_stability FROM jobs WHERE company_id = ?1 ORDER BY id")
+                .unwrap()
+                .query_map(params![first.company_id], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(caches, vec![company_score, company_score]);
         }
     }
 
-    /// Req 2.7, 2.8, 2.11: other edits, archive, unarchive, and `closed` keep the
-    /// score; a stability-only update keeps the other scores, favorite, status.
+    /// Req 2.1, 2.3, 3.14, 3.16, 3.17: a score write is company-scoped, while
+    /// posting scores, favorites, status, notes, and events remain per-job.
     #[test]
-    fn company_stability_is_independent_of_other_job_fields() {
+    fn company_score_writes_fan_out_without_changing_posting_state() {
         let conn = test_connection();
-        let job = stability_job(&conn, "stability-independent");
-        set_job_favorite(&conn, &job.id, true).unwrap();
+        let first = company_score_job(&conn, "stability-independent-first");
+        let second = company_score_job(&conn, "stability-independent-second");
+        set_job_favorite(&conn, &first.id, true).unwrap();
         update_job(
             &conn,
-            &job.id,
+            &first.id,
             UpdateJobInput {
                 appeal: Some(Some(2)),
                 application_ease: Some(Some(5)),
                 company_stability: Some(Some(4)),
-                ..UpdateJobInput::default()
-            },
-        )
-        .unwrap();
-
-        let edited = update_job(
-            &conn,
-            &job.id,
-            UpdateJobInput {
+                employment_stability: Some(Some(2)),
                 notes: Some(Some("recruiter call".into())),
                 ..UpdateJobInput::default()
             },
         )
         .unwrap();
-        assert_eq!(edited.job.company_stability, Some(4));
-        assert_eq!(archive_job(&conn, &job.id).unwrap().job.company_stability, Some(4));
-        assert_eq!(
-            unarchive_job(&conn, &job.id, None).unwrap().job.company_stability,
-            Some(4)
-        );
-        let closed = update_job(
-            &conn,
-            &job.id,
-            UpdateJobInput {
-                status: Some("closed".into()),
-                ..UpdateJobInput::default()
-            },
-        )
-        .unwrap();
-        assert_eq!(closed.job.company_stability, Some(4));
+        let second_before = get_job_by_id(&conn, &second.id).unwrap().unwrap();
+        let events_before: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id IN (?1, ?2)",
+                params![first.id, second.id],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         let rescored = update_job(
             &conn,
-            &job.id,
+            &first.id,
             UpdateJobInput {
                 company_stability: Some(Some(1)),
+                employment_stability: Some(Some(5)),
                 ..UpdateJobInput::default()
             },
         )
         .unwrap()
         .job;
-        assert_eq!(rescored.company_stability, Some(1));
+        let second_after = get_job_by_id(&conn, &second.id).unwrap().unwrap();
+
+        assert_eq!(
+            (rescored.company_stability, rescored.employment_stability),
+            (Some(1), Some(5))
+        );
+        assert_eq!(
+            (
+                second_after.company_stability,
+                second_after.employment_stability
+            ),
+            (Some(1), Some(5))
+        );
+        assert_eq!(second_after.appeal, second_before.appeal);
+        assert_eq!(
+            second_after.application_ease,
+            second_before.application_ease
+        );
+        assert_eq!(second_after.is_favorite, second_before.is_favorite);
+        assert_eq!(second_after.status, second_before.status);
+        assert_eq!(second_after.notes, second_before.notes);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id IN (?1, ?2)",
+                params![first.id, second.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            events_before
+        );
         assert_eq!(rescored.appeal, Some(2));
         assert_eq!(rescored.application_ease, Some(5));
         assert!(rescored.is_favorite);
-        assert_eq!(rescored.status, "closed");
+        assert_eq!(rescored.status, "wishlist");
+        assert_eq!(rescored.notes.as_deref(), Some("recruiter call"));
     }
 
     /// Req 2.4, 2.5, 2.6: invalid payloads, alone or bundled with a valid change,
@@ -4201,7 +4823,7 @@ mod tests {
     #[test]
     fn invalid_company_stability_rejects_whole_update_and_keeps_job() {
         let conn = test_connection();
-        let job = stability_job(&conn, "stability-invalid");
+        let job = company_score_job(&conn, "stability-invalid");
         update_job(
             &conn,
             &job.id,
@@ -4252,9 +4874,9 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("Job not found"));
 
-        let created = stability_job(&conn, "stability-new");
+        let created = company_score_job(&conn, "stability-new");
         assert_eq!(created.company_stability, None);
-        assert_eq!(stability_of(&conn, &created.id), None);
+        assert_eq!(company_score_of(&conn, &created.id), None);
 
         let company = find_or_create_company(&conn, "Watched Co", None).unwrap();
         let watch_id = insert_watch_pending_job(
@@ -4270,7 +4892,125 @@ mod tests {
         .unwrap();
         let saved = save_open_watch_job(&conn, &watch_id).unwrap();
         assert_eq!(saved.company_stability, None);
-        assert_eq!(stability_of(&conn, &watch_id), None);
+        assert_eq!(company_score_of(&conn, &watch_id), None);
+    }
+
+    #[test]
+    fn company_scores_are_read_from_company_and_cache_follows_lifecycle() {
+        let conn = test_connection();
+        let first = company_score_job(&conn, "company-owned-first");
+        let second = company_score_job(&conn, "company-owned-second");
+        update_job(
+            &conn,
+            &first.id,
+            UpdateJobInput {
+                company_stability: Some(Some(4)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+
+        // The company is authoritative even if a legacy cache row is stale.
+        conn.execute(
+            "UPDATE jobs SET company_stability = 1 WHERE id = ?1",
+            params![second.id],
+        )
+        .unwrap();
+        assert_eq!(company_score_of(&conn, &second.id), Some(4));
+        assert_eq!(
+            conn.query_row(
+                "SELECT company_stability FROM jobs WHERE id = ?1",
+                params![second.id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap(),
+            Some(1)
+        );
+
+        // Inserts and moves initialize only the moved/inserted row's cache.
+        let inserted = company_score_job(&conn, "company-owned-inserted");
+        assert_eq!(
+            conn.query_row(
+                "SELECT company_stability FROM jobs WHERE id = ?1",
+                params![inserted.id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap(),
+            Some(4)
+        );
+        let destination = company_score_job(&conn, "company-owned-destination");
+        update_job(
+            &conn,
+            &destination.id,
+            UpdateJobInput {
+                company_name: Some("Destination Co".into()),
+                company_stability: Some(Some(2)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        let events_before_move = conn
+            .query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id = ?1",
+                params![first.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        update_job(
+            &conn,
+            &first.id,
+            UpdateJobInput {
+                company_name: Some("Destination Co".into()),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(company_score_of(&conn, &first.id), Some(2));
+        assert_eq!(company_score_of(&conn, &inserted.id), Some(4));
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id = ?1 AND type = 'company_changed'",
+                params![first.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            events_before_move + 1,
+            conn.query_row(
+                "SELECT COUNT(*) FROM job_events WHERE job_id = ?1",
+                params![first.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn scored_empty_companies_are_retained_after_last_job_delete() {
+        let conn = test_connection();
+        let job = company_score_job(&conn, "scored-empty-company");
+        let company_id = job.company_id.clone();
+        update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_stability: Some(Some(5)),
+                ..UpdateJobInput::default()
+            },
+        )
+        .unwrap();
+        delete_job(&conn, &job.id).unwrap();
+        assert!(conn
+            .query_row(
+                "SELECT 1 FROM companies WHERE id = ?1",
+                params![company_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .unwrap()
+            .is_some());
     }
 
     // ---- Query-time filtering integration tests (task 8.3) ----
@@ -4563,7 +5303,15 @@ mod tests {
                                posting_state, last_checked_at, source, location, \
                                is_new_from_watch, missing_from_sync_count, created_at, updated_at) \
              VALUES (?1, 'prop-co', ?1, ?2, ?2, ?3, ?4, 'active', ?5, 'manual', ?6, 0, 0, ?7, ?7)",
-            params![id, url, status, applied_at, last_checked_at, location, created_at],
+            params![
+                id,
+                url,
+                status,
+                applied_at,
+                last_checked_at,
+                location,
+                created_at
+            ],
         )
         .unwrap();
     }
@@ -4892,16 +5640,16 @@ mod tests {
     /// dates, full ISO timestamps, start-of-day, end-of-day, and NULL across
     /// the test days.
     const DATE_VALUES: [(&str, bool); 10] = [
-        ("2026-08-23", false),                      // bare date
-        ("2026-08-23T00:00:00", false),             // start of day
-        ("2026-08-23T12:30:00", false),             // midday full ISO
-        ("2026-08-23T23:59:59.999999999", false),   // end of day
-        ("2026-08-22T23:59:59", false),             // just before day 23
-        ("2026-08-24T00:00:00", false),             // just after day 23
-        ("2026-08-25T08:00:00Z", false),            // later day with Z suffix
-        ("2026-08-22", false),                      // bare date, earlier day
-        ("", true),                                 // NULL field
-        ("2026-08-24", false),                      // bare date, later day
+        ("2026-08-23", false),                    // bare date
+        ("2026-08-23T00:00:00", false),           // start of day
+        ("2026-08-23T12:30:00", false),           // midday full ISO
+        ("2026-08-23T23:59:59.999999999", false), // end of day
+        ("2026-08-22T23:59:59", false),           // just before day 23
+        ("2026-08-24T00:00:00", false),           // just after day 23
+        ("2026-08-25T08:00:00Z", false),          // later day with Z suffix
+        ("2026-08-22", false),                    // bare date, earlier day
+        ("", true),                               // NULL field
+        ("2026-08-24", false),                    // bare date, later day
     ];
 
     // --- Property 7: Location-text substring match (DB-backed) ---
@@ -5279,22 +6027,36 @@ mod tests {
     }
 
     /// Insert all jobs with direct SQL in one transaction (fast for 500 rows).
+    /// Each generated row gets its own company so the generated score values
+    /// model company-owned stability rather than conflicting per-job caches.
     fn stability_prop_insert(conn: &Connection, jobs: &[(String, Option<i64>)]) {
         let tx = conn.unchecked_transaction().unwrap();
         {
-            let mut stmt = tx
+            let mut company_stmt = tx
+                .prepare(
+                    "INSERT INTO companies (id, name, created_at, updated_at, company_stability)
+                     VALUES (?1, ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', ?3)",
+                )
+                .unwrap();
+            let mut job_stmt = tx
                 .prepare(
                     "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, \
                                        posting_state, source, is_new_from_watch, \
                                        missing_from_sync_count, company_stability, \
                                        created_at, updated_at) \
-                     VALUES (?1, 'prop-co', ?1, ?2, ?2, 'wishlist', 'active', 'manual', 0, 0, ?3, \
+                     VALUES (?1, ?2, ?1, ?3, ?3, 'wishlist', 'active', 'manual', 0, 0, ?4, \
                              '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
                 )
                 .unwrap();
-            for (id, stability) in jobs {
+            for (index, (id, stability)) in jobs.iter().enumerate() {
+                let company_id = format!("prop-co-{index}");
                 let url = format!("https://example.test/stability/{id}");
-                stmt.execute(params![id, url, stability]).unwrap();
+                company_stmt
+                    .execute(params![company_id, format!("Prop Co {index}"), stability])
+                    .unwrap();
+                job_stmt
+                    .execute(params![id, company_id, url, stability])
+                    .unwrap();
             }
         }
         tx.commit().unwrap();
@@ -5413,8 +6175,14 @@ mod tests {
         stability: Option<i64>,
     }
 
-    const MIN_FILTER_STATUSES: [&str; 6] =
-        ["wishlist", "applied", "interviewing", "rejected", "archived", "closed"];
+    const MIN_FILTER_STATUSES: [&str; 6] = [
+        "wishlist",
+        "applied",
+        "interviewing",
+        "rejected",
+        "archived",
+        "closed",
+    ];
     const MIN_FILTER_TITLE_WORDS: [&str; 3] = ["Engineer", "Designer", "Manager"];
 
     fn min_filter_job() -> impl Strategy<Value = MinFilterJob> {
@@ -5425,12 +6193,14 @@ mod tests {
             any::<bool>(),
             stability_value(),
         )
-            .prop_map(|(status, title_word, appeal, is_favorite, stability)| MinFilterJob {
-                status,
-                title_word,
-                appeal,
-                is_favorite,
-                stability,
+            .prop_map(|(status, title_word, appeal, is_favorite, stability)| {
+                MinFilterJob {
+                    status,
+                    title_word,
+                    appeal,
+                    is_favorite,
+                    stability,
+                }
             })
     }
 
@@ -5440,26 +6210,41 @@ mod tests {
     fn min_filter_insert(conn: &Connection, jobs: &[(String, MinFilterJob)]) {
         let tx = conn.unchecked_transaction().unwrap();
         {
+            let mut company_stmt = tx
+                .prepare(
+                    "INSERT INTO companies (id, name, created_at, updated_at, company_stability)
+                     VALUES (?1, ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', ?3)",
+                )
+                .unwrap();
             let mut stmt = tx
                 .prepare(
                     "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, \
                                        posting_state, source, is_new_from_watch, \
                                        missing_from_sync_count, is_favorite, appeal, \
                                        company_stability, created_at, updated_at) \
-                     VALUES (?1, 'prop-co', ?2, ?3, ?3, ?4, 'active', 'manual', 0, 0, ?5, ?6, \
-                             ?7, ?8, ?8)",
+                     VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'active', 'manual', 0, 0, ?6, ?7, \
+                             ?8, ?9, ?9)",
                 )
                 .unwrap();
             let count = jobs.len().max(1);
             for (index, (id, job)) in jobs.iter().enumerate() {
+                let company_id = format!("min-filter-co-{index}");
                 let url = format!("https://example.test/min-filter/{id}");
                 let title = format!("{} {index}", job.title_word);
                 // Scrambled minute breaks the link to insertion order; the
                 // seconds field (index < 60) keeps every timestamp unique.
                 let minute = (index * 37) % count % 60;
                 let stamp = format!("2026-01-01T00:{minute:02}:{:02}Z", index % 60);
+                company_stmt
+                    .execute(params![
+                        company_id,
+                        format!("Min Filter Co {index}"),
+                        job.stability
+                    ])
+                    .unwrap();
                 stmt.execute(params![
                     id,
+                    company_id,
                     title,
                     url,
                     job.status,
@@ -5611,6 +6396,486 @@ mod tests {
                     is_subset(&filtered_list, &list_m),
                     "list_jobs result for {} is not a subset of the result for {}", n, m
                 );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod task_24_tests {
+    use super::*;
+    use crate::company_scores::{
+        read_company_scores, write_company_scores, OptionalField, ScoreSource, ScoreWriteInput,
+    };
+    use crate::db::migrate::migrate;
+    use proptest::prelude::*;
+    use rusqlite::{params, Connection};
+    use std::collections::HashSet;
+
+    fn connection() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn
+    }
+
+    fn create_role(conn: &Connection, slug: &str, company: &str) -> Job {
+        create_job_from_url(
+            conn,
+            &format!("https://example.com/task-24/{slug}"),
+            "Task 2.4 role",
+            Some(company),
+            Some("wishlist"),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .0
+    }
+
+    fn score_company(
+        conn: &Connection,
+        company_id: &str,
+        company: Option<i64>,
+        employment: Option<i64>,
+    ) {
+        write_company_scores(
+            conn,
+            company_id,
+            &ScoreWriteInput {
+                company_stability: OptionalField::present(company),
+                employment_stability: OptionalField::present(employment),
+                source: ScoreSource::Manual,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    fn cache_rows(conn: &Connection) -> Vec<(String, String, Option<i64>, Option<i64>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT j.id, j.company_id, j.company_stability, c.company_stability
+             FROM jobs j JOIN companies c ON c.id = j.company_id ORDER BY j.id",
+            )
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    fn assert_cache_invariant(conn: &Connection) {
+        for (job_id, company_id, cache, company_score) in cache_rows(conn) {
+            assert_eq!(
+                cache, company_score,
+                "cache mismatch for job {job_id} at {company_id}"
+            );
+        }
+    }
+
+    fn unrelated_job_snapshot(
+        conn: &Connection,
+    ) -> Vec<(
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+        i64,
+    )> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, company_id, updated_at, notes, appeal, application_ease, is_favorite
+             FROM jobs ORDER BY id",
+            )
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    // Feature: company-employment-stability, Property 4: Company stability cache fan-out is exact
+    // Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.8, 2.9, 3.16, 3.17
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn prop_cache_fan_out_survives_generated_lifecycle_operations(operations in prop::collection::vec(0u8..5, 1..=20)) {
+            let conn = connection();
+            let first = create_role(&conn, "fanout-first", "Acme");
+            let second = create_role(&conn, "fanout-second", "Acme");
+            let other = create_role(&conn, "fanout-other", "Beta");
+            score_company(&conn, &first.company_id, Some(3), Some(2));
+            score_company(&conn, &other.company_id, Some(5), Some(4));
+            assert_cache_invariant(&conn);
+
+            for (step, operation) in operations.into_iter().enumerate() {
+                match operation {
+                    0 => {
+                        let before = unrelated_job_snapshot(&conn);
+                        score_company(&conn, &first.company_id, Some((step as i64 % 5) + 1), None);
+                        assert_eq!(unrelated_job_snapshot(&conn), before);
+                    }
+                    1 => {
+                        let before = unrelated_job_snapshot(&conn);
+                        score_company(&conn, &other.company_id, None, Some((step as i64 % 5) + 1));
+                        assert_eq!(unrelated_job_snapshot(&conn), before);
+                    }
+                    2 => {
+                        let _ = create_role(&conn, &format!("fanout-new-{step}"), "Acme");
+                    }
+                    3 => {
+                        if get_job_by_id(&conn, &first.id).unwrap().is_some() {
+                            update_job(&conn, &first.id, UpdateJobInput {
+                                company_name: Some("Beta".into()),
+                                ..Default::default()
+                            }).unwrap();
+                        }
+                    }
+                    4 => {
+                        if get_job_by_id(&conn, &second.id).unwrap().is_some() {
+                            update_job(&conn, &second.id, UpdateJobInput {
+                                notes: Some(Some(format!("step {step}"))),
+                                ..Default::default()
+                            }).unwrap();
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                assert_cache_invariant(&conn);
+            }
+        }
+    }
+
+    // Feature: company-employment-stability, Property 5: Score and job transactions are atomic
+    // Validates: Requirements 2.7, 5.4, 5.5, 5.6, 5.7, 5.9, 5.10, 5.11, 5.12, 5.13, 6.21, 6.22
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn prop_combined_move_and_score_failures_leave_the_database_unchanged(mode in 0u8..4) {
+            let conn = connection();
+            let job = create_role(&conn, "atomic-job", "Acme");
+            update_job(&conn, &job.id, UpdateJobInput {
+                company_stability: Some(Some(3)),
+                employment_stability: Some(Some(3)),
+                ..Default::default()
+            }).unwrap();
+            if mode == 2 {
+                let destination = find_or_create_company(&conn, "Existing destination", None).unwrap();
+                score_company(&conn, &destination.id, Some(2), Some(2));
+            }
+            let before_job = serde_json::to_value(get_job_by_id(&conn, &job.id).unwrap()).unwrap();
+            let before_companies: Vec<(String, Option<i64>, Option<i64>)> = conn.prepare(
+                "SELECT id, company_stability, employment_stability FROM companies ORDER BY id"
+            ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+
+            let result = match mode {
+                0 => update_job(&conn, &job.id, UpdateJobInput {
+                    company_name: Some("Created only if broken".into()),
+                    company_stability: Some(Some(6)),
+                    ..Default::default()
+                }),
+                1 => update_job(&conn, &job.id, UpdateJobInput {
+                    company_name: Some("Created then rolled back".into()),
+                    company_stability: Some(Some(5)),
+                    salary_min: Some(Some(-1)),
+                    ..Default::default()
+                }),
+                2 => {
+                    let destination: (String, String) = conn.query_row(
+                        "SELECT id, name FROM companies WHERE name = 'Existing destination'", [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    ).unwrap();
+                    update_job(&conn, &job.id, UpdateJobInput {
+                        company_name: Some(destination.1),
+                        company_stability: Some(Some(5)),
+                        salary_min: Some(Some(-1)),
+                        ..Default::default()
+                    })
+                }
+                3 => update_job(&conn, "missing-job", UpdateJobInput {
+                    company_name: Some("Missing job destination".into()),
+                    company_stability: Some(Some(5)),
+                    ..Default::default()
+                }),
+                _ => unreachable!(),
+            };
+            prop_assert!(result.is_err());
+            prop_assert_eq!(serde_json::to_value(get_job_by_id(&conn, &job.id).unwrap()).unwrap(), before_job);
+            let after_companies: Vec<(String, Option<i64>, Option<i64>)> = conn.prepare(
+                "SELECT id, company_stability, employment_stability FROM companies ORDER BY id"
+            ).unwrap().query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            prop_assert_eq!(after_companies, before_companies);
+            assert_cache_invariant(&conn);
+        }
+    }
+
+    // Feature: company-employment-stability, Property 8: Nullable score ordering and paging match the reference
+    // Validates: Requirements 6.10, 6.11, 6.12, 7.8, 7.9, 7.12, 7.13
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn prop_nullable_score_sort_pages_match_reference(
+            company_scores in prop::collection::vec(prop::option::of(1i64..=5), 1..=12),
+            employment_scores in prop::collection::vec(prop::option::of(1i64..=5), 1..=12),
+            field_choice in 0usize..2,
+            descending in any::<bool>(),
+            page_size in 1usize..=5,
+        ) {
+            let n = company_scores.len().min(employment_scores.len());
+            let conn = connection();
+            let mut rows = Vec::new();
+            for index in 0..n {
+                let company = find_or_create_company(&conn, &format!("Sort Company {index}"), None).unwrap();
+                let job = create_role(&conn, &format!("sort-{index}"), &company.name);
+                conn.execute(
+                    "UPDATE companies SET company_stability = ?1, employment_stability = ?2 WHERE id = ?3",
+                    params![company_scores[index], employment_scores[index], company.id],
+                ).unwrap();
+                rows.push((job.id, if field_choice == 0 { company_scores[index] } else { employment_scores[index] }));
+            }
+            rows.sort_by(|(left_id, left_score), (right_id, right_score)| {
+                match (left_score, right_score) {
+                    (Some(left), Some(right)) => left.cmp(right).then_with(|| left_id.cmp(right_id)),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => left_id.cmp(right_id),
+                }
+            });
+            if descending {
+                rows.sort_by(|(left_id, left_score), (right_id, right_score)| {
+                    match (left_score, right_score) {
+                        (Some(left), Some(right)) => right.cmp(left).then_with(|| left_id.cmp(right_id)),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => left_id.cmp(right_id),
+                    }
+                });
+            }
+            let sort_spec = JobListSort {
+                field: if field_choice == 0 { JobListSortField::CompanyStability } else { JobListSortField::EmploymentStability },
+                direction: if descending { JobListSortDirection::Descending } else { JobListSortDirection::Ascending },
+            };
+            let mut cursor = None;
+            let mut actual = Vec::new();
+            loop {
+                let page = list_jobs_page_sized(&conn, JobFilters::default(), JobSort::NewestPosting, Some(sort_spec), cursor, page_size).unwrap();
+                prop_assert_eq!(page.total_count, n as i64);
+                actual.extend(page.jobs.into_iter().map(|item| item.job.id));
+                cursor = page.next_cursor;
+                if cursor.is_none() { break; }
+            }
+            let expected_ids = rows.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+            prop_assert_eq!(&actual, &expected_ids);
+            prop_assert_eq!(actual.iter().collect::<HashSet<_>>().len(), n);
+        }
+    }
+
+    // Feature: company-employment-stability, Property 9: Minimum filters are pure conjunctive restrictions
+    // Validates: Requirements 6.10, 6.11, 6.12, 7.10, 7.11, 7.12, 7.13, 7.14, 7.15, 7.16, 7.17
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn prop_minimum_company_and_employment_filters_are_conjunctive(
+            scores in prop::collection::vec((prop::option::of(1i64..=5), prop::option::of(1i64..=5)), 1..=12),
+            company_min in 1i64..=5,
+            employment_min in 1i64..=5,
+            status_filter in any::<bool>(),
+        ) {
+            let conn = connection();
+            for (index, (company_score, employment_score)) in scores.iter().enumerate() {
+                let company = find_or_create_company(&conn, &format!("Filter Company {index}"), None).unwrap();
+                let job = create_role(&conn, &format!("filter-{index}"), &company.name);
+                conn.execute(
+                    "UPDATE companies SET company_stability = ?1, employment_stability = ?2 WHERE id = ?3",
+                    params![company_score, employment_score, company.id],
+                ).unwrap();
+                if status_filter && index % 2 == 0 {
+                    conn.execute("UPDATE jobs SET status = 'applied' WHERE id = ?1", params![job.id]).unwrap();
+                }
+            }
+            let mut base = JobFilters::default();
+            if status_filter { base.status = Some("wishlist".into()); }
+            let mut restricted = base.clone();
+            restricted.min_company_stability = Some(company_min);
+            restricted.min_employment_stability = Some(employment_min);
+            let base_ids = list_jobs(&conn, base.clone()).unwrap().into_iter().map(|item| item.job.id).collect::<Vec<_>>();
+            let restricted_ids = list_jobs(&conn, restricted.clone()).unwrap().into_iter().map(|item| item.job.id).collect::<Vec<_>>();
+            let expected = base_ids.iter().filter(|id| {
+                let (company_score, employment_score): (Option<i64>, Option<i64>) = conn.query_row(
+                    "SELECT c.company_stability, c.employment_stability FROM jobs j JOIN companies c ON c.id=j.company_id WHERE j.id=?1",
+                    params![id], |row| Ok((row.get(0)?, row.get(1)?))
+                ).unwrap();
+                company_score.is_some_and(|value| value >= company_min) && employment_score.is_some_and(|value| value >= employment_min)
+            }).cloned().collect::<Vec<_>>();
+            prop_assert_eq!(&restricted_ids, &expected);
+            let base_page = list_jobs_page(&conn, base, JobSort::NewestPosting, None, None).unwrap();
+            let expected_page = base_page.jobs.iter().map(|item| item.job.id.clone())
+                .filter(|id| expected.contains(id)).collect::<Vec<_>>();
+            let page = list_jobs_page(&conn, restricted, JobSort::NewestPosting, None, None).unwrap();
+            prop_assert_eq!(page.total_count, expected_page.len() as i64);
+            prop_assert_eq!(page.jobs.into_iter().map(|item| item.job.id).collect::<Vec<_>>(), expected_page);
+        }
+    }
+
+    #[test]
+    fn move_to_new_destination_sets_cache_and_later_failure_rolls_back_destination_creation() {
+        let conn = connection();
+        let job = create_role(&conn, "move-valid", "Source");
+        let moved = update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_name: Some("New destination".into()),
+                company_stability: Some(Some(4)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(moved.job.company_stability, Some(4));
+        assert_eq!(moved.company.scores.company_stability, Some(4));
+        assert_cache_invariant(&conn);
+
+        let failed = update_job(
+            &conn,
+            &moved.job.id,
+            UpdateJobInput {
+                company_name: Some("Rolled back destination".into()),
+                company_stability: Some(Some(5)),
+                salary_min: Some(Some(-1)),
+                ..Default::default()
+            },
+        );
+        assert!(failed.is_err());
+        let destination_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM companies WHERE name = 'Rolled back destination'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(destination_count, 0);
+        assert_eq!(
+            get_job_by_id(&conn, &job.id).unwrap().unwrap().company_id,
+            moved.job.company_id
+        );
+        assert_eq!(
+            read_company_scores(&conn, &moved.job.company_id)
+                .unwrap()
+                .company_stability,
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn missing_ids_and_invalid_scores_have_no_company_side_effects() {
+        let conn = connection();
+        let job = create_role(&conn, "missing-id", "Source");
+        let before_company_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM companies", [], |row| row.get(0))
+            .unwrap();
+        assert!(update_job(
+            &conn,
+            "missing",
+            UpdateJobInput {
+                company_name: Some("Must not exist".into()),
+                company_stability: Some(Some(4)),
+                ..Default::default()
+            }
+        )
+        .is_err());
+        assert!(update_job(
+            &conn,
+            &job.id,
+            UpdateJobInput {
+                company_name: Some("Invalid score destination".into()),
+                company_stability: Some(Some(0)),
+                ..Default::default()
+            }
+        )
+        .is_err());
+        let after_company_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM companies", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(after_company_count, before_company_count);
+    }
+
+    #[test]
+    fn score_fanout_records_no_job_event_and_preserves_unrelated_fields() {
+        let conn = connection();
+        let first = create_role(&conn, "event-first", "Event Co");
+        let second = create_role(&conn, "event-second", "Event Co");
+        conn.execute("UPDATE jobs SET appeal=2, application_ease=4, is_favorite=1, notes='keep', updated_at='2026-01-01T00:00:00.000Z' WHERE id=?1", params![first.id]).unwrap();
+        let before = unrelated_job_snapshot(&conn);
+        let events_before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM job_events", [], |row| row.get(0))
+            .unwrap();
+        let company_id = first.company_id.clone();
+        score_company(&conn, &company_id, Some(5), None);
+        assert_eq!(unrelated_job_snapshot(&conn), before);
+        let events_after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM job_events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(events_after, events_before);
+        assert_eq!(
+            get_job_by_id(&conn, &first.id)
+                .unwrap()
+                .unwrap()
+                .company_stability,
+            Some(5)
+        );
+        assert_eq!(
+            get_job_by_id(&conn, &second.id)
+                .unwrap()
+                .unwrap()
+                .company_stability,
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn ipc_score_payloads_accept_null_and_valid_integers_but_reject_invalid_ranges() {
+        let conn = connection();
+        let job = create_role(&conn, "ipc-parser", "IPC Co");
+        for payload in [
+            serde_json::json!({"companyStability": null, "employmentStability": null}),
+            serde_json::json!({"companyStability": 1, "employmentStability": 5}),
+        ] {
+            let input: UpdateJobInput = serde_json::from_value(payload).unwrap();
+            update_job(&conn, &job.id, input).unwrap();
+        }
+        for payload in [
+            serde_json::json!({"companyStability": 0}),
+            serde_json::json!({"employmentStability": 6}),
+            serde_json::json!({"companyStability": 2.5}),
+            serde_json::json!({"employmentStability": "3"}),
+        ] {
+            match serde_json::from_value::<UpdateJobInput>(payload.clone()) {
+                Ok(input) => assert!(
+                    update_job(&conn, &job.id, input).is_err(),
+                    "accepted {payload}"
+                ),
+                Err(error) => assert!(error.to_string().contains("stability"), "{error}"),
             }
         }
     }

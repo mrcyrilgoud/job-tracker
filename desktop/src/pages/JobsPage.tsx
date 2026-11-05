@@ -11,6 +11,10 @@ import {
   COMPANY_STABILITY_SCALE_LABEL,
   CompanyStabilitySelect,
 } from "@/components/CompanyStabilitySelect";
+import {
+  EMPLOYMENT_STABILITY_SCALE_LABEL,
+  EmploymentStabilitySelect,
+} from "@/components/EmploymentStabilitySelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import {
   ArchiveIcon,
@@ -36,10 +40,12 @@ import {
 } from "@/lib/job-list-sort";
 import {
   countActiveJobFilters,
+  encodeMinEmploymentStabilityToUrl,
   encodeMinStabilityToUrl,
   encodeStatusesToUrl,
   filterDraftFromUrl,
   parseDateFilterFromUrl,
+  parseMinEmploymentStabilityFromUrl,
   parseMinStabilityFromUrl,
   parseRemoteModeFromUrl,
   parseSalaryBound,
@@ -113,6 +119,7 @@ export function JobsPage() {
   const activeRemoteMode = useMemo(() => parseRemoteModeFromUrl(searchParams), [searchParams]);
   const activeLocation = (locationParam ?? "").trim();
   const activeMinStability = parseMinStabilityFromUrl(searchParams);
+  const activeMinEmploymentStability = parseMinEmploymentStabilityFromUrl(searchParams);
   // A URL param was present but the parser dropped it as malformed / out-of-domain.
   const droppedFilterNotice = useMemo(() => {
     const statusesDropped = Boolean(statusesParam) && activeStatuses.length === 0;
@@ -217,6 +224,7 @@ export function JobsPage() {
         isFavorite?: boolean;
         isArchived?: boolean;
         minCompanyStability?: number;
+        minEmploymentStability?: number;
       };
     } | null;
   }>({ running: false, activeKey: null, activeSequence: null, pending: null });
@@ -282,6 +290,7 @@ export function JobsPage() {
       isFavorite: isFavoriteFilter,
       isArchived: isArchivedFilter,
       minCompanyStability: activeMinStability,
+      minEmploymentStability: activeMinEmploymentStability,
       sort,
       sortSpec,
   });
@@ -294,6 +303,7 @@ export function JobsPage() {
   const requestKeyFor = (searchText: string) => JSON.stringify({
     filtersKey,
     minCompanyStability: activeMinStability,
+    minEmploymentStability: activeMinEmploymentStability,
     search: searchText,
     sort,
     sortSpec,
@@ -353,6 +363,7 @@ export function JobsPage() {
             ? false
             : undefined,
         minCompanyStability: activeMinStability,
+        minEmploymentStability: activeMinEmploymentStability,
       },
     };
     if (!quiet && !queue.running) setLoading(true);
@@ -411,7 +422,7 @@ export function JobsPage() {
       }
     };
     void drain();
-  }, [status, activeStatuses, companyId, postingState, salaryMin, salaryMax, activeDateFilter, activeLocation, activeRemoteMode, isFavoriteFilter, isArchivedFilter, activeMinStability, sort, sortSpec, filtersKey, reportRefreshFailed]);
+  }, [status, activeStatuses, companyId, postingState, salaryMin, salaryMax, activeDateFilter, activeLocation, activeRemoteMode, isFavoriteFilter, isArchivedFilter, activeMinStability, activeMinEmploymentStability, sort, sortSpec, filtersKey, reportRefreshFailed]);
 
   const loadMore = useCallback(() => {
     if (!nextCursor || loadingMore || loading) return;
@@ -576,49 +587,74 @@ export function JobsPage() {
     }
   }
 
-  async function handleSetCompanyStability(jobId: string, companyStability: number | null) {
-    const previous = jobs.find((item) => item.job.id === jobId)?.job.companyStability ?? null;
+  async function handleSetCompanyScore(
+    jobId: string,
+    companyStability: number | null,
+    employmentStability: number | null,
+    field: "companyStability" | "employmentStability",
+  ) {
+    const edited = jobs.find((item) => item.job.id === jobId);
+    if (!edited) return;
+    const previousByJob = new Map(
+      jobs
+        .filter((item) => item.companyName === edited.companyName)
+        .map((item) => [item.job.id, item.job[field]] as const),
+    );
     setJobs((prev) =>
       prev.map((item) =>
-        item.job.id === jobId ? { ...item, job: { ...item.job, companyStability } } : item,
+        item.companyName === edited.companyName
+          ? { ...item, job: { ...item.job, [field]: field === "companyStability" ? companyStability : employmentStability } }
+          : item,
       ),
     );
+    const updates = field === "companyStability"
+      ? { companyStability }
+      : { employmentStability };
     try {
-      const res = await api.updateJob(jobId, { companyStability });
+      const res = await api.updateJob(jobId, updates);
+      const returnedValue = res.detail.job[field];
       setJobs((prev) =>
         prev.map((item) =>
-          item.job.id === jobId
-            ? {
-                ...item,
-                job: {
-                  ...item.job,
-                  companyStability: res.detail.job.companyStability,
-                  updatedAt: res.detail.job.updatedAt,
-                },
-              }
+          item.companyName === edited.companyName
+            ? { ...item, job: { ...item.job, [field]: returnedValue } }
             : item,
         ),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update company stability");
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : field === "companyStability"
+            ? "Failed to update company stability"
+            : "Failed to update employment stability",
+      );
       setJobs((prev) =>
-        prev.map((item) =>
-          item.job.id === jobId
-            ? { ...item, job: { ...item.job, companyStability: previous } }
-            : item,
-        ),
+        prev.map((item) => {
+          const previous = previousByJob.get(item.job.id);
+          return previousByJob.has(item.job.id)
+            ? { ...item, job: { ...item.job, [field]: previous } }
+            : item;
+        }),
       );
       return;
     }
-    // Refresh only the sidebar's company rows (server computes the averages).
-    // Do not reload the jobs list, so the row keeps its position. A refetch
-    // failure keeps the existing rows; the score itself was saved.
+    // Refresh only the sidebar. Keep loaded rows and their positions unchanged.
     try {
       const companies = await api.listCompanies();
       setCompanyRows(companies.companies);
     } catch {
-      // ignored
+      // A saved score remains visible even when the sidebar refetch fails.
     }
+  }
+
+  async function handleSetCompanyStability(jobId: string, companyStability: number | null) {
+    const edited = jobs.find((item) => item.job.id === jobId);
+    await handleSetCompanyScore(jobId, companyStability, edited?.job.employmentStability ?? null, "companyStability");
+  }
+
+  async function handleSetEmploymentStability(jobId: string, employmentStability: number | null) {
+    const edited = jobs.find((item) => item.job.id === jobId);
+    await handleSetCompanyScore(jobId, edited?.job.companyStability ?? null, employmentStability, "employmentStability");
   }
 
   async function handleUpdateStatus(jobId: string, nextStatus: JobStatus) {
@@ -730,6 +766,7 @@ export function JobsPage() {
       isFavorite: isFavoriteFilter ? true : undefined,
       isArchived: true,
       minCompanyStability: activeMinStability,
+      minEmploymentStability: activeMinEmploymentStability,
     };
     void api.listJobIds(filters).then(({ ids }) => {
       if (requestSequence !== selectAllSequenceRef.current) return;
@@ -892,7 +929,8 @@ export function JobsPage() {
     || (activeDateFilter.field && (activeDateFilter.from || activeDateFilter.to))
     || activeLocation
     || activeRemoteMode !== "any"
-    || activeMinStability !== undefined,
+    || activeMinStability !== undefined
+    || activeMinEmploymentStability !== undefined,
   );
   const isFiltered = Boolean(status || companyId || postingState || liveSearch.trim() || salaryMinParam || salaryMaxParam || isFavoriteFilter || isArchivedFilter || hasNewDimensionFilters);
   const hasDraftFilters = Boolean(
@@ -905,6 +943,7 @@ export function JobsPage() {
     || filterDraft.location.trim()
     || filterDraft.remoteMode !== "any"
     || filterDraft.minStability !== ""
+    || filterDraft.minEmploymentStability !== ""
     || status
     || companyId
     || isFavoriteFilter
@@ -921,6 +960,7 @@ export function JobsPage() {
     location: activeLocation,
     remoteMode: activeRemoteMode,
     minStability: activeMinStability,
+    minEmploymentStability: activeMinEmploymentStability,
   });
 
   function handleFilterSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -963,6 +1003,7 @@ export function JobsPage() {
     if (nextLocation) next.set("location", nextLocation);
     if (filterDraft.remoteMode !== "any") next.set("remote", filterDraft.remoteMode);
     encodeMinStabilityToUrl(next, filterDraft.minStability === "" ? undefined : Number(filterDraft.minStability));
+    encodeMinEmploymentStabilityToUrl(next, filterDraft.minEmploymentStability === "" ? undefined : Number(filterDraft.minEmploymentStability));
     if (viewMode) next.set("view", viewMode);
     writeSortToParams(next, sortSpec, isAppliedTab);
     setSearchParams(next);
@@ -1053,6 +1094,9 @@ export function JobsPage() {
               <p className="mt-1 text-sm text-[var(--muted)]">
                 {subtitle}
               </p>
+              <p className="mt-1 text-xs text-[var(--faint)]">
+                Company stability and employment stability apply to all jobs at that company.
+              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
               <label htmlFor="jobs-sort-field" className="jobs-sort-control">
@@ -1069,6 +1113,7 @@ export function JobsPage() {
                   <option value="postingDate">Date added</option>
                   <option value="appeal">Appeal</option>
                   <option value="companyStability">Company stability</option>
+                  <option value="employmentStability">Employment stability</option>
                   <option value="companyName">Company name</option>
                 </select>
               </label>
@@ -1446,6 +1491,26 @@ export function JobsPage() {
                       <option value="4">4+</option>
                       <option value="5">5</option>
                     </select>
+                    <label htmlFor="jobs-min-employment-stability" className="field-label mt-4">Minimum employment stability</label>
+                    <select
+                      id="jobs-min-employment-stability"
+                      name="minEmploymentStability"
+                      value={filterDraft.minEmploymentStability}
+                      onChange={(event) =>
+                        setFilterDraft((current) => ({
+                          ...current,
+                          minEmploymentStability: event.target.value as MinStabilityDraft,
+                        }))
+                      }
+                      className="field text-sm"
+                    >
+                      <option value="">Any</option>
+                      <option value="1">1+</option>
+                      <option value="2">2+</option>
+                      <option value="3">3+</option>
+                      <option value="4">4+</option>
+                      <option value="5">5</option>
+                    </select>
                     <div className="mt-4 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-3">
                       {isFiltered || hasDraftFilters ? (
                         <Link
@@ -1782,7 +1847,7 @@ export function JobsPage() {
                               className="text-xs text-[var(--faint)]"
                               title={COMPANY_STABILITY_SCALE_LABEL}
                             >
-                              Stability
+                              Company
                             </label>
                             <CompanyStabilitySelect
                               id={`stability-${job.id}`}
@@ -1790,6 +1855,30 @@ export function JobsPage() {
                               compact
                               onChange={(companyStability) =>
                                 void handleSetCompanyStability(job.id, companyStability)
+                              }
+                            />
+                          </div>
+                          <div
+                            className="flex items-center gap-1.5"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                          >
+                            <label
+                              htmlFor={`employment-stability-${job.id}`}
+                              className="text-xs text-[var(--faint)]"
+                              title={EMPLOYMENT_STABILITY_SCALE_LABEL}
+                            >
+                              Employment
+                            </label>
+                            <EmploymentStabilitySelect
+                              id={`employment-stability-${job.id}`}
+                              value={job.employmentStability}
+                              compact
+                              onChange={(employmentStability) =>
+                                void handleSetEmploymentStability(job.id, employmentStability)
                               }
                             />
                           </div>

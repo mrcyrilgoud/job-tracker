@@ -1,5 +1,224 @@
-use anyhow::Result;
-use rusqlite::Connection;
+use anyhow::{Context, Result};
+use rusqlite::{Connection, OptionalExtension};
+
+const COMPANY_STABILITY_BACKFILL_MARKER: &str = "company_employment_stability_backfill_v1";
+const BACKFILL_MAX_ATTEMPTS: usize = 3;
+
+fn company_columns(conn: &Connection) -> Result<Vec<String>> {
+    Ok(conn
+        .prepare("PRAGMA table_info(companies)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Add one company score column if it is absent.
+///
+/// The schema is inspected immediately before each step rather than once for
+/// the whole migration. Each ALTER is independent, so a later migration run
+/// can resume after a previous run added only a prefix of the columns.
+fn add_company_column(conn: &Connection, column: &str, definition: &str) -> Result<()> {
+    let step = format!("company schema migration step add companies.{column}");
+    if company_columns(conn)
+        .with_context(|| format!("{step} failed while reading table_info"))?
+        .iter()
+        .any(|name| name == column)
+    {
+        return Ok(());
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE companies ADD COLUMN {column} {definition}"),
+        [],
+    )
+    .with_context(|| format!("{step} failed"))?;
+
+    if !company_columns(conn)
+        .with_context(|| format!("{step} failed while refreshing table_info"))?
+        .iter()
+        .any(|name| name == column)
+    {
+        anyhow::bail!("{step} failed: column was not added");
+    }
+
+    Ok(())
+}
+
+fn add_company_score_columns(conn: &Connection) -> Result<()> {
+    add_company_column(
+        conn,
+        "company_stability",
+        "INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5))",
+    )?;
+    add_company_column(
+        conn,
+        "employment_stability",
+        "INTEGER CHECK (employment_stability IS NULL OR (typeof(employment_stability) = 'integer' AND employment_stability BETWEEN 1 AND 5))",
+    )?;
+    add_company_column(conn, "company_stability_rationale", "TEXT")?;
+    add_company_column(conn, "company_stability_citations", "TEXT")?;
+    add_company_column(conn, "company_stability_scored_at", "TEXT")?;
+    add_company_column(
+        conn,
+        "company_stability_scored_by",
+        "TEXT CHECK (company_stability_scored_by IS NULL OR company_stability_scored_by IN ('manual','import'))",
+    )?;
+    add_company_column(conn, "employment_stability_rationale", "TEXT")?;
+    add_company_column(conn, "employment_stability_citations", "TEXT")?;
+    add_company_column(conn, "employment_stability_scored_at", "TEXT")?;
+    add_company_column(
+        conn,
+        "employment_stability_scored_by",
+        "TEXT CHECK (employment_stability_scored_by IS NULL OR employment_stability_scored_by IN ('manual','import'))",
+    )?;
+    Ok(())
+}
+
+fn ensure_backfill_conflict_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS company_stability_backfill_conflicts (
+          company_id TEXT PRIMARY KEY NOT NULL,
+          company_name TEXT NOT NULL,
+          values_json TEXT NOT NULL,
+          reported INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          reported_at TEXT
+        );
+        "#,
+    )?;
+    Ok(())
+}
+
+/// Apply the legacy job-cache backfill exactly once. The marker, company
+/// changes, cache fan-out, and conflict rows are one transaction so an
+/// interrupted or failed attempt can never make a partial migration durable.
+fn backfill_company_stability_once(conn: &Connection) -> Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("company stability backfill transaction failed")?;
+
+    let result = backfill_company_stability_in_transaction(conn);
+    match result {
+        Ok(()) => match conn.execute_batch("COMMIT") {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                Err(error).context("company stability backfill commit failed")
+            }
+        },
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
+}
+
+fn backfill_company_stability_in_transaction(conn: &Connection) -> Result<()> {
+    if conn
+        .query_row(
+            "SELECT 1 FROM app_settings WHERE key = ?1",
+            [COMPANY_STABILITY_BACKFILL_MARKER],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    // Generate this after acquiring the write transaction so all companies
+    // scored by this run receive exactly one shared UTC timestamp.
+    let backfill_started_at = crate::util::now_iso();
+    let companies = {
+        let mut statement =
+            conn.prepare("SELECT id, name, company_stability FROM companies ORDER BY id")?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    for (company_id, company_name, company_stability) in companies {
+        // Existing company-owned scores are authoritative. In particular, a
+        // later migration must never overwrite a score that was already set.
+        if company_stability.is_some() {
+            continue;
+        }
+
+        let legacy_values = {
+            let mut statement = conn.prepare(
+                "SELECT company_stability
+                 FROM jobs
+                 WHERE company_id = ?1 AND company_stability IS NOT NULL
+                 GROUP BY company_stability
+                 ORDER BY company_stability ASC",
+            )?;
+            let rows = statement.query_map([&company_id], |row| row.get::<_, i64>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+
+        match legacy_values.as_slice() {
+            [] => {}
+            [value] => {
+                conn.execute(
+                    "UPDATE companies
+                     SET company_stability = ?1,
+                         company_stability_rationale = NULL,
+                         company_stability_citations = NULL,
+                         company_stability_scored_at = ?2,
+                         company_stability_scored_by = 'manual'
+                     WHERE id = ?3 AND company_stability IS NULL",
+                    rusqlite::params![value, backfill_started_at, company_id],
+                )?;
+                // Keep the fan-out explicit even though all source values are
+                // equal. This also repairs any cache row changed by a trigger
+                // or concurrent legacy writer before the transaction began.
+                conn.execute(
+                    "UPDATE jobs SET company_stability = ?1 WHERE company_id = ?2",
+                    rusqlite::params![value, company_id],
+                )?;
+            }
+            values => {
+                let values_json = serde_json::to_string(values)?;
+                conn.execute(
+                    "INSERT INTO company_stability_backfill_conflicts
+                       (company_id, company_name, values_json, reported, created_at, reported_at)
+                     VALUES (?1, ?2, ?3, 0, ?4, NULL)
+                     ON CONFLICT(company_id) DO UPDATE SET
+                       company_name = excluded.company_name,
+                       values_json = excluded.values_json,
+                       reported = 0,
+                       created_at = excluded.created_at,
+                       reported_at = NULL",
+                    rusqlite::params![company_id, company_name, values_json, backfill_started_at],
+                )?;
+            }
+        }
+    }
+
+    conn.execute(
+        "INSERT INTO app_settings (key, value, updated_at)
+         VALUES (?1, '1', ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        rusqlite::params![COMPANY_STABILITY_BACKFILL_MARKER, backfill_started_at],
+    )?;
+    Ok(())
+}
+
+fn backfill_company_stability(conn: &Connection) -> Result<()> {
+    let mut last_error = None;
+    for _attempt in 0..BACKFILL_MAX_ATTEMPTS {
+        match backfill_company_stability_once(conn) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+
+    Err(last_error.expect("backfill must make at least one attempt"))
+}
 
 /// Canonical SQLite schema for Job Tracker, including the
 /// partial unique index on `(source, source_external_id)`.
@@ -11,7 +230,17 @@ pub fn migrate(conn: &Connection) -> Result<()> {
       name TEXT NOT NULL,
       careers_url TEXT,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      company_stability INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5)),
+      employment_stability INTEGER CHECK (employment_stability IS NULL OR (typeof(employment_stability) = 'integer' AND employment_stability BETWEEN 1 AND 5)),
+      company_stability_rationale TEXT,
+      company_stability_citations TEXT,
+      company_stability_scored_at TEXT,
+      company_stability_scored_by TEXT CHECK (company_stability_scored_by IS NULL OR company_stability_scored_by IN ('manual','import')),
+      employment_stability_rationale TEXT,
+      employment_stability_citations TEXT,
+      employment_stability_scored_at TEXT,
+      employment_stability_scored_by TEXT CHECK (employment_stability_scored_by IS NULL OR employment_stability_scored_by IN ('manual','import'))
     );
 
     CREATE TABLE IF NOT EXISTS jobs (
@@ -136,6 +365,12 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     CREATE INDEX IF NOT EXISTS company_watches_company_id_idx ON company_watches(company_id);
     "#,
     )?;
+
+    // `CREATE TABLE IF NOT EXISTS` does not evolve an existing companies
+    // table. Add each score column independently so a failed step leaves its
+    // column absent while earlier successful steps remain available for the
+    // next migration run.
+    add_company_score_columns(conn)?;
 
     conn.execute_batch(
         r#"
@@ -346,6 +581,9 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         "#,
     )?;
 
+    ensure_backfill_conflict_schema(conn)?;
+    backfill_company_stability(conn)?;
+
     // Watchlist job filtering: seed the default alias table and convert legacy
     // country/cities/keyword settings into structured global criteria. Both
     // steps are idempotent and guarded by key-absent checks (Req 14.1–14.7).
@@ -478,6 +716,140 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn company_score_schema_is_complete_strict_and_job_scoped() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+
+        let expected = [
+            "company_stability",
+            "employment_stability",
+            "company_stability_rationale",
+            "company_stability_citations",
+            "company_stability_scored_at",
+            "company_stability_scored_by",
+            "employment_stability_rationale",
+            "employment_stability_citations",
+            "employment_stability_scored_at",
+            "employment_stability_scored_by",
+        ];
+        let columns = company_columns(&conn).unwrap();
+        for column in expected {
+            assert_eq!(
+                columns
+                    .iter()
+                    .filter(|name| name.as_str() == column)
+                    .count(),
+                1
+            );
+        }
+
+        let job_columns = conn
+            .prepare("PRAGMA table_info(jobs)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(!job_columns
+            .iter()
+            .any(|name| name == "employment_stability"));
+        assert!(!job_columns
+            .iter()
+            .any(|name| name == "company_stability_scored_by"));
+
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('c1', 'Acme', 't', 't')",
+            [],
+        )
+        .unwrap();
+
+        for (column, value) in [
+            ("company_stability", "0"),
+            ("company_stability", "6"),
+            ("company_stability", "2.5"),
+            ("employment_stability", "'high'"),
+        ] {
+            let result = conn.execute(
+                &format!(
+                    "UPDATE companies SET {column} = {value}, name = 'changed' WHERE id = 'c1'"
+                ),
+                [],
+            );
+            assert!(result.is_err(), "{column} = {value} should be rejected");
+            let name: String = conn
+                .query_row("SELECT name FROM companies WHERE id = 'c1'", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(name, "Acme");
+        }
+
+        for column in [
+            "company_stability_scored_by",
+            "employment_stability_scored_by",
+        ] {
+            let result = conn.execute(
+                &format!(
+                    "UPDATE companies SET {column} = 'Manual', name = 'changed' WHERE id = 'c1'"
+                ),
+                [],
+            );
+            assert!(result.is_err(), "{column} should reject invalid source");
+        }
+
+        conn.execute(
+            "UPDATE companies SET company_stability = 4, employment_stability = 2,
+             company_stability_scored_by = 'manual', employment_stability_scored_by = 'import'
+             WHERE id = 'c1'",
+            [],
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(company_columns(&conn).unwrap(), columns);
+        let scores: (i64, i64, String, String) = conn
+            .query_row(
+                "SELECT company_stability, employment_stability,
+                        company_stability_scored_by, employment_stability_scored_by
+                 FROM companies WHERE id = 'c1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(scores, (4, 2, "manual".to_string(), "import".to_string()));
+    }
+
+    #[test]
+    fn failed_company_score_alter_reports_named_step_and_can_retry() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE companies (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);",
+        )
+        .unwrap();
+
+        add_company_column(&conn, "company_stability", "INTEGER").unwrap();
+        let error = add_company_column(&conn, "employment_stability", "INTEGER CHECK (")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("companies.employment_stability"));
+        assert!(error.contains("migration step"));
+        assert!(!company_columns(&conn)
+            .unwrap()
+            .iter()
+            .any(|name| name == "employment_stability"));
+
+        add_company_column(
+            &conn,
+            "employment_stability",
+            "INTEGER CHECK (employment_stability IS NULL OR (typeof(employment_stability) = 'integer' AND employment_stability BETWEEN 1 AND 5))",
+        )
+        .unwrap();
+        assert!(company_columns(&conn)
+            .unwrap()
+            .iter()
+            .any(|name| name == "employment_stability"));
     }
 
     #[test]
@@ -655,12 +1027,14 @@ mod tests {
 
     fn legacy_jobs_snapshot(conn: &Connection) -> Vec<Vec<rusqlite::types::Value>> {
         let width = LEGACY_JOB_COLUMNS.split(',').count();
-        conn.prepare(&format!("SELECT {LEGACY_JOB_COLUMNS} FROM jobs ORDER BY id"))
-            .unwrap()
-            .query_map([], |r| (0..width).map(|i| r.get(i)).collect())
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
+        conn.prepare(&format!(
+            "SELECT {LEGACY_JOB_COLUMNS} FROM jobs ORDER BY id"
+        ))
+        .unwrap()
+        .query_map([], |r| (0..width).map(|i| r.get(i)).collect())
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
     }
 
     fn stability_values(conn: &Connection) -> Vec<(String, Option<i64>)> {
@@ -722,7 +1096,9 @@ mod tests {
 
         for bad in ["0", "6", "-1", "2.5", "'2.5'", "'high'"] {
             let result = conn.execute(
-                &format!("UPDATE jobs SET company_stability = {bad}, notes = 'changed' WHERE id = 'j2'"),
+                &format!(
+                    "UPDATE jobs SET company_stability = {bad}, notes = 'changed' WHERE id = 'j2'"
+                ),
                 [],
             );
             assert!(result.is_err(), "{bad} should be rejected");
@@ -751,8 +1127,8 @@ mod tests {
         };
 
         // A read-only connection makes the schema change fail.
-        let ro = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .unwrap();
+        let ro =
+            Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         assert!(migrate(&ro).is_err());
         drop(ro);
 
@@ -868,5 +1244,503 @@ mod tests {
         // check_job_posting rows have no run id and are unconstrained.
         insert("e4", None, "authoritative").unwrap();
         insert("e5", None, "authoritative").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod task_14_tests {
+    use super::*;
+    use proptest::prelude::*;
+    use rusqlite::types::Value;
+    use rusqlite::Connection;
+    use std::collections::BTreeSet;
+    use std::time::Duration;
+
+    const SCORE_COLUMNS: [(&str, &str); 10] = [
+        (
+            "company_stability",
+            "INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5))",
+        ),
+        (
+            "employment_stability",
+            "INTEGER CHECK (employment_stability IS NULL OR (typeof(employment_stability) = 'integer' AND employment_stability BETWEEN 1 AND 5))",
+        ),
+        ("company_stability_rationale", "TEXT"),
+        ("company_stability_citations", "TEXT"),
+        ("company_stability_scored_at", "TEXT"),
+        (
+            "company_stability_scored_by",
+            "TEXT CHECK (company_stability_scored_by IS NULL OR company_stability_scored_by IN ('manual','import'))",
+        ),
+        ("employment_stability_rationale", "TEXT"),
+        ("employment_stability_citations", "TEXT"),
+        ("employment_stability_scored_at", "TEXT"),
+        (
+            "employment_stability_scored_by",
+            "TEXT CHECK (employment_stability_scored_by IS NULL OR employment_stability_scored_by IN ('manual','import'))",
+        ),
+    ];
+
+    fn minimal_companies(mask: &[bool]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE companies (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                careers_url TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+             );
+             INSERT INTO companies (id, name, created_at, updated_at)
+             VALUES ('c1', 'Acme', 'before', 'before');",
+        )
+        .unwrap();
+        for ((column, definition), present) in SCORE_COLUMNS.iter().zip(mask.iter()) {
+            if *present {
+                conn.execute(
+                    &format!("ALTER TABLE companies ADD COLUMN {column} {definition}"),
+                    [],
+                )
+                .unwrap();
+            }
+        }
+        conn
+    }
+
+    fn decl_type(conn: &Connection, column: &str) -> String {
+        conn.query_row(
+            "SELECT type FROM pragma_table_info('companies') WHERE name = ?1",
+            [column],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    // Feature: company-employment-stability, Property 1: Company schema migration is additive and idempotent
+    #[test]
+    fn fresh_company_schema_has_all_score_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        for (column, _) in SCORE_COLUMNS {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('companies') WHERE name = ?1",
+                    [column],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "{column}");
+        }
+        let job_columns = conn
+            .prepare("SELECT name FROM pragma_table_info('jobs')")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(!job_columns
+            .iter()
+            .any(|name| name == "employment_stability"));
+    }
+
+    // Feature: company-employment-stability, Property 1: Company schema migration is additive and idempotent
+    #[test]
+    fn every_missing_company_column_subset_is_additive_and_retryable() {
+        let mut masks = Vec::new();
+        for bits in 0u16..(1u16 << SCORE_COLUMNS.len()) {
+            masks.push(
+                (0..SCORE_COLUMNS.len())
+                    .map(|index| bits & (1 << index) != 0)
+                    .collect::<Vec<_>>(),
+            );
+        }
+        for mask in masks {
+            let conn = minimal_companies(&mask);
+            let before: (String, String) = conn
+                .query_row(
+                    "SELECT name, updated_at FROM companies WHERE id = 'c1'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            add_company_score_columns(&conn).unwrap();
+            add_company_score_columns(&conn).unwrap();
+            for (column, definition) in SCORE_COLUMNS {
+                let count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('companies') WHERE name = ?1",
+                        [column],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(count, 1, "{column}");
+                let expected_type = if definition.starts_with("INTEGER") {
+                    "INTEGER"
+                } else {
+                    "TEXT"
+                };
+                assert_eq!(decl_type(&conn, column), expected_type, "{column}");
+            }
+            let after: (String, String) = conn
+                .query_row(
+                    "SELECT name, updated_at FROM companies WHERE id = 'c1'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(after, before);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        // Feature: company-employment-stability, Property 1: Company schema migration is additive and idempotent
+        #[test]
+        fn prop_generated_legacy_company_schemas_are_additive_and_idempotent(
+            mask in prop::collection::vec(any::<bool>(), SCORE_COLUMNS.len())
+        ) {
+            let conn = minimal_companies(&mask);
+            add_company_score_columns(&conn).unwrap();
+            let first_columns = company_columns(&conn).unwrap();
+            add_company_score_columns(&conn).unwrap();
+            prop_assert_eq!(company_columns(&conn).unwrap(), first_columns.clone());
+            for (column, _) in SCORE_COLUMNS {
+                prop_assert_eq!(first_columns.iter().filter(|name| name.as_str() == column).count(), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn sqlite_score_and_source_constraints_fail_atomically() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO companies (id, name, created_at, updated_at) VALUES ('c1', 'Acme', 't', 't')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE companies SET company_stability = 3, employment_stability = 4,
+             company_stability_rationale = 'keep', employment_stability_scored_by = 'manual'
+             WHERE id = 'c1'",
+            [],
+        )
+        .unwrap();
+
+        let before: Vec<Value> = conn
+            .query_row(
+                "SELECT name, company_stability, employment_stability,
+                        company_stability_rationale, employment_stability_scored_by
+                 FROM companies WHERE id = 'c1'",
+                [],
+                |row| (0..5).map(|index| row.get(index)).collect(),
+            )
+            .unwrap();
+        for statement in [
+            "UPDATE companies SET company_stability = 0, name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET company_stability = 6, name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET company_stability = 2.5, name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET company_stability = '2.5', name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET company_stability = 'high', name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET employment_stability = 0, name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET employment_stability = 6, name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET company_stability_scored_by = '', name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET company_stability_scored_by = 'Manual', name = 'changed' WHERE id = 'c1'",
+            "UPDATE companies SET employment_stability_scored_by = 'csv', name = 'changed' WHERE id = 'c1'",
+        ] {
+            assert!(conn.execute(statement, []).is_err(), "{statement}");
+            let after: Vec<Value> = conn
+                .query_row(
+                    "SELECT name, company_stability, employment_stability,
+                            company_stability_rationale, employment_stability_scored_by
+                     FROM companies WHERE id = 'c1'",
+                    [],
+                    |row| (0..5).map(|index| row.get(index)).collect(),
+                )
+                .unwrap();
+            assert_eq!(after, before, "failed statement changed the row");
+        }
+        conn.execute("UPDATE companies SET company_stability = NULL, employment_stability = 1, company_stability_scored_by = 'import' WHERE id = 'c1'", []).unwrap();
+    }
+
+    #[test]
+    fn backfill_marker_rolls_back_with_company_and_cache_changes_and_retries() {
+        let conn = backfill_test_database();
+        insert_company(&conn, "c1", "Acme");
+        insert_job(&conn, "j1", "c1", Some(4), "wishlist", 0, None);
+        conn.execute_batch(
+            "CREATE TRIGGER fail_backfill_cache BEFORE UPDATE OF company_stability ON jobs
+             WHEN NEW.company_stability = 4 BEGIN SELECT RAISE(ABORT, 'forced backfill failure'); END;",
+        )
+        .unwrap();
+
+        assert!(backfill_company_stability(&conn).is_err());
+        assert_eq!(company_score(&conn, "c1"), None);
+        assert_eq!(job_stability(&conn, "j1"), Some(4));
+        assert!(!marker_exists(&conn));
+
+        conn.execute_batch("DROP TRIGGER fail_backfill_cache")
+            .unwrap();
+        backfill_company_stability(&conn).unwrap();
+        assert_eq!(company_score(&conn, "c1"), Some(4));
+        assert!(marker_exists(&conn));
+    }
+
+    #[test]
+    fn backfill_busy_lock_leaves_marker_absent_and_succeeds_after_retry() {
+        let path = std::env::temp_dir().join(format!(
+            "jt-backfill-lock-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            let conn = Connection::open(&path).unwrap();
+            let _ = backfill_test_database_on(&conn);
+            insert_company(&conn, "c1", "Acme");
+            insert_job(&conn, "j1", "c1", Some(5), "wishlist", 0, None);
+            conn.execute(
+                "DELETE FROM app_settings WHERE key = ?1",
+                [COMPANY_STABILITY_BACKFILL_MARKER],
+            )
+            .unwrap();
+        }
+        let lock = Connection::open(&path).unwrap();
+        lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let conn = Connection::open(&path).unwrap();
+        conn.busy_timeout(Duration::from_millis(1)).unwrap();
+        assert!(backfill_company_stability(&conn).is_err());
+        assert!(!marker_exists(&conn));
+        drop(lock);
+        backfill_company_stability(&conn).unwrap();
+        assert_eq!(company_score(&conn, "c1"), Some(5));
+        assert!(marker_exists(&conn));
+        drop(conn);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn backfill_counts_all_statuses_and_persists_sorted_conflicts() {
+        let conn = backfill_test_database();
+        insert_company(&conn, "empty", "Empty Co");
+        insert_company(&conn, "all", "All Statuses");
+        insert_company(&conn, "conflict", "Conflict Co");
+        let statuses = [
+            ("wishlist", 0, None),
+            ("applied", 0, None),
+            ("interviewing", 0, None),
+            ("offer", 0, None),
+            ("rejected", 0, None),
+            ("withdrawn", 0, None),
+            ("closed", 0, None),
+            ("archived", 0, None),
+            ("wishlist", 1, Some("new")),
+            ("wishlist", 0, Some("dismissed")),
+        ];
+        for (index, (status, is_new, disposition)) in statuses.into_iter().enumerate() {
+            insert_job(
+                &conn,
+                &format!("all-{index}"),
+                "all",
+                Some(4),
+                status,
+                is_new,
+                disposition,
+            );
+        }
+        insert_job(&conn, "conflict-1", "conflict", Some(1), "closed", 0, None);
+        insert_job(
+            &conn,
+            "conflict-2",
+            "conflict",
+            Some(5),
+            "archived",
+            0,
+            None,
+        );
+
+        backfill_company_stability(&conn).unwrap();
+        assert_eq!(company_score(&conn, "empty"), None);
+        assert_eq!(company_score(&conn, "all"), Some(4));
+        assert!(all_job_stability(&conn, "all")
+            .iter()
+            .all(|value| *value == Some(4)));
+        assert_eq!(company_score(&conn, "conflict"), None);
+        assert_eq!(all_job_stability(&conn, "conflict"), vec![Some(1), Some(5)]);
+        let conflict: (String, String, i64) = conn.query_row(
+            "SELECT company_name, values_json, reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(conflict, ("Conflict Co".into(), "[1,5]".into(), 0));
+        assert!(marker_exists(&conn));
+        let before = database_backfill_snapshot(&conn);
+        backfill_company_stability(&conn).unwrap();
+        assert_eq!(database_backfill_snapshot(&conn), before);
+    }
+
+    fn backfill_test_database() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        backfill_test_database_on(&conn);
+        conn
+    }
+
+    fn backfill_test_database_on(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE companies (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                company_stability INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5)),
+                employment_stability INTEGER CHECK (employment_stability IS NULL OR (typeof(employment_stability) = 'integer' AND employment_stability BETWEEN 1 AND 5)),
+                company_stability_rationale TEXT,
+                company_stability_citations TEXT,
+                company_stability_scored_at TEXT,
+                company_stability_scored_by TEXT CHECK (company_stability_scored_by IS NULL OR company_stability_scored_by IN ('manual','import')),
+                employment_stability_rationale TEXT,
+                employment_stability_citations TEXT,
+                employment_stability_scored_at TEXT,
+                employment_stability_scored_by TEXT CHECK (employment_stability_scored_by IS NULL OR employment_stability_scored_by IN ('manual','import'))
+             );
+             CREATE TABLE jobs (
+                id TEXT PRIMARY KEY NOT NULL,
+                company_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                is_new_from_watch INTEGER NOT NULL DEFAULT 0,
+                watch_disposition TEXT,
+                company_stability INTEGER CHECK (company_stability IS NULL OR (typeof(company_stability) = 'integer' AND company_stability BETWEEN 1 AND 5))
+             );
+             CREATE TABLE app_settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL, updated_at TEXT NOT NULL);",
+        ).unwrap();
+        ensure_backfill_conflict_schema(conn).unwrap();
+    }
+
+    fn insert_company(conn: &Connection, id: &str, name: &str) {
+        conn.execute(
+            "INSERT INTO companies (id, name) VALUES (?1, ?2)",
+            [id, name],
+        )
+        .unwrap();
+    }
+
+    fn insert_job(
+        conn: &Connection,
+        id: &str,
+        company_id: &str,
+        stability: Option<i64>,
+        status: &str,
+        is_new: i64,
+        disposition: Option<&str>,
+    ) {
+        conn.execute(
+            "INSERT INTO jobs (id, company_id, status, is_new_from_watch, watch_disposition, company_stability) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, company_id, status, is_new, disposition, stability],
+        ).unwrap();
+    }
+
+    fn marker_exists(conn: &Connection) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM app_settings WHERE key = ?1)",
+            [COMPANY_STABILITY_BACKFILL_MARKER],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn company_score(conn: &Connection, id: &str) -> Option<i64> {
+        conn.query_row(
+            "SELECT company_stability FROM companies WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn job_stability(conn: &Connection, id: &str) -> Option<i64> {
+        conn.query_row(
+            "SELECT company_stability FROM jobs WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn all_job_stability(conn: &Connection, company_id: &str) -> Vec<Option<i64>> {
+        conn.prepare("SELECT company_stability FROM jobs WHERE company_id = ?1 ORDER BY id")
+            .unwrap()
+            .query_map([company_id], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn database_backfill_snapshot(
+        conn: &Connection,
+    ) -> (
+        Vec<(String, Option<i64>, Option<String>)>,
+        Vec<(String, Option<i64>, String)>,
+    ) {
+        let companies = conn.prepare("SELECT id, company_stability, company_stability_scored_at FROM companies ORDER BY id").unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap();
+        let conflicts = conn.prepare("SELECT company_id, reported, values_json FROM company_stability_backfill_conflicts ORDER BY company_id").unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
+            .collect::<Result<Vec<_>, _>>().unwrap();
+        (companies, conflicts)
+    }
+
+    fn cache_states_strategy() -> impl Strategy<Value = Vec<Vec<Option<i64>>>> {
+        prop::collection::vec(
+            prop::collection::vec(prop::option::of(1i64..=5), 0..=4),
+            1..=4,
+        )
+    }
+
+    // Feature: company-employment-stability, Property 6: Backfill matches a reference model and is idempotent
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+        #[test]
+        fn prop_backfill_matches_reference_model_and_is_idempotent(states in cache_states_strategy()) {
+            let conn = backfill_test_database();
+            for (company_index, caches) in states.iter().enumerate() {
+                let company_id = format!("c{company_index}");
+                insert_company(&conn, &company_id, &format!("Company {company_index}"));
+                for (job_index, cache) in caches.iter().enumerate() {
+                    insert_job(&conn, &format!("j{company_index}-{job_index}"), &company_id, *cache, "wishlist", 0, None);
+                }
+            }
+
+            backfill_company_stability(&conn).unwrap();
+            for (company_index, caches) in states.iter().enumerate() {
+                let company_id = format!("c{company_index}");
+                let distinct = caches.iter().flatten().copied().collect::<BTreeSet<_>>();
+                match distinct.len() {
+                    0 => {
+                        prop_assert_eq!(company_score(&conn, &company_id), None);
+                        prop_assert_eq!(all_job_stability(&conn, &company_id), caches.clone());
+                    }
+                    1 => {
+                        let value = *distinct.iter().next().unwrap();
+                        prop_assert_eq!(company_score(&conn, &company_id), Some(value));
+                        prop_assert!(all_job_stability(&conn, &company_id).iter().all(|cache| *cache == Some(value)));
+                    }
+                    _ => {
+                        prop_assert_eq!(company_score(&conn, &company_id), None);
+                        prop_assert_eq!(all_job_stability(&conn, &company_id), caches.clone());
+                        let values_json: String = conn.query_row(
+                            "SELECT values_json FROM company_stability_backfill_conflicts WHERE company_id = ?1",
+                            [&company_id], |row| row.get(0)
+                        ).unwrap();
+                        prop_assert_eq!(serde_json::from_str::<Vec<i64>>(&values_json).unwrap(), distinct.into_iter().collect::<Vec<_>>());
+                    }
+                }
+            }
+            prop_assert!(marker_exists(&conn));
+            let snapshot = database_backfill_snapshot(&conn);
+            backfill_company_stability(&conn).unwrap();
+            prop_assert_eq!(database_backfill_snapshot(&conn), snapshot);
+        }
     }
 }

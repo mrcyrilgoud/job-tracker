@@ -214,14 +214,20 @@ mod tests {
         assert_eq!(latest.clone().into_value(), None);
         latest.offer("2026-10-01T01:00:00Z");
         latest.offer("2026-10-01T09:00:00+09:00"); // earlier instant
-        assert_eq!(latest.clone().into_value().as_deref(), Some("2026-10-01T01:00:00Z"));
+        assert_eq!(
+            latest.clone().into_value().as_deref(),
+            Some("2026-10-01T01:00:00Z")
+        );
 
         let mut tie = LatestTimestamp::default();
         tie.offer("2026-10-01T00:00:00Z");
         tie.offer("2026-10-01");
         tie.offer("2026-10-01T09:00:00+09:00");
         tie.offer("zzz");
-        assert_eq!(tie.into_value().as_deref(), Some("2026-10-01T09:00:00+09:00"));
+        assert_eq!(
+            tie.into_value().as_deref(),
+            Some("2026-10-01T09:00:00+09:00")
+        );
     }
 
     // ---- Property 5 (Rust half) ----------------------------------------------
@@ -233,7 +239,11 @@ mod tests {
     enum Offset {
         UpperZ,
         LowerZ,
-        Signed { negative: bool, hours: u32, minutes: u32 },
+        Signed {
+            negative: bool,
+            hours: u32,
+            minutes: u32,
+        },
     }
 
     #[derive(Debug, Clone)]
@@ -247,7 +257,11 @@ mod tests {
     }
 
     fn days_in_month(year: u32, month: u32) -> u32 {
-        let (ny, nm) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+        let (ny, nm) = if month == 12 {
+            (year + 1, 1)
+        } else {
+            (year, month + 1)
+        };
         // Year 10000 is fine for chrono, so December 9999 works too.
         let first_next = NaiveDate::from_ymd_opt(ny as i32, nm, 1).unwrap();
         (first_next - Duration::days(1)).day()
@@ -268,7 +282,11 @@ mod tests {
             Just(Offset::UpperZ),
             Just(Offset::LowerZ),
             (any::<bool>(), 0u32..=23, 0u32..=59).prop_map(|(negative, hours, minutes)| {
-                Offset::Signed { negative, hours, minutes }
+                Offset::Signed {
+                    negative,
+                    hours,
+                    minutes,
+                }
             }),
         ]
     }
@@ -306,7 +324,11 @@ mod tests {
                 None => {}
                 Some(Offset::UpperZ) => s.push('Z'),
                 Some(Offset::LowerZ) => s.push('z'),
-                Some(Offset::Signed { negative, hours, minutes }) => {
+                Some(Offset::Signed {
+                    negative,
+                    hours,
+                    minutes,
+                }) => {
                     let sign = if *negative { '-' } else { '+' };
                     s.push_str(&format!("{sign}{hours:02}:{minutes:02}"));
                 }
@@ -332,7 +354,11 @@ mod tests {
             .and_utc();
         let offset_minutes: i64 = match &t.offset {
             None | Some(Offset::UpperZ) | Some(Offset::LowerZ) => 0,
-            Some(Offset::Signed { negative, hours, minutes }) => {
+            Some(Offset::Signed {
+                negative,
+                hours,
+                minutes,
+            }) => {
                 let v = i64::from(hours * 60 + minutes);
                 if *negative {
                     -v
@@ -473,7 +499,12 @@ mod tests {
         for entry in &corpus.valid {
             let parsed = parse_instant(&entry.input)
                 .unwrap_or_else(|| panic!("rejected valid corpus entry {:?}", entry.input));
-            assert_eq!(parsed.timestamp_millis(), entry.epoch_ms, "epochMs for {:?}", entry.input);
+            assert_eq!(
+                parsed.timestamp_millis(),
+                entry.epoch_ms,
+                "epochMs for {:?}",
+                entry.input
+            );
             assert_eq!(
                 parsed.timestamp_subsec_nanos() % 1_000_000,
                 entry.sub_ms_nanos,
@@ -482,7 +513,10 @@ mod tests {
             );
         }
         for bad in &corpus.invalid {
-            assert!(parse_instant(bad).is_none(), "accepted invalid corpus entry {bad:?}");
+            assert!(
+                parse_instant(bad).is_none(),
+                "accepted invalid corpus entry {bad:?}"
+            );
         }
     }
 }

@@ -1,4 +1,5 @@
 import { formatDistanceToNow } from "date-fns";
+import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 
 import { APPEAL_SCALE_LABEL, AppealSelect } from "@/components/AppealSelect";
@@ -10,6 +11,10 @@ import {
   COMPANY_STABILITY_SCALE_LABEL,
   CompanyStabilitySelect,
 } from "@/components/CompanyStabilitySelect";
+import {
+  EMPLOYMENT_STABILITY_SCALE_LABEL,
+  EmploymentStabilitySelect,
+} from "@/components/EmploymentStabilitySelect";
 import { FavoriteButton } from "@/components/FavoriteButton";
 import { AlertIcon, ArchiveIcon, ArrowUpRightIcon, CheckIcon, TrashIcon } from "@/components/icons";
 import { api } from "@/lib/api";
@@ -33,11 +38,17 @@ type Initial = {
   lastCheckedAt: string | null;
   lastCheckResult: string | null;
   url: string;
+  companyId: string;
   isNewFromWatch: boolean;
   isFavorite: boolean;
   appeal: number | null;
   applicationEase: number | null;
   companyStability: number | null;
+  companyStabilityRationale: string | null;
+  companyStabilityCitations: string[] | null;
+  employmentStability: number | null;
+  employmentStabilityRationale: string | null;
+  employmentStabilityCitations: string[] | null;
   salaryMin: number | null;
   salaryMax: number | null;
 };
@@ -55,6 +66,7 @@ type Draft = {
   appeal: number | null;
   applicationEase: number | null;
   companyStability: number | null;
+  employmentStability: number | null;
   salaryMin: string;
   salaryMax: string;
 };
@@ -62,6 +74,37 @@ type Draft = {
 export type JobDetailUpdateMode = "save" | "check" | "attachment" | "full";
 
 type SaveState = "saving" | "unsaved" | "just-saved" | "clean";
+
+type ScoreDetails = {
+  companyStability: number | null;
+  companyStabilityRationale: string | null;
+  companyStabilityCitations: string[] | null;
+  employmentStability: number | null;
+  employmentStabilityRationale: string | null;
+  employmentStabilityCitations: string[] | null;
+};
+
+function scoreDetailsFromInitial(initial: Initial): ScoreDetails {
+  return {
+    companyStability: initial.companyStability,
+    companyStabilityRationale: initial.companyStabilityRationale,
+    companyStabilityCitations: initial.companyStabilityCitations,
+    employmentStability: initial.employmentStability,
+    employmentStabilityRationale: initial.employmentStabilityRationale,
+    employmentStabilityCitations: initial.employmentStabilityCitations,
+  };
+}
+
+function scoreDetailsFromCompany(company: JobDetail["company"]): ScoreDetails {
+  return {
+    companyStability: company.companyStability,
+    companyStabilityRationale: company.companyStabilityRationale,
+    companyStabilityCitations: company.companyStabilityCitations,
+    employmentStability: company.employmentStability,
+    employmentStabilityRationale: company.employmentStabilityRationale,
+    employmentStabilityCitations: company.employmentStabilityCitations,
+  };
+}
 
 function toDraft(initial: Initial): Draft {
   return {
@@ -75,6 +118,7 @@ function toDraft(initial: Initial): Draft {
     appeal: initial.appeal,
     applicationEase: initial.applicationEase,
     companyStability: initial.companyStability,
+    employmentStability: initial.employmentStability,
     salaryMin: initial.salaryMin === null ? "" : String(initial.salaryMin),
     salaryMax: initial.salaryMax === null ? "" : String(initial.salaryMax),
   };
@@ -92,6 +136,7 @@ function draftsMatch(a: Draft, b: Draft): boolean {
     a.appeal === b.appeal &&
     a.applicationEase === b.applicationEase &&
     a.companyStability === b.companyStability &&
+    a.employmentStability === b.employmentStability &&
     a.salaryMin === b.salaryMin &&
     a.salaryMax === b.salaryMax
   );
@@ -131,6 +176,7 @@ export function JobDetailClient({
   // The gap between the two is the entire save story this card tells.
   const [saved, setSaved] = useState<Draft>(() => toDraft(initial));
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial));
+  const [scoreDetails, setScoreDetails] = useState<ScoreDetails>(() => scoreDetailsFromInitial(initial));
   const [posting, setPosting] = useState({
     state: initial.postingState,
     lastCheckedAt: initial.lastCheckedAt,
@@ -154,6 +200,17 @@ export function JobDetailClient({
       lastCheckResult: initial.lastCheckResult,
     });
   }, [initial.postingState, initial.lastCheckedAt, initial.lastCheckResult]);
+
+  useEffect(() => {
+    setScoreDetails(scoreDetailsFromInitial(initial));
+  }, [
+    initial.companyStability,
+    initial.companyStabilityRationale,
+    initial.companyStabilityCitations,
+    initial.employmentStability,
+    initial.employmentStabilityRationale,
+    initial.employmentStabilityCitations,
+  ]);
 
   const isDirty = !draftsMatch(draft, saved);
   const postingInfo = postingStateMatters(draft.status)
@@ -196,7 +253,7 @@ export function JobDetailClient({
     setError(null);
     const attempted = draft;
     try {
-      const result = await api.updateJob(jobId, {
+      const updates = {
         title: attempted.title,
         companyName: attempted.companyName,
         status: attempted.status,
@@ -207,11 +264,18 @@ export function JobDetailClient({
         isFavorite: attempted.isFavorite,
         appeal: attempted.appeal,
         applicationEase: attempted.applicationEase,
-        companyStability: attempted.companyStability,
         salaryMin: attempted.salaryMin.trim() === "" ? null : Number(attempted.salaryMin),
         salaryMax: attempted.salaryMax.trim() === "" ? null : Number(attempted.salaryMax),
-      });
+        ...(attempted.companyStability !== saved.companyStability
+          ? { companyStability: attempted.companyStability }
+          : {}),
+        ...(attempted.employmentStability !== saved.employmentStability
+          ? { employmentStability: attempted.employmentStability }
+          : {}),
+      };
+      const result = await api.updateJob(jobId, updates);
       const detail = result.detail;
+      setScoreDetails(scoreDetailsFromCompany(detail.company));
       const baseline: Draft = {
         title: detail.job.title,
         companyName: detail.company.name,
@@ -223,6 +287,7 @@ export function JobDetailClient({
         appeal: detail.job.appeal,
         applicationEase: detail.job.applicationEase,
         companyStability: detail.job.companyStability,
+        employmentStability: detail.job.employmentStability,
         salaryMin: detail.job.salaryMin === null ? "" : String(detail.job.salaryMin),
         salaryMax: detail.job.salaryMax === null ? "" : String(detail.job.salaryMax),
       };
@@ -236,7 +301,7 @@ export function JobDetailClient({
     } finally {
       setSaving(false);
     }
-  }, [draft, jobId, onUpdated]);
+  }, [draft, jobId, onUpdated, saved]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -298,6 +363,7 @@ export function JobDetailClient({
           appeal: detail.job.appeal,
           applicationEase: detail.job.applicationEase,
           companyStability: detail.job.companyStability,
+          employmentStability: detail.job.employmentStability,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         });
@@ -319,6 +385,7 @@ export function JobDetailClient({
           appeal: detail.job.appeal,
           applicationEase: detail.job.applicationEase,
           companyStability: detail.job.companyStability,
+          employmentStability: detail.job.employmentStability,
           salaryMin: detail.job.salaryMin,
           salaryMax: detail.job.salaryMax,
         });
@@ -514,6 +581,16 @@ export function JobDetailClient({
                 onChange={(companyStability) => update("companyStability", companyStability)}
               />
             </div>
+            <div>
+              <label htmlFor="job-employment-stability" className="field-label" title={EMPLOYMENT_STABILITY_SCALE_LABEL}>
+                {EMPLOYMENT_STABILITY_SCALE_LABEL}
+              </label>
+              <EmploymentStabilitySelect
+                id="job-employment-stability"
+                value={draft.employmentStability}
+                onChange={(employmentStability) => update("employmentStability", employmentStability)}
+              />
+            </div>
             <div className="sm:col-span-2">
               <span className="field-label">Salary range (USD per year)</span>
               <div className="grid grid-cols-2 gap-3">
@@ -542,6 +619,71 @@ export function JobDetailClient({
                   className="field"
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-xl bg-[var(--surface-muted)] px-4 py-3 text-sm text-[var(--muted)]">
+            <p>
+              Company and employment stability apply to every job at {initial.companyName}.{" "}
+              <Link
+                to={`/companies/${initial.companyId}`}
+                className="font-medium text-[var(--accent)] hover:underline"
+              >
+                View company details
+              </Link>
+              .
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {scoreDetails.companyStability !== null &&
+              (scoreDetails.companyStabilityRationale || scoreDetails.companyStabilityCitations?.length) ? (
+                <div>
+                  <p className="text-xs font-medium text-[var(--foreground)]">Company stability evidence</p>
+                  {scoreDetails.companyStabilityRationale ? (
+                    <p className="mt-1 whitespace-pre-wrap">{scoreDetails.companyStabilityRationale}</p>
+                  ) : null}
+                  {scoreDetails.companyStabilityCitations?.length ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {scoreDetails.companyStabilityCitations.map((citation) => (
+                        <li key={citation}>
+                          <a
+                            href={citation}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="break-all text-[var(--accent)] hover:underline"
+                          >
+                            {citation}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              {scoreDetails.employmentStability !== null &&
+              (scoreDetails.employmentStabilityRationale || scoreDetails.employmentStabilityCitations?.length) ? (
+                <div>
+                  <p className="text-xs font-medium text-[var(--foreground)]">Employment stability evidence</p>
+                  {scoreDetails.employmentStabilityRationale ? (
+                    <p className="mt-1 whitespace-pre-wrap">{scoreDetails.employmentStabilityRationale}</p>
+                  ) : null}
+                  {scoreDetails.employmentStabilityCitations?.length ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {scoreDetails.employmentStabilityCitations.map((citation) => (
+                        <li key={citation}>
+                          <a
+                            href={citation}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="break-all text-[var(--accent)] hover:underline"
+                          >
+                            {citation}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
 

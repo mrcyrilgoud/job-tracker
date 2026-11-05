@@ -58,6 +58,13 @@ fn apply_watch_sync_inner(
     remote_jobs: &Result<Vec<AtsJob>, String>,
 ) -> AppResult<serde_json::Value> {
     let watch = get_watch(conn, watch_id)?.ok_or_else(|| AppError::from("Watch not found"))?;
+    let watch_company_stability: Option<i64> = conn
+        .query_row(
+            "SELECT company_stability FROM companies WHERE id = ?1",
+            params![watch.company_id],
+            |row| row.get(0),
+        )
+        .map_err(map_sqlite)?;
     let synced_at = now_iso();
 
     let remote_jobs = match remote_jobs {
@@ -264,8 +271,9 @@ fn apply_watch_sync_inner(
             r#"INSERT INTO jobs (
                 id, company_id, title, url, canonical_url, source_external_id, status, applied_at,
                 posting_state, last_checked_at, last_check_result, source, notes, description, location,
-                is_new_from_watch, watch_disposition, missing_from_sync_count, watch_filtered, created_at, updated_at
-            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,NULL,?8,1,'new',0,?9,?10,?10)"#,
+                is_new_from_watch, watch_disposition, missing_from_sync_count, watch_filtered,
+                company_stability, created_at, updated_at
+            ) VALUES (?1,?2,?3,?4,?5,?6,'wishlist',NULL,'active',NULL,NULL,?7,NULL,NULL,?8,1,'new',0,?9,?10,?11,?11)"#,
             params![
                 job_id,
                 watch.company_id,
@@ -276,6 +284,7 @@ fn apply_watch_sync_inner(
                 watch.provider,
                 remote.location,
                 included_int,
+                watch_company_stability,
                 synced_at
             ],
         )
@@ -361,6 +370,52 @@ mod tests {
         let missing = 1;
         let next = missing + 1;
         assert!(next >= 2);
+    }
+
+    #[test]
+    fn new_watch_jobs_copy_company_scores_to_the_legacy_cache() {
+        let connection = test_connection();
+        let company = create_company(&connection, "Watched Co", None).unwrap();
+        connection
+            .execute(
+                "UPDATE companies SET company_stability = 4, employment_stability = 3 WHERE id = ?1",
+                params![company.id],
+            )
+            .unwrap();
+        let watch = insert_watch(&connection, &company.id, "greenhouse", "watched-co").unwrap();
+        let remote = AtsJob {
+            external_id: "role-456".into(),
+            title: "Backend Engineer".into(),
+            url: "https://boards.greenhouse.io/watched-co/jobs/456".into(),
+            location: Some("Remote".into()),
+        };
+
+        apply_watch_sync(&connection, &watch.id, Ok(vec![remote])).unwrap();
+        let detail = get_job_detail(
+            &connection,
+            &connection
+                .query_row(
+                    "SELECT id FROM jobs WHERE company_id = ?1",
+                    params![company.id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(detail.job.company_stability, Some(4));
+        assert_eq!(detail.job.employment_stability, Some(3));
+        assert_eq!(detail.company.scores.company_stability, Some(4));
+        assert_eq!(detail.company.scores.employment_stability, Some(3));
+
+        let cached: Option<i64> = connection
+            .query_row(
+                "SELECT j.company_stability FROM jobs j WHERE j.company_id = ?1",
+                params![company.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(cached, Some(4));
     }
 
     #[test]

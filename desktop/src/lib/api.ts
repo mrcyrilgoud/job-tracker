@@ -73,6 +73,8 @@ export type JobFilters = {
   isArchived?: boolean;
   /** 1–5. Keeps jobs whose companyStability is >= this value; unscored jobs are excluded. */
   minCompanyStability?: number;
+  /** 1–5. Keeps jobs whose employmentStability is >= this value; unscored jobs are excluded. */
+  minEmploymentStability?: number;
   limit?: number;
 };
 
@@ -132,11 +134,39 @@ export type UpdateJobInput = {
   appeal?: number | null;
   /** 1–5, where 5 is easiest to apply. Null clears the score. */
   applicationEase?: number | null;
-  /** 1–5, where 5 is most stable. Null clears the score. */
+  /** 1–5, where 5 is most stable. Null clears the company score. */
   companyStability?: number | null;
+  /** 1–5, where 5 is most secure. Null clears the employment score. */
+  employmentStability?: number | null;
+  /** Omitted preserves the rationale; null clears it. */
+  companyStabilityRationale?: string | null;
+  /** Omitted preserves the citations; null clears them. */
+  companyStabilityCitations?: string[] | null;
+  /** Omitted preserves the rationale; null clears it. */
+  employmentStabilityRationale?: string | null;
+  /** Omitted preserves the citations; null clears them. */
+  employmentStabilityCitations?: string[] | null;
   salaryMin?: number | null;
   salaryMax?: number | null;
 };
+
+export type CompanyScoreWriteInput = {
+  /** Omitted preserves the stored score; null clears it; a number sets it. */
+  companyStability?: number | null;
+  /** Omitted preserves the stored score; null clears it; a number sets it. */
+  employmentStability?: number | null;
+  /** Omitted preserves the stored rationale; null clears it. */
+  companyStabilityRationale?: string | null;
+  /** Omitted preserves the stored citations; null clears them. */
+  companyStabilityCitations?: string[] | null;
+  /** Omitted preserves the stored rationale; null clears it. */
+  employmentStabilityRationale?: string | null;
+  /** Omitted preserves the stored citations; null clears them. */
+  employmentStabilityCitations?: string[] | null;
+};
+
+/** Alias matching the backend ScoreWriteInput name. */
+export type ScoreWriteInput = CompanyScoreWriteInput;
 
 export type ImportDocumentInput = {
   originalFilename: string;
@@ -241,6 +271,12 @@ export const api = {
 
   updateJob: (id: string, updates: UpdateJobInput) =>
     call<{ detail: JobDetail }>("update_job_cmd", { id, updates }),
+
+  writeCompanyScores: (companyId: string, input: CompanyScoreWriteInput) =>
+    call<{ company: Company; changed: boolean; warnings: string[] }>("write_company_scores", {
+      companyId,
+      input,
+    }),
 
   deleteJob: (id: string) => call<{ success: boolean; id: string }>("delete_job", { id }),
 

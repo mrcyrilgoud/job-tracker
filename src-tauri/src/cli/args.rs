@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
-use crate::models::COMPANY_STABILITY_RANGE_MESSAGE;
+use crate::models::{COMPANY_STABILITY_RANGE_MESSAGE, EMPLOYMENT_STABILITY_RANGE_MESSAGE};
 
 /// Strict value parser for company stability flags: accepts only base-10
 /// integers 1-5 (ASCII digits, no sign or whitespace) and otherwise returns
@@ -13,6 +13,19 @@ pub fn parse_company_stability(raw: &str) -> Result<i64, String> {
     match raw.parse::<i64>() {
         Ok(n) if (1..=5).contains(&n) => Ok(n),
         _ => Err(COMPANY_STABILITY_RANGE_MESSAGE.to_string()),
+    }
+}
+
+/// Strict value parser for employment stability flags. It deliberately has the
+/// same grammar as [`parse_company_stability`] but keeps the employment scale's
+/// exact boundary error for CLI and filter callers.
+pub fn parse_employment_stability(raw: &str) -> Result<i64, String> {
+    if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(EMPLOYMENT_STABILITY_RANGE_MESSAGE.to_string());
+    }
+    match raw.parse::<i64>() {
+        Ok(n) if (1..=5).contains(&n) => Ok(n),
+        _ => Err(EMPLOYMENT_STABILITY_RANGE_MESSAGE.to_string()),
     }
 }
 
@@ -109,6 +122,9 @@ pub enum Commands {
         about = "Run a full sync cycle (postings check, watches, careers, CSV)"
     )]
     Sync(SyncArgs),
+
+    #[command(name = "scores", about = "Import company score files")]
+    Scores(ScoresArgs),
 }
 
 #[derive(Debug, Args)]
@@ -159,9 +175,17 @@ pub struct ListArgs {
         long,
         value_name = "N",
         value_parser = parse_company_stability,
-        help = "Only jobs with company stability >= N (integer 1-5, 5 = most stable); unscored jobs are excluded"
+        help = "Only jobs with company stability >= N (integer 1-5, 5 = most stable; applies to every job at its company); unscored companies are excluded"
     )]
     pub min_company_stability: Option<i64>,
+
+    #[arg(
+        long,
+        value_name = "N",
+        value_parser = parse_employment_stability,
+        help = "Only jobs with employment stability >= N (integer 1-5, 5 = most secure; applies to every job at its company); unscored companies are excluded"
+    )]
+    pub min_employment_stability: Option<i64>,
 }
 
 #[derive(Debug, Args)]
@@ -301,16 +325,60 @@ pub struct UpdateArgs {
         value_name = "N",
         conflicts_with = "clear_company_stability",
         value_parser = parse_company_stability,
-        help = "Company stability from 1 (least stable) to 5 (most stable)"
+        help = "Company stability from 1 (least stable) to 5 (most stable), applied to every job at the job's company"
     )]
     pub company_stability: Option<i64>,
 
     #[arg(
         long,
-        conflicts_with = "company_stability",
-        help = "Clear the company stability score (leave the job unscored)"
+        conflicts_with_all = ["company_stability", "company_stability_rationale", "clear_company_stability_rationale"],
+        help = "Clear the company stability score and its metadata for every job at the job's company"
     )]
     pub clear_company_stability: bool,
+
+    #[arg(
+        long,
+        value_name = "N",
+        conflicts_with = "clear_employment_stability",
+        value_parser = parse_employment_stability,
+        help = "Employment stability from 1 (least secure) to 5 (most secure), applied to every job at the job's company"
+    )]
+    pub employment_stability: Option<i64>,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["employment_stability", "employment_stability_rationale", "clear_employment_stability_rationale"],
+        help = "Clear the employment stability score and its metadata for every job at the job's company"
+    )]
+    pub clear_employment_stability: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["clear_company_stability_rationale", "clear_company_stability"],
+        help = "Set the company stability rationale (trimmed; applies to every job at the job's company)"
+    )]
+    pub company_stability_rationale: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["company_stability_rationale", "clear_company_stability"],
+        help = "Clear the company stability rationale while keeping the score for every job at the job's company"
+    )]
+    pub clear_company_stability_rationale: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["clear_employment_stability_rationale", "clear_employment_stability"],
+        help = "Set the employment stability rationale (trimmed; applies to every job at the job's company)"
+    )]
+    pub employment_stability_rationale: Option<String>,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["employment_stability_rationale", "clear_employment_stability"],
+        help = "Clear the employment stability rationale while keeping the score for every job at the job's company"
+    )]
+    pub clear_employment_stability_rationale: bool,
 }
 
 #[derive(Debug, Args)]
@@ -454,20 +522,75 @@ pub struct SyncArgs {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
-    fn parse_company_stability_table() {
+    fn parse_employment_stability_table_matches_cli_grammar() {
         for (raw, expected) in [("1", 1), ("2", 2), ("3", 3), ("4", 4), ("5", 5)] {
-            assert_eq!(parse_company_stability(raw), Ok(expected), "input {raw:?}");
+            assert_eq!(
+                parse_employment_stability(raw),
+                Ok(expected),
+                "input {raw:?}"
+            );
         }
-        // "03" is a base-10 representation of 3 (Req 3.4), so it is accepted.
-        assert_eq!(parse_company_stability("03"), Ok(3));
+        assert_eq!(parse_employment_stability("03"), Ok(3));
         for raw in ["0", "6", "-1", "+3", "3.5", " 3", "3 ", "x", ""] {
             assert_eq!(
-                parse_company_stability(raw),
-                Err(COMPANY_STABILITY_RANGE_MESSAGE.to_string()),
+                parse_employment_stability(raw),
+                Err(EMPLOYMENT_STABILITY_RANGE_MESSAGE.to_string()),
                 "input {raw:?}"
             );
         }
     }
+
+    // Feature: company-employment-stability, Property 7: Strict CLI and IPC parsers accept only their specified values
+    // Validates: Requirements 5.6, 6.7, 6.8, 6.9, 7.15
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(100))]
+
+        #[test]
+        fn prop_strict_cli_score_parsers_accept_only_digit_scores(raw in prop::string::string_regex("[\\x00-\\x7f]{0,12}").unwrap()) {
+            let expected = raw.parse::<i64>().ok().filter(|value| (1..=5).contains(value));
+            let company = parse_company_stability(&raw);
+            let employment = parse_employment_stability(&raw);
+            match expected {
+                Some(value) if raw.bytes().all(|byte| byte.is_ascii_digit()) => {
+                    prop_assert_eq!(company, Ok(value));
+                    prop_assert_eq!(employment, Ok(value));
+                }
+                _ => {
+                    prop_assert!(company.is_err(), "accepted invalid company input {raw:?}");
+                    prop_assert!(employment.is_err(), "accepted invalid employment input {raw:?}");
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct ScoresArgs {
+    #[command(subcommand)]
+    pub command: ScoresCommands,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScoresCommands {
+    #[command(
+        name = "import",
+        about = "Import company scores from a JSON research file"
+    )]
+    Import(ScoreImportArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ScoreImportArgs {
+    #[arg(help = "JSON score file to read")]
+    pub path: PathBuf,
+
+    #[arg(
+        short = 'y',
+        long,
+        help = "Apply valid entries; without this flag only print the plan"
+    )]
+    pub yes: bool,
 }

@@ -10,7 +10,7 @@ import type { CompanyRow } from "./schema";
 
 /**
  * Sort_Menu entries, top to bottom. `group` is internal: the menu renders a separator
- * wherever it changes between adjacent entries (name | count | activity).
+ * wherever it changes between adjacent entries (name | count | activity | stability).
  */
 export const COMPANY_SORT_OPTIONS = [
   { value: "nameAsc", label: "Name A–Z", group: "name" },
@@ -26,7 +26,8 @@ export const COMPANY_SORT_OPTIONS = [
   { value: "recentActivity", label: "Recently updated job", group: "activity" },
   { value: "recentlyApplied", label: "Recently applied", group: "activity" },
   { value: "easiestWishlist", label: "Easiest wishlist to apply", group: "activity" },
-  { value: "mostStable", label: "Most stable company", group: "activity" },
+  { value: "mostStable", label: "Most stable company", group: "stability" },
+  { value: "mostStableEmployment", label: "Most stable employment", group: "stability" },
 ] as const;
 
 export type CompanySortOption = (typeof COMPANY_SORT_OPTIONS)[number]["value"];
@@ -116,14 +117,21 @@ export function easeOf(row: CompanyRow): number | null {
   return sanitizeEase((row as Partial<CompanyRow>).wishlistEaseAverage);
 }
 
-/** Sanitized Company_Stability_Average (unrounded), or null (missing, null, non-number, non-finite, <1, >5). */
-export function stabilityOf(row: CompanyRow): number | null {
-  return sanitizeEase((row as Partial<CompanyRow>).stabilityAverage);
+/** A stored company score is valid only as an integer 1–5; malformed values are unscored. */
+function sanitizeStoredScore(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && Number.isFinite(value) && value >= 1 && value <= 5
+    ? value
+    : null;
 }
 
-/** Sanitized count of Pipeline_Jobs with a valid Company_Stability. */
-export function stabilityCountOf(row: CompanyRow): number {
-  return sanitizeCount((row as Partial<CompanyRow>).stabilityScoredJobCount);
+/** Sanitized stored Company_Stability score, or null when malformed/unscored. */
+export function stabilityOf(row: CompanyRow): number | null {
+  return sanitizeStoredScore((row.company as Partial<CompanyRow["company"]>).companyStability);
+}
+
+/** Sanitized stored Employment_Stability score, or null when malformed/unscored. */
+export function employmentStabilityOf(row: CompanyRow): number | null {
+  return sanitizeStoredScore((row.company as Partial<CompanyRow["company"]>).employmentStability);
 }
 
 /** Last_Activity_At as an Instant, or null when missing or not a Valid_Timestamp. */
@@ -182,7 +190,11 @@ function sortKeyVector(row: CompanyRow, sort: KeyedSortOption): readonly number[
     }
     case "mostStable": {
       const s = stabilityOf(row);
-      return s === null ? [1, 0, 0] : [0, -s, -stabilityCountOf(row)];
+      return s === null ? [1, 0] : [0, -s];
+    }
+    case "mostStableEmployment": {
+      const s = employmentStabilityOf(row);
+      return s === null ? [1, 0] : [0, -s];
     }
     default: {
       const unreachable: never = sort;
@@ -309,8 +321,12 @@ export function sortAnnotationFor(
     case "mostStable": {
       const s = stabilityOf(row);
       if (s === null) return null;
-      const text = formatEase(s);
-      return { text, label: `Average stability ${text}` };
+      return { text: `Company ${s}`, label: `Company stability ${s}` };
+    }
+    case "mostStableEmployment": {
+      const s = employmentStabilityOf(row);
+      if (s === null) return null;
+      return { text: `Employment ${s}`, label: `Employment stability ${s}` };
     }
     default: {
       const unreachable: never = sort;

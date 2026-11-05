@@ -81,10 +81,14 @@ Release builds may one-time migrate from a legacy repo `data/` tree into Applica
 
 ### Jobs CSV
 
-- Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`, `appeal`, `application_ease`, `company_stability`
+- Editable columns: `url`, `title`, `company`, `status`, `applied_at`, `notes`, `location`, `latest_note`, `appeal`, `application_ease`, `company_stability`, `employment_stability`
 - `appeal` is one overall score from 1 to 5 (**5 = most appealing**, 1 = least), covering salary, career growth, industry, role fit, and anything else that matters. Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
 - `application_ease` is how easy that posting is to apply to, from 1 to 5 (**5 = easiest**, 1 = hardest). Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
-- `company_stability` is how stable the hiring company looks for that posting, an integer from 1 to 5 (**5 = most stable**, 1 = least stable). Leave the cell blank for an unscored job. There is no default score, and a CSV that omits the column does not clear a score already stored in the app.
+- `company_stability` is a company-wide score from 1 to 5 (**5 = most stable**, 1 = least stable). `employment_stability` is a company-wide score from 1 to 5 (**5 = most secure**, 1 = least secure). The CSV repeats each company's stored score on every job row for that company. Leave either cell blank when that score is unscored. Blank score cells clear a stored score only when the import treats that cell as changed; omitting a score column, including the legacy omission of `employment_stability`, preserves the stored score.
+- Company score metadata, including rationales, citations, scored-at timestamps, and scored-by sources, is not exported as CSV columns.
+- The `.sync.json` sidecar beside the CSV stores the last-export baseline. In merge mode, a score cell is changed only when it differs from that baseline; for a row without a baseline, only a non-blank score cell counts as changed. In overwrite mode, present score columns are treated as changed. Changed score cells for one company and score must agree, including blank as a clear; disagreements create a company-level conflict and do not write that score, while other fields and companies continue to import.
+- If the stored company score changed since the sidecar baseline, the stored value wins: the CSV score is reported as a conflict and does not overwrite the stored value. Invalid score cells must be an integer from 1 to 5 or blank; the entire row is skipped and reported with its row number and field/value, while other rows continue.
+- A CSV import with **dry run** enabled reports the planned changes without writing jobs or scores. After a non-dry-run import, the mirror is exported again and the `.sync.json` sidecar baselines are rewritten to the current stored values.
 - Conflicts (merge mode): DB wins when both sides changed since last export
 - Blank `id` + url/title/company creates a job; missing CSV rows do not delete jobs
 - By default, the mirror is `<data directory>/jobs.csv`. In **Settings**, choose another local

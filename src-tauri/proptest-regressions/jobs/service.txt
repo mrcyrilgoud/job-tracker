@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc ddb9e0ea9cffb4533f984f8a6e3f4bbf28ac0bb472b46a6a2726a2b6cc83a05c # shrinks to locations = [Some("100% remote")], query = " %"
+cc a09b5d7ee61247d28d7e0888cf083b9334be71d52799d84dcad92ba76d679e5f # shrinks to scores = [(Some(5), Some(4)), (Some(5), Some(2)), (None, Some(3)), (None, Some(4)), (None, None), (Some(1), Some(4)), (None, None), (None, Some(1))], company_min = 2, employment_min = 1, status_filter = false

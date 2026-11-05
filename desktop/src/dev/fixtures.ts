@@ -31,6 +31,16 @@ function company(id: string, name: string, careersUrl: string | null): Company {
     careersUrl,
     createdAt: ago(30 * days),
     updatedAt: ago(2 * days),
+    companyStability: null,
+    companyStabilityRationale: null,
+    companyStabilityCitations: null,
+    companyStabilityScoredAt: null,
+    companyStabilityScoredBy: null,
+    employmentStability: null,
+    employmentStabilityRationale: null,
+    employmentStabilityCitations: null,
+    employmentStabilityScoredAt: null,
+    employmentStabilityScoredBy: null,
   };
 }
 
@@ -98,6 +108,7 @@ function job(
     appeal: opts.appeal ?? null,
     applicationEase: opts.applicationEase ?? null,
     companyStability: null,
+    employmentStability: null,
     salaryMin: null,
     salaryMax: null,
   };
@@ -227,9 +238,6 @@ export function createFixtureBackend() {
       lastActivityAt: latest(pipeline.map((j) => j.updatedAt)),
       lastAppliedAt: latest(pipeline.map((j) => j.appliedAt)),
       wishlistEaseAverage: eases.length ? eases.reduce((a, b) => a + b, 0) / eases.length : null,
-      // Fixture jobs are unscored for company stability.
-      stabilityAverage: null,
-      stabilityScoredJobCount: 0,
     };
   }
 

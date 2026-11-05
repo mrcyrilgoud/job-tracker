@@ -21,6 +21,7 @@ const SORT_FIELDS: readonly JobListSortField[] = [
   "appeal",
   "companyName",
   "companyStability",
+  "employmentStability",
 ];
 
 const DIRECTIONS: readonly JobListSortDirection[] = ["ascending", "descending"];

@@ -14,33 +14,52 @@ export type JobFilterDraft = {
   dateTo: string;
   location: string;
   remoteMode: RemoteMode;
-  /** Minimum_Stability_Filter draft: "" means Any. */
+  /** Minimum company stability filter draft: "" means Any. */
   minStability: MinStabilityDraft;
+  /** Minimum employment stability filter draft: "" means Any. */
+  minEmploymentStability: MinStabilityDraft;
 };
 
-/** A Minimum_Stability_Filter threshold. */
+/** A minimum stability threshold. */
 export type MinStability = 1 | 2 | 3 | 4 | 5;
 export type MinStabilityDraft = "" | "1" | "2" | "3" | "4" | "5";
 
 const MIN_STABILITY_VALUES: readonly string[] = ["1", "2", "3", "4", "5"];
 
-/**
- * Parse the `minStability` param. Returns 1–5 only when the raw value is
- * exactly `"1"`–`"5"`; anything else (absent, `"3.0"`, `" 3"`, `"6"`) is Any
- * (`undefined`). Total.
- */
-export function parseMinStabilityFromUrl(params: URLSearchParams): MinStability | undefined {
-  const raw = params.get("minStability");
+function parseMinimumFromUrl(params: URLSearchParams, key: string): MinStability | undefined {
+  const raw = params.get(key);
   return raw !== null && MIN_STABILITY_VALUES.includes(raw) ? (Number(raw) as MinStability) : undefined;
 }
 
-/** Sets `minStability=<n>` for 1–5, deletes the param for `undefined` (or any other value). */
-export function encodeMinStabilityToUrl(params: URLSearchParams, value: number | undefined): void {
+function encodeMinimumToUrl(params: URLSearchParams, key: string, value: number | undefined): void {
   if (value !== undefined && Number.isInteger(value) && value >= 1 && value <= 5) {
-    params.set("minStability", String(value));
+    params.set(key, String(value));
   } else {
-    params.delete("minStability");
+    params.delete(key);
   }
+}
+
+/**
+ * Parse the `minStability` param. Returns 1–5 only when the raw value is
+ * exactly `"1"`–`"5"`; malformed values are treated as Any (`undefined`).
+ */
+export function parseMinStabilityFromUrl(params: URLSearchParams): MinStability | undefined {
+  return parseMinimumFromUrl(params, "minStability");
+}
+
+/** Parse the employment minimum using the same strict URL grammar. */
+export function parseMinEmploymentStabilityFromUrl(params: URLSearchParams): MinStability | undefined {
+  return parseMinimumFromUrl(params, "minEmploymentStability");
+}
+
+/** Set or remove the company minimum URL parameter. */
+export function encodeMinStabilityToUrl(params: URLSearchParams, value: number | undefined): void {
+  encodeMinimumToUrl(params, "minStability", value);
+}
+
+/** Set or remove the employment minimum URL parameter. */
+export function encodeMinEmploymentStabilityToUrl(params: URLSearchParams, value: number | undefined): void {
+  encodeMinimumToUrl(params, "minEmploymentStability", value);
 }
 
 const DATE_FIELDS: readonly DateField[] = ["appliedAt", "postingDate", "lastCheckedAt"];
@@ -176,6 +195,7 @@ export function filterDraftFromUrl(
   const remoteMode = params ? parseRemoteModeFromUrl(params) : "any";
   const location = params?.get("location")?.trim() ?? "";
   const minStability = params ? parseMinStabilityFromUrl(params) : undefined;
+  const minEmploymentStability = params ? parseMinEmploymentStabilityFromUrl(params) : undefined;
   return {
     search: search ?? "",
     postingState: postingState ?? "",
@@ -188,6 +208,7 @@ export function filterDraftFromUrl(
     location,
     remoteMode,
     minStability: minStability === undefined ? "" : (String(minStability) as MinStabilityDraft),
+    minEmploymentStability: minEmploymentStability === undefined ? "" : (String(minEmploymentStability) as MinStabilityDraft),
   };
 }
 
@@ -215,8 +236,8 @@ export function countActiveFilterDimensions(input: {
 /**
  * Count the active Jobs-page filters shown on the Filters button badge:
  * +1 for a salary bound, +1 for a posting state, the new filter dimensions
- * (see `countActiveFilterDimensions`), and +1 when a Minimum_Stability_Filter
- * value is set. Pure so it can be tested without rendering the page.
+ * (see `countActiveFilterDimensions`), and +1 for each active minimum
+ * stability filter. Pure so it can be tested without rendering the page.
  */
 export function countActiveJobFilters(input: {
   salaryMin: number | undefined;
@@ -229,12 +250,14 @@ export function countActiveJobFilters(input: {
   location: string;
   remoteMode: RemoteMode;
   minStability: MinStability | undefined;
+  minEmploymentStability?: MinStability | undefined;
 }): number {
   return (
     Number(input.salaryMin !== undefined || input.salaryMax !== undefined)
     + Number(Boolean(input.postingState))
     + countActiveFilterDimensions(input)
     + Number(input.minStability !== undefined)
+    + Number(input.minEmploymentStability !== undefined)
   );
 }
 

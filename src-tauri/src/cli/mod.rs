@@ -1,12 +1,13 @@
 pub mod args;
 pub mod handlers;
+pub mod importer;
 pub mod output;
 
 use std::io::IsTerminal;
 
 use rusqlite::Connection;
 
-use crate::cli::args::{Cli, Commands};
+use crate::cli::args::{Cli, Commands, ScoresCommands};
 use crate::db::configure_app_connection;
 use crate::db::paths::{resolve_data_dir, DataPaths};
 use crate::error::AppResult;
@@ -56,6 +57,18 @@ fn open_cli_connection(paths: &DataPaths) -> AppResult<Connection> {
     Ok(conn)
 }
 
+fn open_cli_connection_for_command(
+    paths: &DataPaths,
+    json: bool,
+    quiet: bool,
+) -> AppResult<Connection> {
+    let conn = open_cli_connection(paths)?;
+    if !json && !quiet {
+        handlers::report_unreported_backfill_conflicts(&conn)?;
+    }
+    Ok(conn)
+}
+
 pub async fn run_cli(cli: Cli) -> AppResult<()> {
     let paths = if let Some(dir) = cli.data_dir {
         DataPaths::from_data_dir(dir)
@@ -98,51 +111,66 @@ pub async fn run_cli(cli: Cli) -> AppResult<()> {
                 archived: false,
                 limit: None,
                 min_company_stability: None,
+                min_employment_stability: None,
             })
         }
     };
 
+    if let Commands::Scores(scores) = &command {
+        let import_args = match &scores.command {
+            ScoresCommands::Import(import_args) => import_args,
+        };
+        // Parse the envelope before opening SQLite so file-level failures
+        // cannot create migration, marker, or CSV side effects.
+        let file = importer::read_score_file(&import_args.path)?;
+        let conn = open_cli_connection_for_command(&paths, json, quiet)?;
+        handlers::handle_score_import(&conn, &paths, file, import_args.yes, json, quiet)?;
+        return Ok(());
+    }
+
     match command {
         Commands::List(args) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_list(&conn, &paths, args, json)?;
         }
         Commands::Get(args) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_get(&conn, args, json)?;
         }
         Commands::Add(args) => {
-            let mut conn = open_cli_connection(&paths)?;
+            let mut conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_add(&mut conn, &paths, args, json, quiet).await?;
         }
         Commands::Update(args) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_update(&conn, &paths, args, json, quiet)?;
         }
         Commands::Delete(args) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             let stdin_is_terminal = std::io::stdin().is_terminal();
             handlers::handle_delete(&conn, &paths, args, json, quiet, stdin_is_terminal)?;
         }
         Commands::Note(args) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_note(&conn, &paths, args, json, quiet)?;
         }
         Commands::Description(args) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_description(&conn, &paths, args, json, quiet)?;
         }
         Commands::Stats(_) => {
-            let conn = open_cli_connection(&paths)?;
+            let conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_stats(&conn, json)?;
         }
         Commands::Watches(args) => {
-            let mut conn = open_cli_connection(&paths)?;
+            let mut conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_watches(&mut conn, &paths, args.command, json, quiet).await?;
         }
         Commands::Sync(_) => {
+            let _conn = open_cli_connection_for_command(&paths, json, quiet)?;
             handlers::handle_sync(&paths, json, quiet).await?;
         }
+        Commands::Scores(_) => unreachable!("score import is handled before command dispatch"),
     }
 
     Ok(())
@@ -154,6 +182,7 @@ mod tests {
     use super::handlers;
     use crate::db::migrate;
     use crate::db::paths::DataPaths;
+    use crate::models::EMPLOYMENT_STABILITY_RANGE_MESSAGE;
     use clap::Parser;
     use rusqlite::Connection;
 
@@ -480,6 +509,12 @@ mod tests {
             clear_application_ease: false,
             company_stability: None,
             clear_company_stability: false,
+            employment_stability: None,
+            clear_employment_stability: false,
+            company_stability_rationale: None,
+            clear_company_stability_rationale: false,
+            employment_stability_rationale: None,
+            clear_employment_stability_rationale: false,
         };
         handlers::handle_update(&conn, &paths, update_args, true, true).unwrap();
 
@@ -565,6 +600,7 @@ mod tests {
             archived: false,
             limit: None,
             min_company_stability: None,
+            min_employment_stability: None,
         };
         let search_results = crate::jobs::service::list_jobs(
             &conn,
@@ -612,6 +648,12 @@ mod tests {
             clear_application_ease: false,
             company_stability: None,
             clear_company_stability: false,
+            employment_stability: None,
+            clear_employment_stability: false,
+            company_stability_rationale: None,
+            clear_company_stability_rationale: false,
+            employment_stability_rationale: None,
+            clear_employment_stability_rationale: false,
         };
         handlers::handle_update(&conn, &paths, set_appeal, true, true).unwrap();
         let scored = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -626,8 +668,14 @@ mod tests {
             .position(|header| header == "appeal")
             .unwrap();
         assert_eq!(
-            parsed[0].last().map(String::as_str),
+            parsed[0]
+                .get(parsed[0].len().saturating_sub(2))
+                .map(String::as_str),
             Some("company_stability")
+        );
+        assert_eq!(
+            parsed[0].last().map(String::as_str),
+            Some("employment_stability")
         );
         assert_eq!(parsed[1][appeal_idx], "4");
         let ease_idx = parsed[0]
@@ -657,6 +705,12 @@ mod tests {
             clear_application_ease: false,
             company_stability: None,
             clear_company_stability: false,
+            employment_stability: None,
+            clear_employment_stability: false,
+            company_stability_rationale: None,
+            clear_company_stability_rationale: false,
+            employment_stability_rationale: None,
+            clear_employment_stability_rationale: false,
         };
         handlers::handle_update(&conn, &paths, clear_appeal, true, true).unwrap();
         let cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -690,6 +744,12 @@ mod tests {
             clear_application_ease: false,
             company_stability: None,
             clear_company_stability: false,
+            employment_stability: None,
+            clear_employment_stability: false,
+            company_stability_rationale: None,
+            clear_company_stability_rationale: false,
+            employment_stability_rationale: None,
+            clear_employment_stability_rationale: false,
         };
         handlers::handle_update(&conn, &paths, set_ease, true, true).unwrap();
         let eased = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -735,6 +795,12 @@ mod tests {
             clear_application_ease: true,
             company_stability: None,
             clear_company_stability: false,
+            employment_stability: None,
+            clear_employment_stability: false,
+            company_stability_rationale: None,
+            clear_company_stability_rationale: false,
+            employment_stability_rationale: None,
+            clear_employment_stability_rationale: false,
         };
         handlers::handle_update(&conn, &paths, clear_ease, true, true).unwrap();
         let ease_cleared = crate::jobs::service::get_job_detail(&conn, &job_id)
@@ -1004,6 +1070,12 @@ mod tests {
                 clear_application_ease: false,
                 company_stability: None,
                 clear_company_stability: false,
+                employment_stability: None,
+                clear_employment_stability: false,
+                company_stability_rationale: None,
+                clear_company_stability_rationale: false,
+                employment_stability_rationale: None,
+                clear_employment_stability_rationale: false,
             },
             true,
             true,
@@ -1105,9 +1177,18 @@ mod tests {
             "--company-stability",
             "--clear-company-stability",
             "1 (least stable) to 5 (most stable)",
-            "leave the job unscored",
+            "applied to every job at the job's company",
+            "--employment-stability",
+            "--clear-employment-stability",
+            "--company-stability-rationale",
+            "--clear-company-stability-rationale",
+            "--employment-stability-rationale",
+            "--clear-employment-stability-rationale",
         ] {
-            assert!(update_help.contains(needle), "update help missing {needle:?}");
+            assert!(
+                update_help.contains(needle),
+                "update help missing {needle:?}"
+            );
         }
         let list_help = cmd
             .find_subcommand_mut("list")
@@ -1119,10 +1200,110 @@ mod tests {
             ">= N",
             "1-5",
             "5 = most stable",
-            "unscored jobs are excluded",
+            "unscored companies are excluded",
+            "--min-employment-stability",
+            "5 = most secure",
         ] {
             assert!(list_help.contains(needle), "list help missing {needle:?}");
         }
+    }
+
+    #[test]
+    fn employment_score_flags_parse_strictly_and_conflicts_are_named() {
+        let parsed = Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_1",
+            "--company-stability",
+            "03",
+            "--employment-stability",
+            "5",
+            "--company-stability-rationale",
+            "  steady  ",
+        ])
+        .unwrap();
+        match parsed.command.unwrap() {
+            Commands::Update(args) => {
+                assert_eq!(args.company_stability, Some(3));
+                assert_eq!(args.employment_stability, Some(5));
+                assert_eq!(
+                    args.company_stability_rationale.as_deref(),
+                    Some("  steady  ")
+                );
+            }
+            _ => panic!("Expected Update command"),
+        }
+
+        for argv in [
+            vec!["job-tracker", "list", "--min-employment-stability", "0"],
+            vec![
+                "job-tracker",
+                "update",
+                "job_1",
+                "--employment-stability",
+                "+3",
+            ],
+        ] {
+            let error = Cli::try_parse_from(argv).unwrap_err().to_string();
+            assert!(
+                error.contains(EMPLOYMENT_STABILITY_RANGE_MESSAGE),
+                "{error}"
+            );
+        }
+
+        let dual_invalid = Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_1",
+            "--company-stability",
+            "0",
+            "--employment-stability",
+            "0",
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(
+            dual_invalid.contains(crate::models::COMPANY_STABILITY_RANGE_MESSAGE)
+                || dual_invalid.contains(EMPLOYMENT_STABILITY_RANGE_MESSAGE)
+        );
+
+        let conflict = Cli::try_parse_from([
+            "job-tracker",
+            "update",
+            "job_1",
+            "--company-stability-rationale",
+            "why",
+            "--clear-company-stability",
+        ])
+        .unwrap_err();
+        assert_eq!(conflict.kind(), clap::error::ErrorKind::ArgumentConflict);
+        let message = conflict.to_string();
+        assert!(message.contains("--company-stability-rationale"));
+        assert!(message.contains("--clear-company-stability"));
+    }
+
+    #[test]
+    fn backfill_conflicts_report_once_after_stderr_write() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO company_stability_backfill_conflicts
+             (company_id, company_name, values_json, reported, created_at)
+             VALUES (?1, ?2, ?3, 0, ?4)",
+            rusqlite::params!["conflict-id", "Acme", "[1,5]", crate::util::now_iso()],
+        )
+        .unwrap();
+
+        handlers::report_unreported_backfill_conflicts(&conn).unwrap();
+        let reported: i64 = conn
+            .query_row(
+                "SELECT reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reported, 1);
+        handlers::report_unreported_backfill_conflicts(&conn).unwrap();
     }
 
     #[test]
@@ -1164,6 +1345,49 @@ mod tests {
         assert!(!job.is_favorite);
         assert_eq!(csv_cell(&paths, &job_id, "company_stability"), "4");
 
+        // Employment and rationale flags share the same company-scoped write.
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[
+                &job_id,
+                "--employment-stability",
+                "03",
+                "--company-stability-rationale",
+                "  durable cash flow  ",
+            ]),
+            true,
+            true,
+        )
+        .unwrap();
+        let detail = crate::jobs::service::get_job_detail(&conn, &job_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.job.employment_stability, Some(3));
+        assert_eq!(
+            detail.company.scores.company_stability_rationale.as_deref(),
+            Some("durable cash flow")
+        );
+        assert_eq!(csv_cell(&paths, &job_id, "employment_stability"), "3");
+
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[&job_id, "--clear-company-stability-rationale"]),
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::jobs::service::get_job_detail(&conn, &job_id)
+                .unwrap()
+                .unwrap()
+                .company
+                .scores
+                .company_stability_rationale,
+            None
+        );
+
         // Keep (Req 3.3): an update without either flag leaves the score.
         handlers::handle_update(
             &conn,
@@ -1186,15 +1410,13 @@ mod tests {
         );
         assert!(missing.unwrap_err().to_string().contains("No job found"));
         assert_eq!(get(&job_id).company_stability, Some(4));
-        assert_eq!(get(&other_id).company_stability, None);
+        assert_eq!(get(&other_id).company_stability, Some(4));
 
         // Table and detail output print to stdout, which libtest captures and
         // the tests cannot read; run them as smoke checks only (Req 3.8, 3.9).
-        let listed = crate::jobs::service::list_jobs(
-            &conn,
-            crate::jobs::service::JobFilters::default(),
-        )
-        .unwrap();
+        let listed =
+            crate::jobs::service::list_jobs(&conn, crate::jobs::service::JobFilters::default())
+                .unwrap();
         super::output::format_jobs_table(&listed);
         let detail = crate::jobs::service::get_job_detail(&conn, &job_id)
             .unwrap()
@@ -1207,12 +1429,24 @@ mod tests {
             handlers::handle_update(
                 &conn,
                 &paths,
-                update_args(&[&job_id, "--clear-company-stability"]),
+                {
+                    let args = update_args(&[&job_id, "--clear-company-stability"]);
+                    assert!(args.clear_company_stability);
+                    args
+                },
                 true,
                 true,
             )
             .unwrap();
             let job = get(&job_id);
+            let raw_company: Option<i64> = conn
+                .query_row(
+                    "SELECT company_stability FROM companies WHERE id = (SELECT company_id FROM jobs WHERE id = ?1)",
+                    rusqlite::params![job_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(raw_company, None);
             assert_eq!(job.company_stability, None);
             assert_eq!((job.appeal, job.application_ease), (Some(2), Some(5)));
             assert_eq!(csv_cell(&paths, &job_id, "company_stability"), "");
@@ -1228,6 +1462,14 @@ mod tests {
         migrate::migrate(&conn).unwrap();
         let scored = insert_job(&conn, "https://example.com/jobs/scored", "Scored");
         let unscored = insert_job(&conn, "https://example.com/jobs/unscored", "Unscored");
+        handlers::handle_update(
+            &conn,
+            &paths,
+            update_args(&[&unscored, "--company", "Other"]),
+            true,
+            true,
+        )
+        .unwrap();
         handlers::handle_update(
             &conn,
             &paths,
@@ -1268,6 +1510,162 @@ mod tests {
         assert!(empty.is_empty());
         let none: Vec<crate::models::JobListItem> = Vec::new();
         assert_eq!(serde_json::to_string_pretty(&none).unwrap(), "[]");
+    }
+    #[test]
+    fn ordinary_conflict_startup_reports_and_marks_once() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO company_stability_backfill_conflicts
+             (company_id, company_name, values_json, reported, created_at)
+             VALUES ('conflict-id', 'Acme', '[1,5]', 0, ?1)",
+            [crate::util::now_iso()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let connection = super::open_cli_connection_for_command(&paths, false, false).unwrap();
+        let reported: i64 = connection
+            .query_row(
+                "SELECT reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reported, 1);
+        drop(connection);
+        let connection = super::open_cli_connection_for_command(&paths, false, false).unwrap();
+        let reported_again: i64 = connection
+            .query_row(
+                "SELECT reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reported_again, 1);
+    }
+
+    #[test]
+    fn json_and_quiet_startup_suppress_backfill_conflict_reporting() {
+        for (json, quiet) in [(true, false), (false, true)] {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+            paths.ensure_dirs().unwrap();
+            let conn = Connection::open(&paths.db_path).unwrap();
+            migrate::migrate(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO company_stability_backfill_conflicts
+                 (company_id, company_name, values_json, reported, created_at)
+                 VALUES ('conflict-id', 'Acme', '[1,5]', 0, ?1)",
+                [crate::util::now_iso()],
+            )
+            .unwrap();
+            drop(conn);
+
+            let connection = super::open_cli_connection_for_command(&paths, json, quiet).unwrap();
+            let reported: i64 = connection
+                .query_row(
+                    "SELECT reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict-id'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(reported, 0, "json={json}, quiet={quiet}");
+        }
+    }
+
+    #[tokio::test]
+    async fn run_jobs_path_suppresses_backfill_conflict_reporting() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::from_data_dir(temp_dir.path().to_path_buf());
+        paths.ensure_dirs().unwrap();
+        let conn = Connection::open(&paths.db_path).unwrap();
+        migrate::migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO company_stability_backfill_conflicts
+             (company_id, company_name, values_json, reported, created_at)
+             VALUES ('conflict-id', 'Acme', '[1,5]', 0, ?1)",
+            [crate::util::now_iso()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let cli = Cli::try_parse_from([
+            "job-tracker",
+            "--data-dir",
+            paths.data_dir.to_str().unwrap(),
+            "--run-jobs",
+        ])
+        .unwrap();
+        let _ = super::run_cli(cli).await;
+        let conn = Connection::open(&paths.db_path).unwrap();
+        let reported: i64 = conn
+            .query_row(
+                "SELECT reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reported, 0);
+    }
+
+    #[test]
+    fn dual_invalid_cli_scores_fail_before_opening_database() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let data_dir = temp_dir.path().join("data");
+        let error = Cli::try_parse_from([
+            "job-tracker",
+            "--data-dir",
+            data_dir.to_str().unwrap(),
+            "update",
+            "job-1",
+            "--company-stability",
+            "0",
+            "--employment-stability",
+            "6",
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("stability"));
+        assert!(!data_dir.join("job-tracker.db").exists());
+    }
+
+    #[test]
+    fn scores_import_help_and_human_summary_contract() {
+        use clap::CommandFactory;
+        let mut command = Cli::command();
+        let scores_help = command
+            .find_subcommand_mut("scores")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(scores_help.contains("import"));
+        assert!(scores_help.contains("company score files"));
+        let import_help = command
+            .find_subcommand_mut("scores")
+            .unwrap()
+            .find_subcommand_mut("import")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(import_help.contains("JSON score file to read"));
+        assert!(import_help.contains("--yes"));
+
+        let mut summary = crate::cli::importer::ImportSummary::new(true);
+        summary.conflicts.push(crate::cli::importer::ImportItem {
+            position: Some(2),
+            name: "Acme entry".to_string(),
+            company_id: Some("acme-id".to_string()),
+            company_name: Some("Acme".to_string()),
+            reason: Some("duplicate entries".to_string()),
+        });
+        let output = crate::cli::importer::format_summary(&summary, false, false).unwrap();
+        assert!(output.contains("Score import plan (dry run):"));
+        assert!(output.contains("Conflicts (1):"));
+        assert!(output.contains("[2] Acme entry: Acme: duplicate entries"));
     }
 }
 

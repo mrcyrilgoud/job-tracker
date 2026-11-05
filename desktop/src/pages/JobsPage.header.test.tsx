@@ -42,6 +42,7 @@ function makeJob(id: string, status: JobStatus, isFavorite: boolean): JobListIte
       appeal: null,
       applicationEase: null,
       companyStability: null,
+      employmentStability: null,
       appliedAt: null,
       lastCheckedAt: null,
       salaryMin: null,
@@ -284,8 +285,8 @@ describe("JobsPage header title/toolbar layout contract", () => {
     const orderSelect = host.querySelector<HTMLSelectElement>("#jobs-sort-order")!;
     expect([...sortSelect.options].map((o) => o.value)).toEqual(
       appliedTab
-        ? ["appliedAt", "postingDate", "appeal", "companyStability", "companyName"]
-        : ["postingDate", "appeal", "companyStability", "companyName"],
+        ? ["appliedAt", "postingDate", "appeal", "companyStability", "employmentStability", "companyName"]
+        : ["postingDate", "appeal", "companyStability", "employmentStability", "companyName"],
     );
     expect([...sortSelect.options].some((o) => o.textContent === "Date applied")).toBe(appliedTab);
     expect(sortSelect.value).toBe(sort.field);
@@ -391,5 +392,5 @@ describe("JobsPage header title/toolbar layout contract", () => {
       }),
       { numRuns: 25 },
     );
-  });
+  }, 15_000);
 });

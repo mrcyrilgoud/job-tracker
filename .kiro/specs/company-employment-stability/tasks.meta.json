@@ -1,0 +1,622 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Extend `src-tauri/src/db/migrate.rs` and fresh-schema SQL to add the ten nullable company score/metadata columns with identical strict score and source checks; retain all existing job columns and add no employment score column to `jobs`.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777185839
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777191009
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777506015
+      }
+    ],
+    "1.2 Add company score data models and shared normalization/validation in `src-tauri/src/models.rs` and a new `src-tauri/src/company_scores.rs` module.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777185874
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777191065
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777506044
+      }
+    ],
+    "1.3 Add the one-time backfill conflict schema, marker handling, and transactional legacy-cache backfill in `src-tauri/src/db/migrate.rs`.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777185898
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777508304
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777693187
+      }
+    ],
+    "1.4 Write migration, schema constraint, model, and backfill unit/integration tests in `src-tauri/src/db/migrate.rs`, `src-tauri/src/company_scores.rs`, and related test modules.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777185921
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777695918
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778215636
+      }
+    ],
+    "2.1 Implement `Score_Service::write` and score read helpers in `src-tauri/src/company_scores.rs`.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777185947
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777508348
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777693251
+      }
+    ],
+    "2.2 Update `src-tauri/src/jobs/service.rs` and job query/model code to use company scores as read source and maintain the cache on insert, move, update, and delete.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777185990
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777695994
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778215672
+      }
+    ],
+    "2.3 Add company-score filtering, sorting, and keyset paging to `src-tauri/src/jobs/service.rs` and query helpers.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186020
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777696053
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778215739
+      }
+    ],
+    "2.4 Add Score_Service, job lifecycle, transaction rollback, parser, sort/paging, and cache invariant tests.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186048
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778218831
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779278859
+      }
+    ],
+    "3.1 Extend `src-tauri/src/commands/`, `src-tauri/src/companies.rs`, and shared command registration with `write_company_scores`, score-aware `update_job`, complete company metadata, and validated list minimums.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186073
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778218889
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779278891
+      }
+    ],
+    "3.2 Update `desktop/src/lib/schema.ts` and `desktop/src/lib/api.ts` for company score types, job score fields, `writeCompanyScores`, minimum employment filtering, and new sort values.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186097
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778218912
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779278919
+      }
+    ],
+    "3.3 Add IPC contract tests covering omitted/null/value fields, complete JSON shapes, invalid payloads, CSV dirty behavior, and company-not-found/job-not-found atomicity.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186128
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779281789
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779844420
+      }
+    ],
+    "3.4 Update every company mapper, query, projection, and fixture for the complete score shape.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186156
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779281816
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779844448
+      }
+    ],
+    "3.5 Update every job projection and column-count assumption for both company scores.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186189
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779281861
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779844473
+      }
+    ],
+    "4.1 Extend `src-tauri/src/cli/args.rs` and CLI command dispatch for both score flags, rationale flags, clear flags, employment minimums, exact help text, conflicts, and pre-database parsing.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186213
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779281938
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779844498
+      }
+    ],
+    "4.2 Implement the score-file planner, top-level validator, and summary envelope in `src-tauri/src/cli/` and a dedicated importer module.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186255
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779847990
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780313036
+      }
+    ],
+    "4.3 Implement score-file matching, merged conflict planning, and per-entry transactional application.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186281
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779848014
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780312982
+      }
+    ],
+    "4.4 Add CLI and importer tests for help/output contracts, parser grammar, conflict reporting, metadata preservation, dry-run/apply parity, idempotence, file validation, matching, warnings, per-entry failures, and mirror-refresh failure.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186305
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780636316
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781222476
+      }
+    ],
+    "5.1 Update `src-tauri/src/jobs/csv.rs` export/import models, headers, sidecar baselines, and merge/overwrite application.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186408
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778218971
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779278947
+      }
+    ],
+    "5.2 Add CSV field-list, sidecar, and export tests in `src-tauri/src/jobs/csv.rs` and related fixtures.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186447
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779848058
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780325780
+      }
+    ],
+    "5.3 Add CSV merge, overwrite, and lifecycle tests.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186483
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780636345
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781222538
+      }
+    ],
+    "6.1 Update `desktop/src/pages/JobsPage.tsx` and supporting list/filter components for Company and Employment selects, optimistic company-wide updates, minimum employment URL state, filters, counts, and sorts.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186514
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779848136
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780325834
+      }
+    ],
+    "6.2 Update `desktop/src/components/JobsBoardView.tsx` to show both company score chips and summary segments with null omission and exact ordering/titles.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186540
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779848223
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780313097
+      }
+    ],
+    "6.3 Update `desktop/src/components/JobDetailClient.tsx` for both company score selects, changed-only update payloads, company helper/link, read-only rationale/citation display, and failed-save dirty-state preservation.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186571
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780636430
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781222618
+      }
+    ],
+    "6.4 Add `CompanyScoresEditor` and integrate it into `desktop/src/pages/CompanyDetailPage.tsx`.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186599
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780636482
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781484066
+      }
+    ],
+    "6.5 Update `desktop/src/lib/company-sidebar.ts` and sidebar components for stored score sorting, `mostStableEmployment`, filters, annotations, saved state, and malformed-score sanitization.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186632
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780331924
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780632382
+      }
+    ],
+    "6.6 Add TypeScript Vitest/fast-check tests for Jobs list/board/detail/editor/sidebar behavior and URL state.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186672
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781559564
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781875468
+      }
+    ],
+    "6.7 Add focused CompanyScoresEditor and company-detail integration tests.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186705
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781559583
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781875561
+      }
+    ],
+    "7.1 Update `AGENTS.md` to replace the per-job company-stability description and document company scope, both scales, clear/rationale flags, metadata JSON, Backfill_Conflict reporting, score-file import, CSV refresh, exit rules, and unchanged Appeal/Application_Ease/favorite behavior.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186765
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793780636558
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781484140
+      }
+    ],
+    "7.2 Update the Jobs CSV section of `README.md` for both score columns, company repetition, blank/unscored behavior, absence of metadata columns, baseline/merge/conflict rules, invalid-row behavior, and stored-value-wins semantics.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186807
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781487340
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781556191
+      }
+    ],
+    "7.3 Add documentation contract tests or targeted repository checks for required flags, mappings, JSON fields, CSV columns, scales, importer exit rules, and removal of stale per-job wording.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186842
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781559643
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781875588
+      }
+    ],
+    "8.1 Rewrite existing company-stability tests and fixtures that assert per-job semantics to assert company scope, synchronized cache behavior, and the new two-score contract.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186871
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781559663
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781875628
+      }
+    ],
+    "8.2 Wire all modules, command registrations, CLI dispatch, database migration startup, CSV refresh paths, and desktop API call sites, then run the complete Rust and desktop test suites.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186905
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781878614
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781993657
+      }
+    ],
+    "8.3 Run final automated acceptance checks for migration/backfill, Score_Service invariants, CLI/IPC/CSV contracts, importer idempotence, UI behavior, documentation spelling, and all 15 design properties.": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793777186932
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781998935
+      },
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793782153483
+      }
+    ],
+    "1. Build the company score schema, models, validators, and migration/backfill foundation": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793778215695
+      }
+    ],
+    "2. Implement the transactional Score_Service and company lifecycle integration": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793779278974
+      }
+    ],
+    "4. Implement CLI score commands and score-file importer": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781222517
+      }
+    ],
+    "5. Extend the CSV mirror for company-scoped scores": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781222569
+      }
+    ],
+    "6. Implement desktop Jobs list, board, detail, company editor, and sidebar": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781875657
+      }
+    ],
+    "7. Update documentation and repository contracts": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793781875680
+      }
+    ],
+    "8. Integrate, reconcile regression coverage, and perform final validation": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793782153545
+      }
+    ],
+    "3. Add IPC contracts and company/sidebar backend responses": [
+      {
+        "executionId": "32733b98-61ab-4281-a72c-38c292cb7ceb",
+        "chatSessionId": "sess_670e670b-f7fd-4e54-9ec8-7b8897e8c274",
+        "timestamp": 1793782167709
+      }
+    ]
+  }
+}

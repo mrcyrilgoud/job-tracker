@@ -86,13 +86,25 @@ function easiestWishlist(a: CompanyRow, b: CompanyRow): number {
   if (ea === null || eb === null) return refNameOrder(a, b);
   return higherFirst(ea, eb) || higherFirst(a.wishlistJobCount, b.wishlistJobCount) || refNameOrder(a, b);
 }
-/** "Non-null averages highest first, then higher stability-scored count, then Name_Order; null averages last in Name_Order." */
+/** "Non-null stored scores highest first, then Name_Order; null scores last in Name_Order." */
 function mostStable(a: CompanyRow, b: CompanyRow): number {
-  const sa = a.stabilityAverage;
-  const sb = b.stabilityAverage;
+  const aScore = a.company.companyStability;
+  const bScore = b.company.companyStability;
+  const sa = typeof aScore === "number" && Number.isInteger(aScore) && Number.isFinite(aScore) && aScore >= 1 && aScore <= 5 ? aScore : null;
+  const sb = typeof bScore === "number" && Number.isInteger(bScore) && Number.isFinite(bScore) && bScore >= 1 && bScore <= 5 ? bScore : null;
   if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1;
   if (sa === null || sb === null) return refNameOrder(a, b);
-  return higherFirst(sa, sb) || higherFirst(a.stabilityScoredJobCount, b.stabilityScoredJobCount) || refNameOrder(a, b);
+  return higherFirst(sa, sb) || refNameOrder(a, b);
+}
+
+function mostStableEmployment(a: CompanyRow, b: CompanyRow): number {
+  const aScore = a.company.employmentStability;
+  const bScore = b.company.employmentStability;
+  const sa = typeof aScore === "number" && Number.isInteger(aScore) && Number.isFinite(aScore) && aScore >= 1 && aScore <= 5 ? aScore : null;
+  const sb = typeof bScore === "number" && Number.isInteger(bScore) && Number.isFinite(bScore) && bScore >= 1 && bScore <= 5 ? bScore : null;
+  if ((sa === null) !== (sb === null)) return sa === null ? 1 : -1;
+  if (sa === null || sb === null) return refNameOrder(a, b);
+  return higherFirst(sa, sb) || refNameOrder(a, b);
 }
 
 const REFERENCE: Record<CompanySortOption, (a: CompanyRow, b: CompanyRow) => number> = {
@@ -112,6 +124,7 @@ const REFERENCE: Record<CompanySortOption, (a: CompanyRow, b: CompanyRow) => num
   recentlyApplied: newestFirst((r) => r.lastAppliedAt),
   easiestWishlist,
   mostStable,
+  mostStableEmployment,
 };
 
 const arbSortOption = fc.constantFrom(...COMPANY_SORT_OPTIONS.map((o) => o.value));
@@ -167,20 +180,23 @@ describe("companies-tab-sorting sort ordering", () => {
 // malformed pool), not from the sanitizers under test.
 // ---------------------------------------------------------------------------
 
-const COUNT_FIELDS = ["wishlistJobCount", "appliedJobCount", "interviewingJobCount", "stabilityScoredJobCount"] as const;
+const COUNT_FIELDS = ["wishlistJobCount", "appliedJobCount", "interviewingJobCount"] as const;
 
-/** Same row with each missing/malformed count → 0 and missing/malformed ease or stability average → null. */
+/** Same row with each missing/malformed count → 0 and missing/malformed ease or company score → null. */
 function sanitizedEquivalent(row: CompanyRow): CompanyRow {
   const raw = row as unknown as Record<string, unknown>;
-  const out: Record<string, unknown> = { ...raw };
+  const out: Record<string, unknown> = { ...raw, company: { ...row.company } };
   for (const key of COUNT_FIELDS) {
     if (!(key in raw) || MALFORMED_COUNT_POOL.includes(raw[key])) out[key] = 0;
   }
   if (!("wishlistEaseAverage" in raw) || MALFORMED_EASE_POOL.includes(raw.wishlistEaseAverage)) {
     out.wishlistEaseAverage = null;
   }
-  if (!("stabilityAverage" in raw) || MALFORMED_STABILITY_POOL.includes(raw.stabilityAverage)) {
-    out.stabilityAverage = null;
+  const company = out.company as Record<string, unknown>;
+  if (!("companyStability" in company) || MALFORMED_STABILITY_POOL.includes(company.companyStability)) {
+    company.companyStability = null;
+    company.companyStabilityScoredAt = null;
+    company.companyStabilityScoredBy = null;
   }
   return out as unknown as CompanyRow;
 }
@@ -284,8 +300,7 @@ function largeRows(count: number, seed: number): CompanyRow[] {
         lastActivityAt: next() % 5 === 0 ? null : pick(next, TIMESTAMP_POOL)[0],
         lastAppliedAt: next() % 5 === 0 ? null : pick(next, TIMESTAMP_POOL)[0],
         wishlistEaseAverage: pick(next, EASE_POOL),
-        stabilityAverage: pick(next, STABILITY_POOL),
-        stabilityScoredJobCount: next() % 4,
+        companyStability: pick(next, STABILITY_POOL),
       }),
     );
   }
@@ -329,11 +344,11 @@ describe("companies-tab-sorting sort invariants", () => {
   // Feature: companies-tab-sorting, Property 8: Sorting is a deterministic, idempotent, non-mutating permutation
   /** **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.7** */
   it(
-    "Property 8: a seeded 10,000-row list satisfies the invariants under all 14 Sort_Options",
+    "Property 8: a seeded 10,000-row list satisfies the invariants under all 15 Sort_Options",
     () => {
       const rows = largeRows(10_000, 0x5eed);
       const permuted = seededShuffle(rows, 0xc0ffee);
-      expect(COMPANY_SORT_OPTIONS).toHaveLength(14);
+      expect(COMPANY_SORT_OPTIONS).toHaveLength(15);
       for (const { value } of COMPANY_SORT_OPTIONS) {
         checkSortInvariants(rows, permuted, value);
       }
@@ -510,7 +525,7 @@ describe("company-stability-score most-stable ordering", () => {
         expect(ids(sortCompanies(rows, "mostStable"))).toEqual(ids([...clean].sort(REFERENCE.mostStable)));
         // Null-average rows come after every scored row.
         const cleanById = new Map(clean.map((r) => [r.company.id, r]));
-        const isNull = derived!.visible.map((r) => cleanById.get(r.company.id)!.stabilityAverage === null);
+        const isNull = derived!.visible.map((r) => cleanById.get(r.company.id)!.company.companyStability === null);
         const firstNull = isNull.indexOf(true);
         if (firstNull >= 0) expect(isNull.slice(firstNull).every(Boolean)).toBe(true);
       }),
@@ -521,13 +536,13 @@ describe("company-stability-score most-stable ordering", () => {
   // Feature: company-stability-score, Property 18: Stability annotation formatting (examples)
   /** **Validates: Requirements 9.7, 9.8** */
   it("stability annotation examples", () => {
-    const row = (stabilityAverage: number | null) =>
-      pipelineRow("c1", "Acme", { stabilityAverage, stabilityScoredJobCount: stabilityAverage === null ? 0 : 2 });
+    const row = (companyStability: number | null) =>
+      pipelineRow("c1", "Acme", { companyStability });
     expect(sortAnnotationFor(row(null), "mostStable", ANNOTATION_CTX)).toBeNull();
-    expect(sortAnnotationFor(row(4.25), "mostStable", ANNOTATION_CTX)).toEqual({
-      text: "4.3",
-      label: "Average stability 4.3",
+    expect(sortAnnotationFor(row(4), "mostStable", ANNOTATION_CTX)).toEqual({
+      text: "Company 4",
+      label: "Company stability 4",
     });
-    expect(sortAnnotationFor(row(3), "mostStable", ANNOTATION_CTX)?.text).toBe("3.0");
+    expect(sortAnnotationFor(row(3), "mostStable", ANNOTATION_CTX)?.text).toBe("Company 3");
   });
 });

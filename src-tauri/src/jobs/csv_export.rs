@@ -54,7 +54,7 @@ impl CsvExportCoordinator {
     }
 
     #[cfg(test)]
-    fn status(&self) -> CsvExportStatus {
+    pub(crate) fn status(&self) -> CsvExportStatus {
         self.status.lock().clone()
     }
 

@@ -18,7 +18,23 @@ vi.mock("@/lib/api", () => ({ api: apiMocks }));
 function row(id: string, name: string, overrides: Partial<Omit<CompanyRow, "company">> = {}): CompanyRow {
   const createdAt = "2026-01-01T00:00:00.000Z";
   return {
-    company: { id, name, careersUrl: null, createdAt, updatedAt: createdAt },
+    company: {
+      id,
+      name,
+      careersUrl: null,
+      createdAt,
+      updatedAt: createdAt,
+      companyStability: null,
+      companyStabilityRationale: null,
+      companyStabilityCitations: null,
+      companyStabilityScoredAt: null,
+      companyStabilityScoredBy: null,
+      employmentStability: null,
+      employmentStabilityRationale: null,
+      employmentStabilityCitations: null,
+      employmentStabilityScoredAt: null,
+      employmentStabilityScoredBy: null,
+    },
     watches: [],
     reviews: [],
     openPositionCount: 0,
@@ -29,8 +45,6 @@ function row(id: string, name: string, overrides: Partial<Omit<CompanyRow, "comp
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
-    stabilityAverage: null,
-    stabilityScoredJobCount: 0,
     ...overrides,
   };
 }
@@ -636,6 +650,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       "Recently applied",
       "Easiest wishlist to apply",
       "Most stable company",
+      "Most stable employment",
     ];
 
     /** Visible text and sr-only label of each link's trailing annotation, or null when absent. */
@@ -675,19 +690,23 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       delete (Element.prototype as Partial<Element>).scrollIntoView;
     });
 
-    it("renders 14 sort options in order with two non-focusable separators at the group boundaries (Req 2.1, 2.2)", () => {
+    it("renders 15 sort options in order with three non-focusable separators at the group boundaries (Req 2.1, 2.2)", () => {
       render();
       click(sortButton());
       expect(sortItems().map((el) => el.textContent)).toEqual(LABELS);
       const children = Array.from(sortMenu()!.children);
       const separators = children.filter((el) => el.getAttribute("role") === "separator");
-      expect(separators).toHaveLength(2);
+      expect(separators).toHaveLength(3);
       for (const sep of separators) {
         expect(sep.hasAttribute("tabindex")).toBe(false);
         const before = children[children.indexOf(sep) - 1]?.textContent;
         const after = children[children.indexOf(sep) + 1]?.textContent;
         expect([before, after]).toEqual(
-          sep === separators[0] ? ["Recently added company", "Most open positions"] : ["Most interviews", "Recently updated job"],
+          sep === separators[0]
+            ? ["Recently added company", "Most open positions"]
+            : sep === separators[1]
+              ? ["Most interviews", "Recently updated job"]
+              : ["Easiest wishlist to apply", "Most stable company"],
         );
       }
     });
@@ -697,7 +716,7 @@ describe("CompaniesSidebar menus, focus, and ARIA", () => {
       click(sortButton());
       expect(document.activeElement).toBe(sortItem("Name A–Z"));
       arrow("ArrowUp");
-      expect(document.activeElement).toBe(sortItem("Most stable company"));
+      expect(document.activeElement).toBe(sortItem("Most stable employment"));
       arrow("ArrowDown");
       expect(document.activeElement).toBe(sortItem("Name A–Z"));
       // A full cycle visits every option once and never lands on a separator.

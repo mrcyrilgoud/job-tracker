@@ -79,7 +79,7 @@ export const MALFORMED_COUNT_POOL: ReadonlyArray<unknown> = [undefined, null, -1
 export const MALFORMED_EASE_POOL: ReadonlyArray<unknown> = [undefined, Number.NaN, Infinity, -Infinity, 0, 0.5, 5.01, 6, "4"];
 
 /** Well-formed Company_Stability_Average values (company-stability-score): the ease pool's colliding values. */
-export const STABILITY_POOL: ReadonlyArray<number | null> = EASE_POOL;
+export const STABILITY_POOL: ReadonlyArray<number | null> = [null, 1, 2, 3, 4, 5];
 /** Malformed stability averages (Req 9.6): each sanitizes to null. Adds non-number types to the ease pool. */
 export const MALFORMED_STABILITY_POOL: ReadonlyArray<unknown> = [...MALFORMED_EASE_POOL, -3, true, "high"];
 export const arbCount = fc.integer({ min: 0, max: 3 });
@@ -96,11 +96,27 @@ export const arbCreatedAt = fc.constantFrom(...CREATED_AT_POOL.map(([value]) => 
 export function pipelineRow(
   id: string,
   name: string,
-  overrides: Partial<Omit<CompanyRow, "company">> & { createdAt?: string } = {},
+  overrides: (Partial<Omit<CompanyRow, "company">> & { createdAt?: string; companyStability?: number | null }) = {},
 ): CompanyRow {
-  const { createdAt = "2026-01-01T00:00:00.000Z", ...rest } = overrides;
+  const { createdAt = "2026-01-01T00:00:00.000Z", companyStability = null, ...rest } = overrides;
   return {
-    company: { id, name, careersUrl: null, createdAt, updatedAt: createdAt },
+    company: {
+      id,
+      name,
+      careersUrl: null,
+      createdAt,
+      updatedAt: createdAt,
+      companyStability,
+      companyStabilityRationale: null,
+      companyStabilityCitations: null,
+      companyStabilityScoredAt: companyStability === null ? null : createdAt,
+      companyStabilityScoredBy: companyStability === null ? null : "manual",
+      employmentStability: null,
+      employmentStabilityRationale: null,
+      employmentStabilityCitations: null,
+      employmentStabilityScoredAt: null,
+      employmentStabilityScoredBy: null,
+    },
     watches: [],
     reviews: [],
     openPositionCount: 0,
@@ -111,8 +127,6 @@ export function pipelineRow(
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
-    stabilityAverage: null,
-    stabilityScoredJobCount: 0,
     ...rest,
   };
 }
@@ -137,8 +151,7 @@ const arbPipelineFields = fc.record({
   lastActivityAt: arbTimestamp,
   lastAppliedAt: arbTimestamp,
   wishlistEaseAverage: arbEase,
-  stabilityAverage: arbStability,
-  stabilityScoredJobCount: arbCount,
+  companyStability: arbStability,
 });
 
 /** Rows with unique ids and well-formed pipeline aggregates drawn from the colliding pools. */
@@ -175,17 +188,22 @@ export const arbMaybeMalformedRows = (maxLength = 30): fc.Arbitrary<CompanyRow[]
               appliedJobCount: arbMutation(MALFORMED_COUNT_POOL),
               interviewingJobCount: arbMutation(MALFORMED_COUNT_POOL),
               wishlistEaseAverage: arbMutation(MALFORMED_EASE_POOL),
-              stabilityAverage: arbMutation(MALFORMED_STABILITY_POOL),
-              stabilityScoredJobCount: arbMutation(MALFORMED_COUNT_POOL),
+              companyStability: arbMutation(MALFORMED_STABILITY_POOL),
             })
             .map((mutations) => {
-              const copy: Record<string, unknown> = { ...r };
+              const copy = { ...r, company: { ...r.company } } as CompanyRow & { company: CompanyRow["company"] };
               for (const [key, m] of Object.entries(mutations)) {
                 if (m === KEEP) continue;
-                if (m === DELETE) delete copy[key];
-                else copy[key] = m;
+                if (key === "companyStability") {
+                  if (m === DELETE) delete (copy.company as Partial<CompanyRow["company"]>).companyStability;
+                  else copy.company.companyStability = m as number | null;
+                } else if (m === DELETE) {
+                  delete (copy as unknown as Record<string, unknown>)[key];
+                } else {
+                  (copy as unknown as Record<string, unknown>)[key] = m;
+                }
               }
-              return copy as unknown as CompanyRow;
+              return copy as CompanyRow;
             }),
         ),
       )

@@ -41,6 +41,7 @@ function makeJob(id: string, title: string, companyName: string): JobListItem {
       appeal: null,
       applicationEase: null,
       companyStability: null,
+      employmentStability: null,
       appliedAt: null,
       lastCheckedAt: null,
       salaryMin: null,
@@ -58,7 +59,23 @@ function makeRow(
   opts: { openPositionCount?: number; trackedJobCount?: number; watched?: boolean; createdAt?: string } = {},
 ): CompanyRow {
   return {
-    company: { id, name, createdAt: opts.createdAt ?? "2026-01-01T00:00:00.000Z" },
+    company: {
+      id,
+      name,
+      createdAt: opts.createdAt ?? "2026-01-01T00:00:00.000Z",
+      updatedAt: opts.createdAt ?? "2026-01-01T00:00:00.000Z",
+      careersUrl: null,
+      companyStability: null,
+      companyStabilityRationale: null,
+      companyStabilityCitations: null,
+      companyStabilityScoredAt: null,
+      companyStabilityScoredBy: null,
+      employmentStability: null,
+      employmentStabilityRationale: null,
+      employmentStabilityCitations: null,
+      employmentStabilityScoredAt: null,
+      employmentStabilityScoredBy: null,
+    },
     watches: opts.watched ? [{ id: `${id}-watch`, consecutiveSyncFailures: 0 }] : [],
     reviews: [],
     openPositionCount: opts.openPositionCount ?? 0,
@@ -69,8 +86,6 @@ function makeRow(
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
-    stabilityAverage: null,
-    stabilityScoredJobCount: 0,
   } as unknown as CompanyRow;
 }
 

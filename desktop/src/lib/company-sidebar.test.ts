@@ -40,7 +40,23 @@ function row(
 ): CompanyRow {
   const { createdAt = "2026-01-01T00:00:00.000Z", ...rest } = overrides;
   return {
-    company: { id, name, careersUrl: null, createdAt, updatedAt: createdAt },
+    company: {
+      id,
+      name,
+      careersUrl: null,
+      createdAt,
+      updatedAt: createdAt,
+      companyStability: null,
+      companyStabilityRationale: null,
+      companyStabilityCitations: null,
+      companyStabilityScoredAt: null,
+      companyStabilityScoredBy: null,
+      employmentStability: null,
+      employmentStabilityRationale: null,
+      employmentStabilityCitations: null,
+      employmentStabilityScoredAt: null,
+      employmentStabilityScoredBy: null,
+    },
     watches: [],
     reviews: [],
     openPositionCount: 0,
@@ -51,8 +67,6 @@ function row(
     lastActivityAt: null,
     lastAppliedAt: null,
     wishlistEaseAverage: null,
-    stabilityAverage: null,
-    stabilityScoredJobCount: 0,
     ...rest,
   };
 }
@@ -198,12 +212,17 @@ describe("company sidebar primitives", () => {
       ["recentlyApplied", "Recently applied"],
       ["easiestWishlist", "Easiest wishlist to apply"],
       ["mostStable", "Most stable company"],
+      ["mostStableEmployment", "Most stable employment"],
     ]);
     // Group changes between adjacent entries mark the two separator positions (Req 2.2).
     const breaks = COMPANY_SORT_OPTIONS.flatMap((o, i, all) =>
       i > 0 && all[i - 1].group !== o.group ? [`${all[i - 1].value}|${o.value}`] : [],
     );
-    expect(breaks).toEqual(["recentlyAdded|openPositionsDesc", "interviewingJobsDesc|recentActivity"]);
+    expect(breaks).toEqual([
+      "recentlyAdded|openPositionsDesc",
+      "interviewingJobsDesc|recentActivity",
+      "easiestWishlist|mostStable",
+    ]);
     expect(COMPANY_FILTERS.map((f) => [f.value, f.label])).toEqual([
       ["watched", "Watched"],
       ["hasOpenPositions", "Has open positions"],

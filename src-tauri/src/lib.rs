@@ -2,13 +2,14 @@ mod ats;
 pub mod cli;
 mod commands;
 mod companies;
+pub mod company_scores;
 mod db;
 mod documents;
 mod error;
 pub mod filtering;
 mod instant;
 mod jobs;
-mod models;
+pub mod models;
 mod runner;
 mod runs;
 mod util;
@@ -84,6 +85,7 @@ pub fn run() {
             commands::create_job,
             commands::get_job,
             commands::update_job_cmd,
+            commands::write_company_scores,
             commands::delete_job,
             commands::delete_jobs,
             commands::archive_job_cmd,

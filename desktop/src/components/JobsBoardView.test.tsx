@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { JobListSummary, JobStatus } from "@/lib/schema";
 import { COMPANY_STABILITY_SCALE_LABEL } from "./CompanyStabilitySelect";
+import { EMPLOYMENT_STABILITY_SCALE_LABEL } from "./EmploymentStabilitySelect";
 import { JobsBoardView } from "./JobsBoardView";
 
 let container: HTMLDivElement;
@@ -23,7 +24,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function makeJob(id: string, status: JobStatus, companyStability: number | null): JobListSummary {
+function makeJob(
+  id: string,
+  status: JobStatus,
+  companyStability: number | null,
+  employmentStability: number | null,
+): JobListSummary {
   const now = new Date().toISOString();
   return {
     job: {
@@ -38,6 +44,7 @@ function makeJob(id: string, status: JobStatus, companyStability: number | null)
       appeal: null,
       applicationEase: null,
       companyStability,
+      employmentStability,
       appliedAt: null,
       lastCheckedAt: null,
       salaryMin: null,
@@ -49,27 +56,43 @@ function makeJob(id: string, status: JobStatus, companyStability: number | null)
   } as JobListSummary;
 }
 
-function stabilityLabels() {
-  return [...container.querySelectorAll<HTMLElement>(`[title="${COMPANY_STABILITY_SCALE_LABEL}"]`)];
-}
-
-it("shows a Stability label with the scale tooltip only for scored jobs", () => {
+it("shows Company and Employment chips in order and omits unscored values", () => {
   act(() =>
     root.render(
       <MemoryRouter>
         <JobsBoardView
           jobs={[
-            makeJob("a", "wishlist", 4),
-            makeJob("b", "wishlist", null),
-            makeJob("c", "archived", 1),
-            makeJob("d", "archived", null),
+            makeJob("a", "wishlist", 4, 2),
+            makeJob("b", "wishlist", null, null),
+            makeJob("c", "archived", 1, 3),
+            makeJob("d", "archived", null, 4),
           ]}
           onToggleFavorite={vi.fn()}
         />
       </MemoryRouter>,
     ),
   );
-  const labels = stabilityLabels();
-  expect(labels.map((el) => el.textContent?.trim())).toEqual(["Stability 4", "· Stability 1"]);
-  expect(container.textContent?.match(/Stability/g)).toHaveLength(2);
+
+  const companyLabels = [
+    ...container.querySelectorAll<HTMLElement>(`[title="${COMPANY_STABILITY_SCALE_LABEL}"]`),
+  ];
+  const employmentLabels = [
+    ...container.querySelectorAll<HTMLElement>(`[title="${EMPLOYMENT_STABILITY_SCALE_LABEL}"]`),
+  ];
+
+  expect(companyLabels.map((el) => el.textContent?.trim())).toEqual([
+    "Company 4",
+    "· Company 1",
+  ]);
+  expect(employmentLabels.map((el) => el.textContent?.trim())).toEqual([
+    "Employment 2",
+    "· Employment 3",
+    "· Employment 4",
+  ]);
+  expect(container.textContent).not.toContain("Stability");
+
+  const activeCard = container.querySelector(".card.group");
+  const activeText = activeCard?.textContent ?? "";
+  expect(activeText.indexOf("Ease")).toBeLessThan(activeText.indexOf("Company 4"));
+  expect(activeText.indexOf("Company 4")).toBeLessThan(activeText.indexOf("Employment 2"));
 });

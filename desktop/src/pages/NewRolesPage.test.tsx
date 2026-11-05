@@ -53,6 +53,7 @@ function role(id: string, overrides: Partial<JobListItem["job"]> = {}): JobListI
       appeal: null,
       applicationEase: null,
       companyStability: null,
+      employmentStability: null,
       salaryMin: null,
       salaryMax: null,
       createdAt: "2026-10-01T00:00:00.000Z",

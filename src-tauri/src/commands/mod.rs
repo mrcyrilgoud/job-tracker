@@ -11,6 +11,9 @@ use crate::ats;
 use crate::ats::careers::{apply_careers_check, company_careers_url, fetch_careers_hash};
 use crate::ats::sync::{apply_watch_sync, fetch_remote_jobs};
 use crate::companies;
+use crate::company_scores::{
+    write_company_scores as persist_company_scores, ScoreSource, ScoreWriteInput,
+};
 use crate::db::AppState;
 use crate::documents;
 use crate::error::{AppError, AppResult};
@@ -33,20 +36,19 @@ use crate::jobs::csv_export::{open_csv_command_conn, with_csv_file_lock};
 use crate::jobs::metadata::{resolve_job_metadata, JobMetadata};
 use crate::jobs::posting_check::fetch::HttpPostingFetcher;
 use crate::jobs::service::{
-    approve_watch_job, archive_job, create_job_from_url_with_careers,
-    delete_job as delete_job_service, delete_jobs as delete_jobs_service, dismiss_watch_job,
-    get_job_detail, get_location_settings, get_pipeline_counts,
-    get_watch_role_keywords as service_get_keywords, get_weekly_activity, list_job_ids, list_jobs,
-    list_jobs_page, list_open_watch_positions, list_watch_roles_page, reset_dismissed_watch_job,
-    resolve_title_from_url, save_open_watch_job, set_job_favorite, set_location_settings,
-    date_column, date_from_boundary, date_to_boundary, partition_statuses,
-    set_watch_role_keywords as service_set_keywords, toggle_job_favorite, unarchive_job,
-    unarchive_jobs as unarchive_jobs_service, update_job, validate_date_range, JobFilters,
-    LocationSettings, UpdateJobInput, WatchRoleFilters,
+    approve_watch_job, archive_job, create_job_from_url_with_careers, date_column,
+    date_from_boundary, date_to_boundary, delete_job as delete_job_service,
+    delete_jobs as delete_jobs_service, dismiss_watch_job, get_job_detail, get_location_settings,
+    get_pipeline_counts, get_watch_role_keywords as service_get_keywords, get_weekly_activity,
+    list_job_ids, list_jobs, list_jobs_page, list_open_watch_positions, list_watch_roles_page,
+    partition_statuses, reset_dismissed_watch_job, resolve_title_from_url, save_open_watch_job,
+    set_job_favorite, set_location_settings, set_watch_role_keywords as service_set_keywords,
+    toggle_job_favorite, unarchive_job, unarchive_jobs as unarchive_jobs_service, update_job,
+    validate_date_range, JobFilters, LocationSettings, UpdateJobInput, WatchRoleFilters,
 };
 use crate::models::{
-    checked_company_stability, Job, JobListPageCursor, JobListSort, JobPageCursor, JobSort,
-    COMPANY_STABILITY_RANGE_MESSAGE,
+    checked_company_stability, checked_employment_stability, Job, JobListPageCursor, JobListSort,
+    JobPageCursor, JobSort, COMPANY_STABILITY_RANGE_MESSAGE, EMPLOYMENT_STABILITY_RANGE_MESSAGE,
 };
 use crate::runner::try_lock_runner;
 use crate::runs::coordinator::{RunCoordinator, RunRequest, SystemClock};
@@ -94,6 +96,9 @@ pub struct ListJobsArgs {
     /// Minimum Company_Stability (1–5). Kept as raw JSON so non-integer input
     /// is rejected with the Stability_Range_Message instead of a serde error.
     pub min_company_stability: Option<serde_json::Value>,
+    /// Minimum Employment_Stability (1–5). Kept as raw JSON so non-integer input
+    /// is rejected with the Employment_Range_Message instead of a serde error.
+    pub min_employment_stability: Option<serde_json::Value>,
     /// Optional row cap forwarded to SQLite LIMIT — used to cap watch-preview fetches.
     pub limit: Option<usize>,
 }
@@ -121,6 +126,16 @@ impl ListJobsArgs {
                     .as_i64()
                     .ok_or(COMPANY_STABILITY_RANGE_MESSAGE)
                     .and_then(checked_company_stability)
+                    .map_err(AppError::from)?,
+            ),
+        };
+        let min_employment_stability = match self.min_employment_stability {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_i64()
+                    .ok_or(EMPLOYMENT_STABILITY_RANGE_MESSAGE)
+                    .and_then(checked_employment_stability)
                     .map_err(AppError::from)?,
             ),
         };
@@ -171,6 +186,7 @@ impl ListJobsArgs {
             is_favorite: self.is_favorite,
             is_archived: self.is_archived,
             min_company_stability,
+            min_employment_stability,
             limit: self.limit,
         })
     }
@@ -391,6 +407,8 @@ mod tests {
     use super::*;
     use crate::db::{paths::DataPaths, AppState};
     use crate::jobs::board_discovery::discover_from_url;
+    use serde_json::json;
+    use tauri::Manager;
     use tempfile::{tempdir, TempDir};
 
     fn test_state() -> (TempDir, AppState) {
@@ -682,7 +700,8 @@ mod tests {
     fn into_filters_rejects_all_invalid_status_set() {
         // Req 1.9: every provided value is a non-member -> error naming the
         // "no valid Job_Status" condition, and no JobFilters is produced.
-        let error = expect_filters_err(list_args_with_statuses(vec!["bogus", "nonsense"]).into_filters());
+        let error =
+            expect_filters_err(list_args_with_statuses(vec!["bogus", "nonsense"]).into_filters());
         assert!(
             error.to_string().contains("No valid Job_Status"),
             "unexpected error message: {error}"
@@ -801,6 +820,40 @@ mod tests {
     }
 
     #[test]
+    fn into_filters_validates_min_employment_stability() {
+        use serde_json::json;
+
+        let with_min = |value: Option<serde_json::Value>| {
+            ListJobsArgs {
+                min_employment_stability: value,
+                ..Default::default()
+            }
+            .into_filters()
+        };
+        assert_eq!(with_min(None).unwrap().min_employment_stability, None);
+        assert_eq!(
+            with_min(Some(serde_json::Value::Null))
+                .unwrap()
+                .min_employment_stability,
+            None
+        );
+        for n in 1..=5 {
+            assert_eq!(
+                with_min(Some(json!(n))).unwrap().min_employment_stability,
+                Some(n)
+            );
+        }
+        for bad in [json!(0), json!(6), json!(2.5), json!("3"), json!(true)] {
+            let error = expect_filters_err(with_min(Some(bad.clone())));
+            assert_eq!(
+                error.to_string(),
+                EMPLOYMENT_STABILITY_RANGE_MESSAGE,
+                "value {bad}"
+            );
+        }
+    }
+
+    #[test]
     fn successful_batch_marks_csv_dirty_once_and_failed_batch_does_not_mark_it() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -825,6 +878,346 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(dirty_marks.load(Ordering::SeqCst), 1);
     }
+
+    fn command_app(state: AppState) -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(state)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock Tauri app builds")
+    }
+
+    fn seed_company(state: &AppState, id: &str, name: &str) {
+        state
+            .with_db(|conn| {
+                conn.execute(
+                    "INSERT INTO companies (id, name, created_at, updated_at) VALUES (?1, ?2, 't', 't')",
+                    rusqlite::params![id, name],
+                )
+                .map_err(crate::error::map_sqlite)?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn seed_job(
+        state: &AppState,
+        id: &str,
+        company_id: &str,
+        status: &str,
+        is_new_from_watch: i64,
+        watch_disposition: Option<&str>,
+    ) {
+        state
+            .with_db(|conn| {
+                conn.execute(
+                    "INSERT INTO jobs (id, company_id, title, url, canonical_url, status, source,
+                     is_new_from_watch, watch_disposition, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7, ?8, 't', 't')",
+                    rusqlite::params![
+                        id,
+                        company_id,
+                        format!("{status} role"),
+                        format!("https://example.test/{id}"),
+                        status,
+                        if is_new_from_watch == 1 {
+                            "ashby"
+                        } else {
+                            "manual"
+                        },
+                        is_new_from_watch,
+                        watch_disposition,
+                    ],
+                )
+                .map_err(crate::error::map_sqlite)?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn seed_company_scores(state: &AppState, company_ids: &[&str]) {
+        state
+            .with_db(|conn| {
+                for company_id in company_ids {
+                    conn.execute(
+                        "UPDATE companies SET company_stability = 4,
+                         company_stability_rationale = 'cash flow',
+                         company_stability_citations = '[\"https://example.test/company\"]',
+                         company_stability_scored_at = '2026-11-02T08:15:30.123Z',
+                         company_stability_scored_by = 'manual',
+                         employment_stability = 3,
+                         employment_stability_rationale = 'steady team',
+                         employment_stability_citations = '[\"https://example.test/employment\"]',
+                         employment_stability_scored_at = '2026-11-02T08:15:30.123Z',
+                         employment_stability_scored_by = 'import'
+                         WHERE id = ?1",
+                        rusqlite::params![company_id],
+                    )
+                    .map_err(crate::error::map_sqlite)?;
+                    conn.execute(
+                        "UPDATE jobs SET company_stability = 4 WHERE company_id = ?1",
+                        rusqlite::params![company_id],
+                    )
+                    .map_err(crate::error::map_sqlite)?;
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn assert_complete_company_shape(company: &serde_json::Value) {
+        for key in [
+            "id",
+            "name",
+            "careersUrl",
+            "createdAt",
+            "updatedAt",
+            "companyStability",
+            "companyStabilityRationale",
+            "companyStabilityCitations",
+            "companyStabilityScoredAt",
+            "companyStabilityScoredBy",
+            "employmentStability",
+            "employmentStabilityRationale",
+            "employmentStabilityCitations",
+            "employmentStabilityScoredAt",
+            "employmentStabilityScoredBy",
+        ] {
+            assert!(company.get(key).is_some(), "missing company key {key}");
+        }
+        for key in ["companyStabilityCitations", "employmentStabilityCitations"] {
+            assert!(
+                company[key].is_array() || company[key].is_null(),
+                "{key} must be an array or null"
+            );
+            assert!(!company[key].is_string(), "{key} must not be JSON text");
+        }
+    }
+
+    /// **Validates: Requirements 5.1, 5.8, 5.11, 12.4**
+    #[tokio::test]
+    async fn ipc_score_write_preserves_omitted_fields_and_applies_null_and_value_fields() {
+        let (_directory, state) = test_state();
+        seed_company(&state, "c1", "Acme");
+        seed_job(&state, "j1", "c1", "wishlist", 0, None);
+        let app = command_app(state);
+
+        let initial: crate::company_scores::ScoreWriteInput = serde_json::from_value(json!({
+            "companyStability": 4,
+            "companyStabilityRationale": "  cash flow  ",
+            "companyStabilityCitations": [" https://example.test/company "],
+            "employmentStability": 3,
+            "employmentStabilityRationale": "steady team",
+            "employmentStabilityCitations": null
+        }))
+        .unwrap();
+        let first = write_company_scores(app.state(), "c1".into(), initial)
+            .await
+            .unwrap();
+        assert_eq!(first["company"]["companyStability"], 4);
+        assert_eq!(first["company"]["companyStabilityRationale"], "cash flow");
+        assert_eq!(
+            first["company"]["companyStabilityCitations"][0],
+            "https://example.test/company"
+        );
+        assert_eq!(first["company"]["employmentStability"], 3);
+
+        let omitted: crate::company_scores::ScoreWriteInput = serde_json::from_value(json!({
+            "employmentStability": 5
+        }))
+        .unwrap();
+        let second = write_company_scores(app.state(), "c1".into(), omitted)
+            .await
+            .unwrap();
+        assert_eq!(second["company"]["companyStability"], 4);
+        assert_eq!(second["company"]["companyStabilityRationale"], "cash flow");
+        assert_eq!(second["company"]["employmentStability"], 5);
+
+        let clear: crate::company_scores::ScoreWriteInput = serde_json::from_value(json!({
+            "companyStability": null
+        }))
+        .unwrap();
+        let third = write_company_scores(app.state(), "c1".into(), clear)
+            .await
+            .unwrap();
+        assert!(third["company"]["companyStability"].is_null());
+        assert!(third["company"]["companyStabilityRationale"].is_null());
+        assert!(third["company"]["companyStabilityCitations"].is_null());
+        assert_eq!(third["company"]["employmentStability"], 5);
+        assert!(app.state::<AppState>().csv_export.status().dirty);
+    }
+
+    /// **Validates: Requirements 5.1, 5.11, 7.12, 12.4**
+    #[tokio::test]
+    async fn ipc_returns_complete_shapes_for_all_company_and_job_lifecycles() {
+        let (_directory, state) = test_state();
+        let companies = [
+            ("archived", "Archived Co"),
+            ("closed", "Closed Co"),
+            ("watch", "Watch Co"),
+            ("dismissed", "Dismissed Co"),
+            ("empty", "Empty Co"),
+        ];
+        for (id, name) in companies {
+            seed_company(&state, id, name);
+        }
+        seed_job(&state, "j-archived", "archived", "archived", 0, None);
+        seed_job(&state, "j-closed", "closed", "closed", 0, None);
+        seed_job(&state, "j-watch", "watch", "wishlist", 1, Some("new"));
+        seed_job(
+            &state,
+            "j-dismissed",
+            "dismissed",
+            "wishlist",
+            0,
+            Some("dismissed"),
+        );
+        state
+            .with_db(|conn| {
+                conn.execute(
+                    "INSERT INTO company_watches (id, company_id, provider, board_slug, created_at, updated_at)
+                     VALUES ('watch-1', 'watch', 'ashby', 'watch-co', 't', 't')",
+                    [],
+                )
+                .map_err(crate::error::map_sqlite)?;
+                Ok(())
+            })
+            .unwrap();
+        seed_company_scores(
+            &state,
+            &["archived", "closed", "watch", "dismissed", "empty"],
+        );
+        let app = command_app(state);
+
+        let companies_response = list_companies(app.state()).await.unwrap();
+        assert_eq!(companies_response["companies"].as_array().unwrap().len(), 5);
+        for row in companies_response["companies"].as_array().unwrap() {
+            assert_complete_company_shape(&row["company"]);
+            assert!(!row.get("stabilityAverage").is_some());
+            assert!(!row.get("stabilityScoredJobCount").is_some());
+            assert_eq!(
+                row["company"]["companyStabilityCitations"][0],
+                "https://example.test/company"
+            );
+        }
+
+        let jobs_response = list_jobs_cmd(app.state(), None).await.unwrap();
+        for row in jobs_response["jobs"].as_array().unwrap() {
+            assert!(row["job"].get("companyStability").is_some());
+            assert!(row["job"].get("employmentStability").is_some());
+            assert_eq!(row["job"]["companyStability"], 4);
+            assert_eq!(row["job"]["employmentStability"], 3);
+        }
+        let detail = get_job(app.state(), "j-watch".into()).await.unwrap();
+        assert_complete_company_shape(&detail["detail"]["company"]);
+        assert_eq!(detail["detail"]["job"]["companyStability"], 4);
+        assert_eq!(detail["detail"]["job"]["employmentStability"], 3);
+    }
+
+    /// **Validates: Requirements 5.1, 5.6, 5.11, 7.12, 7.15, 12.7**
+    #[tokio::test]
+    async fn ipc_rejects_malformed_payloads_and_does_not_dirty_csv() {
+        let (_directory, state) = test_state();
+        seed_company(&state, "c1", "Acme");
+        let app = command_app(state);
+
+        for payload in [
+            json!({"companyStability": "4"}),
+            json!({"companyStability": 2.5}),
+            json!({"employmentStability": true}),
+            json!({"companyStabilityRationale": 42}),
+            json!({"companyStabilityCitations": "https://example.test"}),
+        ] {
+            assert!(
+                serde_json::from_value::<crate::company_scores::ScoreWriteInput>(payload).is_err()
+            );
+        }
+        assert!(!app.state::<AppState>().csv_export.status().dirty);
+
+        let invalid_score: crate::company_scores::ScoreWriteInput =
+            serde_json::from_value(json!({"companyStability": 6})).unwrap();
+        let error = write_company_scores(app.state(), "c1".into(), invalid_score)
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), COMPANY_STABILITY_RANGE_MESSAGE);
+        assert!(!app.state::<AppState>().csv_export.status().dirty);
+
+        let update_payload = json!({"companyStability": "4"});
+        assert!(serde_json::from_value::<UpdateJobInput>(update_payload).is_err());
+    }
+
+    /// **Validates: Requirements 3.11, 5.6, 5.11, 12.7**
+    #[tokio::test]
+    async fn ipc_citation_limit_precedes_invalid_entry_validation_and_dirty_marking() {
+        let (_directory, state) = test_state();
+        seed_company(&state, "c1", "Acme");
+        let app = command_app(state);
+        let citations = (0..=crate::company_scores::MAX_CITATIONS)
+            .map(|_| "not an absolute URL".to_string())
+            .collect::<Vec<_>>();
+        let input: crate::company_scores::ScoreWriteInput = serde_json::from_value(json!({
+            "companyStability": 4,
+            "companyStabilityCitations": citations
+        }))
+        .unwrap();
+        let error = write_company_scores(app.state(), "c1".into(), input)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("at most 20"));
+        assert!(!error.to_string().contains("Citation 1"));
+        assert!(!app.state::<AppState>().csv_export.status().dirty);
+        let stored: Option<i64> = app
+            .state::<AppState>()
+            .with_db(|conn| {
+                conn.query_row(
+                    "SELECT company_stability FROM companies WHERE id = 'c1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(crate::error::map_sqlite)
+            })
+            .unwrap();
+        assert_eq!(stored, None);
+    }
+
+    /// **Validates: Requirements 5.2, 5.13, 12.7**
+    #[tokio::test]
+    async fn ipc_missing_company_and_job_are_atomic_and_do_not_dirty_csv() {
+        let (_directory, state) = test_state();
+        let app = command_app(state);
+        let input: crate::company_scores::ScoreWriteInput = serde_json::from_value(json!({
+            "companyStability": 4
+        }))
+        .unwrap();
+        let company_error = write_company_scores(app.state(), "missing-company".into(), input)
+            .await
+            .unwrap_err();
+        assert_eq!(company_error.to_string(), "Company not found");
+        assert!(!app.state::<AppState>().csv_export.status().dirty);
+
+        let missing_job = UpdateJobInput {
+            company_name: Some("Created only if the job exists".into()),
+            company_stability: Some(Some(5)),
+            ..Default::default()
+        };
+        let job_error = update_job_cmd(app.state(), "missing-job".into(), missing_job)
+            .await
+            .unwrap_err();
+        assert_eq!(job_error.to_string(), "Job not found");
+        assert!(!app.state::<AppState>().csv_export.status().dirty);
+        let counts = app
+            .state::<AppState>()
+            .with_db(|conn| {
+                let companies: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM companies", [], |row| row.get(0))
+                    .map_err(crate::error::map_sqlite)?;
+                let jobs: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))
+                    .map_err(crate::error::map_sqlite)?;
+                Ok((companies, jobs))
+            })
+            .unwrap();
+        assert_eq!(counts, (0, 0));
+    }
 }
 
 #[tauri::command]
@@ -844,6 +1237,30 @@ pub async fn update_job_cmd(
     let result = state.with_db_tx(|conn| {
         let detail = update_job(conn, &id, updates)?;
         Ok(serde_json::json!({ "detail": detail }))
+    })?;
+    state.csv_export.mark_dirty();
+    Ok(result)
+}
+
+#[tauri::command]
+pub async fn write_company_scores(
+    state: State<'_, AppState>,
+    company_id: String,
+    mut input: ScoreWriteInput,
+) -> AppResult<serde_json::Value> {
+    // IPC is always a manual surface. Do not allow wire payloads to select the
+    // importer source or inject an as_of timestamp.
+    input.source = ScoreSource::Manual;
+    input.scored_at_override = None;
+    let result = state.with_db_tx(|conn| {
+        let write = persist_company_scores(conn, &company_id, &input)?;
+        let company = companies::get_company(conn, &company_id)?
+            .ok_or_else(|| AppError::from("Company not found"))?;
+        Ok(serde_json::json!({
+            "company": company,
+            "changed": write.changed,
+            "warnings": write.warnings,
+        }))
     })?;
     state.csv_export.mark_dirty();
     Ok(result)

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::company_scores::company_scores_with_citations;
 use crate::error::{map_sqlite, AppError, AppResult};
 use crate::instant::LatestTimestamp;
 use crate::jobs::service::find_or_create_company;
@@ -22,22 +23,65 @@ fn map_watch(row: &rusqlite::Row<'_>) -> rusqlite::Result<CompanyWatch> {
     })
 }
 
+fn decode_company_citations(raw: Option<String>) -> rusqlite::Result<Option<Vec<String>>> {
+    raw.map(|value| {
+        serde_json::from_str(&value).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    })
+    .transpose()
+}
+
+fn map_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Company> {
+    Ok(Company {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        careers_url: row.get(2)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+        scores: company_scores_with_citations(
+            row.get(5)?,
+            row.get(6)?,
+            decode_company_citations(row.get(7)?)?,
+            row.get(8)?,
+            row.get(9)?,
+            row.get(10)?,
+            row.get(11)?,
+            decode_company_citations(row.get(12)?)?,
+            row.get(13)?,
+            row.get(14)?,
+        ),
+    })
+}
+
+const COMPANY_COLUMNS: &str = "id, name, careers_url, created_at, updated_at,\
+    company_stability, company_stability_rationale, company_stability_citations,\
+    company_stability_scored_at, company_stability_scored_by, employment_stability,\
+    employment_stability_rationale, employment_stability_citations,\
+    employment_stability_scored_at, employment_stability_scored_by";
+
+pub fn get_company(conn: &Connection, company_id: &str) -> AppResult<Option<Company>> {
+    conn.query_row(
+        &format!("SELECT {COMPANY_COLUMNS} FROM companies WHERE id = ?1"),
+        params![company_id],
+        map_company,
+    )
+    .optional()
+    .map_err(map_sqlite)
+}
+
 pub fn list_companies(conn: &Connection) -> AppResult<Vec<Company>> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, name, careers_url, created_at, updated_at FROM companies ORDER BY name",
-        )
+        .prepare(&format!(
+            "SELECT {COMPANY_COLUMNS} FROM companies ORDER BY name"
+        ))
         .map_err(map_sqlite)?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok(Company {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                careers_url: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })
+        .query_map([], map_company)
         .map_err(map_sqlite)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(map_sqlite)?;
@@ -117,8 +161,7 @@ const PIPELINE_JOB_PREDICATE: &str = "j.status <> 'archived' \
     AND (j.watch_disposition IS NULL OR j.watch_disposition <> 'dismissed')";
 
 /// Query A output for one company: wishlist, applied, interviewing counts,
-/// then the guarded application_ease sum and count over wishlist jobs, then
-/// the guarded company_stability sum and count over all Pipeline_Jobs.
+/// then the guarded application_ease sum and count over wishlist jobs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct PipelineCountRow {
     wishlist: i64,
@@ -126,8 +169,6 @@ struct PipelineCountRow {
     interviewing: i64,
     ease_sum: i64,
     ease_count: i64,
-    stability_sum: i64,
-    stability_count: i64,
 }
 
 /// Per-company pipeline aggregates attached to each `CompanyRow`.
@@ -138,8 +179,6 @@ struct CompanyPipelineAggregates {
     interviewing: i64,
     ease_sum: i64,
     ease_count: i64,
-    stability_sum: i64,
-    stability_count: i64,
     last_activity: LatestTimestamp,
     last_applied: LatestTimestamp,
 }
@@ -148,13 +187,6 @@ impl CompanyPipelineAggregates {
     /// Wishlist_Ease_Average, unrounded; None when no wishlist job has ease 1–5.
     fn wishlist_ease_average(&self) -> Option<f64> {
         (self.ease_count > 0).then(|| self.ease_sum as f64 / self.ease_count as f64)
-    }
-
-    /// Company_Stability_Average over all Pipeline_Jobs, unrounded; None when
-    /// no Pipeline_Job has a company_stability of 1–5.
-    fn stability_average(&self) -> Option<f64> {
-        (self.stability_count > 0)
-            .then(|| self.stability_sum as f64 / self.stability_count as f64)
     }
 }
 
@@ -174,8 +206,6 @@ fn fold_pipeline_aggregates(
         entry.interviewing += row.interviewing;
         entry.ease_sum += row.ease_sum;
         entry.ease_count += row.ease_count;
-        entry.stability_sum += row.stability_sum;
-        entry.stability_count += row.stability_count;
     }
     for (company_id, applied_at) in applied_pairs {
         aggregates
@@ -208,11 +238,7 @@ fn load_pipeline_aggregates(
             SUM(CASE WHEN j.status = 'wishlist' AND typeof(j.application_ease) = 'integer'
                       AND j.application_ease BETWEEN 1 AND 5 THEN j.application_ease ELSE 0 END),
             SUM(CASE WHEN j.status = 'wishlist' AND typeof(j.application_ease) = 'integer'
-                      AND j.application_ease BETWEEN 1 AND 5 THEN 1 ELSE 0 END),
-            SUM(CASE WHEN typeof(j.company_stability) = 'integer'
-                      AND j.company_stability BETWEEN 1 AND 5 THEN j.company_stability ELSE 0 END),
-            SUM(CASE WHEN typeof(j.company_stability) = 'integer'
-                      AND j.company_stability BETWEEN 1 AND 5 THEN 1 ELSE 0 END)
+                      AND j.application_ease BETWEEN 1 AND 5 THEN 1 ELSE 0 END)
          FROM jobs j
          WHERE {PIPELINE_JOB_PREDICATE}
          GROUP BY j.company_id"
@@ -228,8 +254,6 @@ fn load_pipeline_aggregates(
                     interviewing: row.get(3)?,
                     ease_sum: row.get(4)?,
                     ease_count: row.get(5)?,
-                    stability_sum: row.get(6)?,
-                    stability_count: row.get(7)?,
                 },
             ))
         })
@@ -243,7 +267,9 @@ fn load_pipeline_aggregates(
     );
     let mut applied_stmt = conn.prepare(&applied_sql).map_err(map_sqlite)?;
     let applied_rows = applied_stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(map_sqlite)?;
 
     let activity_sql = format!(
@@ -254,7 +280,9 @@ fn load_pipeline_aggregates(
     );
     let mut activity_stmt = conn.prepare(&activity_sql).map_err(map_sqlite)?;
     let activity_rows = activity_stmt
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .map_err(map_sqlite)?;
 
     // Stream B and C rows into the fold so memory is bounded by the number of
@@ -354,7 +382,6 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
             let tracked_job_count = tracked_job_counts.get(&company.id).copied().unwrap_or(0);
             let agg = pipeline.remove(&company.id).unwrap_or_default();
             let ease_average = agg.wishlist_ease_average();
-            let stability_average = agg.stability_average();
             serde_json::json!({
                 "company": company,
                 "watches": company_watches,
@@ -366,9 +393,7 @@ pub fn list_companies_with_watches(conn: &Connection) -> AppResult<Vec<serde_jso
                 "interviewingJobCount": agg.interviewing,
                 "lastActivityAt": agg.last_activity.into_value(),
                 "lastAppliedAt": agg.last_applied.into_value(),
-                "wishlistEaseAverage": ease_average,
-                "stabilityAverage": stability_average,
-                "stabilityScoredJobCount": agg.stability_count
+                "wishlistEaseAverage": ease_average
             })
         })
         .collect())
@@ -485,38 +510,73 @@ mod tests {
         assert!(list_companies_with_watches(&connection).is_err());
     }
 
-    /// Stability aggregate covers every Pipeline_Job status and ignores
-    /// unscored and non-pipeline jobs (company-stability-score 8.1).
+    /// Company scores are stored once and repeated on every company job; the
+    /// sidebar response exposes both score records, not per-job aggregates.
     #[test]
-    fn list_companies_with_watches_reports_stability_average() {
+    fn list_companies_with_watches_reports_company_scores() {
         let connection = test_connection();
         connection
             .execute_batch(
-                "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES
-                   ('c1', 'Acme', NULL, '2026-01-01', '2026-01-01'),
-                   ('c2', 'Beta', NULL, '2026-01-01', '2026-01-01');
+                "INSERT INTO companies (id, name, careers_url, created_at, updated_at,
+                   company_stability, employment_stability,
+                   company_stability_rationale, company_stability_citations,
+                   company_stability_scored_at, company_stability_scored_by,
+                   employment_stability_rationale, employment_stability_citations,
+                   employment_stability_scored_at, employment_stability_scored_by) VALUES
+                   ('c1', 'Acme', NULL, '2026-01-01', '2026-01-01', 4, 3,
+                    'cash flow', '[\"https://acme.example/stability\"]',
+                    '2026-11-02T08:15:30.123Z', 'manual', 'steady team',
+                    '[\"https://acme.example/team\"]', '2026-11-02T08:15:30.123Z', 'import'),
+                   ('c2', 'Beta', NULL, '2026-01-01', '2026-01-01', 2, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
                  INSERT INTO jobs (id, company_id, title, url, canonical_url, status,
                    company_stability, is_new_from_watch, watch_disposition, created_at, updated_at) VALUES
-                   ('s1', 'c1', 'S1', 'u1', 'u1', 'wishlist', 5, 0, NULL, 't', 't'),
+                   ('s1', 'c1', 'S1', 'u1', 'u1', 'wishlist', 4, 0, NULL, 't', 't'),
                    ('s2', 'c1', 'S2', 'u2', 'u2', 'applied', 4, 0, NULL, 't', 't'),
-                   ('s3', 'c1', 'S3', 'u3', 'u3', 'closed', 5, 0, NULL, 't', 't'),
-                   ('s4', 'c1', 'S4', 'u4', 'u4', 'interviewing', NULL, 0, NULL, 't', 't'),
-                   ('x1', 'c1', 'X1', 'u7', 'u7', 'archived', 1, 0, NULL, 't', 't'),
-                   ('x2', 'c1', 'X2', 'u8', 'u8', 'wishlist', 1, 1, 'new', 't', 't'),
-                   ('x3', 'c1', 'X3', 'u9', 'u9', 'applied', 1, 0, 'dismissed', 't', 't'),
-                   ('b1', 'c2', 'B1', 'u10', 'u10', 'wishlist', NULL, 0, NULL, 't', 't');",
+                   ('s3', 'c1', 'S3', 'u3', 'u3', 'closed', 4, 0, NULL, 't', 't'),
+                   ('s4', 'c1', 'S4', 'u4', 'u4', 'interviewing', 4, 0, NULL, 't', 't'),
+                   ('x1', 'c1', 'X1', 'u7', 'u7', 'archived', 4, 0, NULL, 't', 't'),
+                   ('x2', 'c1', 'X2', 'u8', 'u8', 'wishlist', 4, 1, 'new', 't', 't'),
+                   ('x3', 'c1', 'X3', 'u9', 'u9', 'applied', 4, 0, 'dismissed', 't', 't'),
+                   ('b1', 'c2', 'B1', 'u10', 'u10', 'wishlist', 2, 0, NULL, 't', 't');",
             )
             .unwrap();
 
         let rows = list_companies_with_watches(&connection).unwrap();
         let acme = &rows[0];
-        assert_eq!(acme["stabilityScoredJobCount"], 3);
-        let average = acme["stabilityAverage"].as_f64().unwrap();
-        assert!((average - 14.0 / 3.0).abs() < 1e-9, "{average}");
+        assert!(!acme.as_object().unwrap().contains_key("stabilityAverage"));
+        assert!(!acme
+            .as_object()
+            .unwrap()
+            .contains_key("stabilityScoredJobCount"));
+        assert_eq!(acme["company"]["companyStability"], 4);
+        assert_eq!(acme["company"]["employmentStability"], 3);
+        assert_eq!(
+            acme["company"]["companyStabilityCitations"][0],
+            "https://acme.example/stability"
+        );
+        assert_eq!(
+            acme["company"]["employmentStabilityCitations"][0],
+            "https://acme.example/team"
+        );
+
+        let acme_caches: Vec<Option<i64>> = connection
+            .prepare("SELECT company_stability FROM jobs WHERE company_id = 'c1' ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(acme_caches, vec![Some(4); 7]);
 
         let beta = &rows[1];
-        assert_eq!(beta["stabilityScoredJobCount"], 0);
-        assert!(beta["stabilityAverage"].is_null());
+        assert!(!beta.as_object().unwrap().contains_key("stabilityAverage"));
+        assert!(!beta
+            .as_object()
+            .unwrap()
+            .contains_key("stabilityScoredJobCount"));
+        assert_eq!(beta["company"]["companyStability"], 2);
+        assert!(beta["company"]["employmentStability"].is_null());
     }
 
     /// Sanity example for the six pipeline fields (companies-tab-sorting 2.1).
@@ -609,28 +669,99 @@ mod tests {
         connection
             .execute_batch(
                 "INSERT INTO companies (id, name, careers_url, created_at, updated_at) VALUES
-                   ('c1', 'Acme', NULL, '2026-01-01', '2026-01-01');
+                   ('c1', 'Acme', NULL, '2026-01-01', '2026-01-01'),
+                   ('c2', 'No Jobs', NULL, '2026-01-01', '2026-01-01');
                  INSERT INTO jobs (id, company_id, title, url, canonical_url, status, applied_at,
-                   application_ease, is_new_from_watch, watch_disposition, created_at, updated_at) VALUES
-                   ('x1', 'c1', 'X1', 'u1', 'u1', 'archived', '2026-10-01', 5, 0, NULL, 't', 't'),
-                   ('x2', 'c1', 'X2', 'u2', 'u2', 'wishlist', NULL, 4, 0, 'dismissed', 't', 't'),
-                   ('x3', 'c1', 'X3', 'u3', 'u3', 'interviewing', '2026-10-01', 3, 1, 'new', 't', 't');
+                   company_stability, application_ease, is_new_from_watch, watch_disposition, created_at, updated_at) VALUES
+                   ('x1', 'c1', 'X1', 'u1', 'u1', 'archived', '2026-10-01', 2, 5, 0, NULL, 't', 't'),
+                   ('x2', 'c1', 'X2', 'u2', 'u2', 'wishlist', NULL, 2, 4, 0, 'dismissed', 't', 't'),
+                   ('x3', 'c1', 'X3', 'u3', 'u3', 'interviewing', '2026-10-01', 2, 3, 1, 'new', 't', 't');
                  INSERT INTO job_events (id, job_id, type, note, occurred_at) VALUES
                    ('e1', 'x1', 'status_changed', NULL, '2026-10-01T00:00:00Z'),
                    ('e2', 'x2', 'note_added', NULL, '2026-10-01T00:00:00Z'),
-                   ('e3', 'x3', 'created', NULL, '2026-10-01T00:00:00Z');",
+                   ('e3', 'x3', 'created', NULL, '2026-10-01T00:00:00Z');
+                 UPDATE companies SET company_stability = 2,
+                   company_stability_citations = '[\"https://example.test/acme\"]',
+                   employment_stability = 4
+                 WHERE id = 'c1';
+                 UPDATE companies SET company_stability = 5 WHERE id = 'c2';",
             )
             .unwrap();
 
         let rows = list_companies_with_watches(&connection).unwrap();
-        assert_eq!(rows.len(), 1);
-        let acme = &rows[0];
+        assert_eq!(rows.len(), 2);
+        for row in &rows {
+            let company = &row["company"];
+            for key in [
+                "companyStability",
+                "companyStabilityRationale",
+                "companyStabilityCitations",
+                "companyStabilityScoredAt",
+                "companyStabilityScoredBy",
+                "employmentStability",
+                "employmentStabilityRationale",
+                "employmentStabilityCitations",
+                "employmentStabilityScoredAt",
+                "employmentStabilityScoredBy",
+            ] {
+                assert!(company.get(key).is_some(), "missing company key {key}");
+            }
+            for key in ["companyStabilityCitations", "employmentStabilityCitations"] {
+                assert!(
+                    company[key].is_array() || company[key].is_null(),
+                    "{key} must be array/null"
+                );
+            }
+            assert!(!row.as_object().unwrap().contains_key("stabilityAverage"));
+            assert!(!row
+                .as_object()
+                .unwrap()
+                .contains_key("stabilityScoredJobCount"));
+        }
+        let acme = rows
+            .iter()
+            .find(|row| row["company"]["id"] == "c1")
+            .unwrap();
         assert_eq!(acme["wishlistJobCount"], 0);
         assert_eq!(acme["appliedJobCount"], 0);
         assert_eq!(acme["interviewingJobCount"], 0);
         assert!(acme["lastActivityAt"].is_null());
         assert!(acme["lastAppliedAt"].is_null());
         assert!(acme["wishlistEaseAverage"].is_null());
+        assert_eq!(acme["company"]["companyStability"], 2);
+        assert_eq!(acme["company"]["employmentStability"], 4);
+        assert_eq!(
+            acme["company"]["companyStabilityCitations"][0],
+            "https://example.test/acme"
+        );
+        assert!(acme["company"]["employmentStabilityCitations"].is_null());
+        let non_pipeline_caches: Vec<Option<i64>> = connection
+            .prepare("SELECT company_stability FROM jobs WHERE company_id = 'c1' ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(non_pipeline_caches, vec![Some(2); 3]);
+
+        let empty = rows
+            .iter()
+            .find(|row| row["company"]["id"] == "c2")
+            .unwrap();
+        assert_eq!(empty["company"]["companyStability"], 5);
+        assert!(empty["company"]["employmentStability"].is_null());
+        for key in [
+            "companyStabilityRationale",
+            "companyStabilityCitations",
+            "companyStabilityScoredAt",
+            "companyStabilityScoredBy",
+            "employmentStabilityRationale",
+            "employmentStabilityCitations",
+            "employmentStabilityScoredAt",
+            "employmentStabilityScoredBy",
+        ] {
+            assert!(empty["company"][key].is_null(), "expected null {key}");
+        }
     }
 
     /// `closed` counts as applied only when `applied_at` is set.
@@ -747,7 +878,10 @@ mod tests {
         ("2026-10-01 01:00", Some((1_790_816_400, 0))),
         ("2026-09-30T20:00:00-05:00", Some((1_790_816_400, 0))),
         ("2026-09-15", Some((1_789_430_400, 0))),
-        ("2025-12-31T23:59:59.999Z", Some((1_767_225_599, 999_000_000))),
+        (
+            "2025-12-31T23:59:59.999Z",
+            Some((1_767_225_599, 999_000_000)),
+        ),
         ("pending", None),
         ("now", None),
         ("2026-02-30", None),
@@ -767,7 +901,10 @@ mod tests {
     fn model_latest<'a>(candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
         candidates
             .filter_map(|raw| expected_instant(raw).map(|instant| (instant, raw)))
-            .max_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.as_bytes().cmp(b.1.as_bytes())))
+            .max_by(|a, b| {
+                a.0.cmp(&b.0)
+                    .then_with(|| a.1.as_bytes().cmp(b.1.as_bytes()))
+            })
             .map(|(_, raw)| raw)
     }
 
@@ -834,10 +971,7 @@ mod tests {
             any::<bool>(),
             prop::option::of(prop::sample::select(WATCH_DISPOSITIONS)),
             prop::collection::vec(
-                (
-                    prop::sample::select(EVENT_TYPES),
-                    timestamp_strategy(),
-                ),
+                (prop::sample::select(EVENT_TYPES), timestamp_strategy()),
                 0..=3,
             ),
         )
@@ -1027,8 +1161,6 @@ mod tests {
         "lastActivityAt",
         "lastAppliedAt",
         "wishlistEaseAverage",
-        "stabilityAverage",
-        "stabilityScoredJobCount",
     ];
 
     proptest! {
@@ -1341,10 +1473,11 @@ mod tests {
             }
         }
 
-        // Feature: company-stability-score, Property 16: Company stability average matches its definition
-        /// **Validates: Requirements 9.1, 9.2, 9.11**
+        // Company stability is company-owned. Sidebar rows expose the complete
+        // score object and never expose the removed per-job aggregates.
+        /// **Validates: Requirements 5.11**
         #[test]
-        fn prop_company_stability_average_matches_definition(
+        fn prop_company_rows_expose_company_scores_without_legacy_aggregates(
             fixture in companies_fixture_strategy()
         ) {
             let conn = test_connection();
@@ -1353,31 +1486,19 @@ mod tests {
             prop_assert_eq!(rows.len(), seeded.company_ids.len());
 
             for row in &rows {
-                let company_id = row_company_id(row);
-                let scores: Vec<i64> = seeded
-                    .jobs
-                    .iter()
-                    .filter(|(id, spec)| *id == company_id && spec.is_pipeline())
-                    .filter_map(|(_, spec)| spec.company_stability)
-                    .filter(|score| (1..=5).contains(score))
-                    .collect();
-
-                prop_assert_eq!(
-                    row["stabilityScoredJobCount"].as_i64(),
-                    Some(scores.len() as i64),
-                    "count {}",
-                    company_id
-                );
-                let average = &row["stabilityAverage"];
-                if scores.is_empty() {
-                    prop_assert!(average.is_null(), "expected null average for {}", company_id);
-                } else {
-                    let exact = scores.iter().sum::<i64>() as f64 / scores.len() as f64;
-                    let actual = average.as_f64();
-                    prop_assert!(actual.is_some(), "missing average for {}", company_id);
-                    let actual = actual.unwrap();
-                    prop_assert!((actual - exact).abs() < 0.001, "{} vs {}", actual, exact);
-                    prop_assert!((1.0..=5.0).contains(&actual));
+                prop_assert!(!row.as_object().unwrap().contains_key("stabilityAverage"));
+                prop_assert!(!row
+                    .as_object()
+                    .unwrap()
+                    .contains_key("stabilityScoredJobCount"));
+                for key in [
+                    "companyStability", "companyStabilityRationale",
+                    "companyStabilityCitations", "companyStabilityScoredAt",
+                    "companyStabilityScoredBy", "employmentStability",
+                    "employmentStabilityRationale", "employmentStabilityCitations",
+                    "employmentStabilityScoredAt", "employmentStabilityScoredBy",
+                ] {
+                    prop_assert!(row["company"].as_object().unwrap().contains_key(key), "missing {key}");
                 }
             }
         }

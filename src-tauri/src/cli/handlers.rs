@@ -6,6 +6,7 @@ use crate::cli::args::{
     AddArgs, DeleteArgs, DescriptionArgs, GetArgs, ListArgs, NoteArgs, UpdateArgs, WatchCommands,
     WatchListArgs,
 };
+use crate::cli::importer::{apply_import, format_summary, plan_import, ValidatedScoreFile};
 use crate::cli::output::{
     format_job_detail, format_jobs_table, format_stats, format_watch_positions, print_json,
     print_raw_json,
@@ -110,6 +111,97 @@ fn sync_csv_after_mutation(conn: &Connection, paths: &DataPaths) {
     }
 }
 
+/// Plan or apply a validated JSON score file. File parsing happens in
+/// `run_cli` before SQLite is opened; this function handles the database-aware
+/// matching/application phase and renders the stable eight-key envelope.
+pub fn handle_score_import(
+    conn: &Connection,
+    paths: &DataPaths,
+    file: ValidatedScoreFile,
+    yes: bool,
+    json: bool,
+    quiet: bool,
+) -> AppResult<()> {
+    let plan = plan_import(conn, &file, !yes)?;
+    let result = if yes {
+        apply_import(conn, paths, plan)?
+    } else {
+        plan.summary
+    };
+    let output = format_summary(&result, json, quiet)?;
+    println!("{output}");
+    if result.failed.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::coded(
+            "score_import_failed",
+            "summary",
+            format!(
+                "score import completed with {} failed write(s)",
+                result.failed.len()
+            ),
+        ))
+    }
+}
+
+/// Report each unresolved migration backfill conflict once. The report is
+/// written to stderr before its durable reported marker is updated, so a
+/// failed output operation leaves the conflict available for a later run.
+pub fn report_unreported_backfill_conflicts(conn: &Connection) -> AppResult<()> {
+    let mut stderr = std::io::stderr();
+    report_unreported_backfill_conflicts_to(conn, &mut stderr)
+}
+
+fn report_unreported_backfill_conflicts_to<W: Write>(
+    conn: &Connection,
+    output: &mut W,
+) -> AppResult<()> {
+    let conflicts: Vec<(String, String, String)> = conn
+        .prepare(
+            "SELECT company_id, company_name, values_json
+             FROM company_stability_backfill_conflicts
+             WHERE reported = 0
+             ORDER BY company_name COLLATE NOCASE, company_id",
+        )?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if conflicts.is_empty() {
+        return Ok(());
+    }
+
+    let mut report = String::new();
+    for (company_id, company_name, values_json) in &conflicts {
+        let values = serde_json::from_str::<Vec<i64>>(values_json)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_else(|_| values_json.clone());
+        report.push_str(&format!(
+            "Backfill_Conflict: {company_name} ({company_id}) has conflicting company stability values: {values}\n"
+        ));
+    }
+
+    // Do not mark conflicts reported until both output operations succeed.
+    output.write_all(report.as_bytes())?;
+    output.flush()?;
+
+    let tx = conn.unchecked_transaction()?;
+    for (company_id, _, _) in &conflicts {
+        tx.execute(
+            "UPDATE company_stability_backfill_conflicts
+             SET reported = 1, reported_at = ?1
+             WHERE company_id = ?2 AND reported = 0",
+            rusqlite::params![crate::util::now_iso(), company_id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 pub fn handle_list(
     conn: &Connection,
     _paths: &DataPaths,
@@ -197,6 +289,7 @@ pub fn handle_list(
             Some(false)
         },
         min_company_stability: args.min_company_stability,
+        min_employment_stability: args.min_employment_stability,
         limit: args.limit,
     };
 
@@ -416,8 +509,24 @@ pub fn handle_update(
         } else {
             args.company_stability.map(Some)
         },
+        employment_stability: if args.clear_employment_stability {
+            Some(None)
+        } else {
+            args.employment_stability.map(Some)
+        },
+        company_stability_rationale: if args.clear_company_stability_rationale {
+            Some(None)
+        } else {
+            args.company_stability_rationale.map(Some)
+        },
+        employment_stability_rationale: if args.clear_employment_stability_rationale {
+            Some(None)
+        } else {
+            args.employment_stability_rationale.map(Some)
+        },
         salary_min: None,
         salary_max: None,
+        ..UpdateJobInput::default()
     };
 
     let updated = update_job(conn, &job_id, input)?;
@@ -451,10 +560,17 @@ pub fn handle_update(
             }
         );
         println!(
-            "  Stability: {}",
+            "  Company stability: {}",
             match updated.job.company_stability {
                 Some(score) => format!("{score} (1-5, 5 = most stable)"),
                 None => "— (1-5, 5 = most stable)".to_string(),
+            }
+        );
+        println!(
+            "  Employment stability: {}",
+            match updated.job.employment_stability {
+                Some(score) => format!("{score} (1-5, 5 = most secure)"),
+                None => "— (1-5, 5 = most secure)".to_string(),
             }
         );
     }
@@ -648,6 +764,7 @@ pub fn handle_note(
             company_stability: None,
             salary_min: None,
             salary_max: None,
+            ..UpdateJobInput::default()
         },
     )?;
 
@@ -1013,6 +1130,7 @@ mod tests {
             archived: false,
             limit: None,
             min_company_stability: None,
+            min_employment_stability: None,
         }
     }
 
@@ -1289,5 +1407,44 @@ mod tests {
         )
         .unwrap();
         assert!(empty.is_empty());
+    }
+
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buffer: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "test pipe",
+            ))
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn backfill_conflict_marker_waits_for_successful_stderr_write() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO company_stability_backfill_conflicts
+             (company_id, company_name, values_json, reported, created_at)
+             VALUES ('conflict-id', 'Acme', '[1,5]', 0, ?1)",
+            [crate::util::now_iso()],
+        )
+        .unwrap();
+
+        let error = report_unreported_backfill_conflicts_to(&conn, &mut FailingWriter).unwrap_err();
+        assert!(error.to_string().contains("test pipe"));
+        let reported: i64 = conn
+            .query_row(
+                "SELECT reported FROM company_stability_backfill_conflicts WHERE company_id = 'conflict-id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(reported, 0);
     }
 }

@@ -62,7 +62,8 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             Cell::new("LOCATION").add_attribute(Attribute::Bold),
             Cell::new("APPEAL").add_attribute(Attribute::Bold),
             Cell::new("EASE").add_attribute(Attribute::Bold),
-            Cell::new("STABILITY").add_attribute(Attribute::Bold),
+            Cell::new("CO. STABILITY").add_attribute(Attribute::Bold),
+            Cell::new("EMP. STABILITY").add_attribute(Attribute::Bold),
             Cell::new("FAV").add_attribute(Attribute::Bold),
         ]);
 
@@ -89,6 +90,10 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             .company_stability
             .map(|score| score.to_string())
             .unwrap_or_else(|| "—".to_string());
+        let employment_stability = job
+            .employment_stability
+            .map(|score| score.to_string())
+            .unwrap_or_else(|| "—".to_string());
 
         table.add_row(vec![
             Cell::new(id_short).fg(Color::DarkGrey),
@@ -102,6 +107,7 @@ pub fn format_jobs_table(jobs: &[JobListItem]) {
             Cell::new(appeal),
             Cell::new(application_ease),
             Cell::new(company_stability),
+            Cell::new(employment_stability),
             Cell::new(fav).fg(Color::Yellow),
         ]);
     }
@@ -145,10 +151,17 @@ pub fn format_job_detail(detail: &JobDetail) {
         }
     );
     println!(
-        "  Stability:   {}",
+        "  Company stability: {}",
         match job.company_stability {
             Some(score) => format!("{score} (1-5, 5 = most stable)"),
             None => "— (1-5, 5 = most stable)".to_string(),
+        }
+    );
+    println!(
+        "  Employment stability: {}",
+        match job.employment_stability {
+            Some(score) => format!("{score} (1-5, 5 = most secure)"),
+            None => "— (1-5, 5 = most secure)".to_string(),
         }
     );
     println!("  Posting URL: {}", job.url);
